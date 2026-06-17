@@ -3,10 +3,10 @@
  * BASE_URL은 .env 파일의 VITE_API_URL 환경변수로 관리
  */
 
-const BASE_URL = "";
+const BASE_URL = import.meta.env.VITE_API_URL || "";
 
 async function request(path, params = {}) {
-  const url = new URL(`${BASE_URL}${path}`);
+  const url = new URL(`${BASE_URL}${path}`, window.location.origin);
   Object.entries(params).forEach(([k, v]) => {
     if (v !== null && v !== undefined && v !== "") {
       url.searchParams.set(k, String(v));
