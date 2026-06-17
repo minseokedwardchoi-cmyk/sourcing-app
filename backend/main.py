@@ -39,15 +39,17 @@ app = FastAPI(
     description="해외 제조업체 소싱 대시보드 백엔드",
 )
 
-ALLOWED_ORIGINS = os.getenv(
+_raw_origins = os.getenv(
     "ALLOWED_ORIGINS",
     "http://localhost:5173,http://localhost:5174,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:5174"
-).split(",")
+)
+ALLOWED_ORIGINS = _raw_origins.split(",")
+_allow_all = _raw_origins.strip() == "*"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"] if _allow_all else ALLOWED_ORIGINS,
+    allow_credentials=False if _allow_all else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
