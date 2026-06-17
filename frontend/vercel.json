@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://sourcing-backend-ucp5.onrender.com/api/:path*"
+    }
+  ]
+}
