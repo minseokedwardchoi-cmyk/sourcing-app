@@ -1,0 +1,979 @@
+import { useState, useMemo, useEffect, useRef } from "react";
+import {
+  fetchSkuHistory, fetchSkuFactories,
+  fetchManufacturerDetail, fetchStats, uploadExcel,
+  updateManufacturerContact, uploadContacts, fetchCompetitorStats,
+} from "./api.js";
+
+// ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
+const COMPETITORS = ["전체", "홈플러스", "이마트", "롯데마트", "쿠팡", "코스트코"];
+const CARD_THEMES = {
+
+  전체:    { bg: "#E8F5E9", active: "#2E7D32" },   // 초록
+  코스트코: { bg: "#E3EAF6", active: "#1A3A6B" },   // 네이비
+  이마트:  { bg: "#FFFDE7", active: "#F9A800" },   // 노랑
+  롯데마트: { bg: "#FDECEA", active: "#C8001E" },   // 롯데 빨강
+  홈플러스: { bg: "#E8F4FD", active: "#7B2FBE" },   // 보라
+  쿠팡:   { bg: "#FFF3E0", active: "#FF6000" },   // 쿠팡 오렌지
+};
+// ─── 공통 CSS ────────────────────────────────────────────────────────────────
+const styles = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f5f6f8; color: #1a1a2e; font-size: 14px; }
+  .app { min-height: 100vh; }
+  .banner { background: #fff; border-bottom: 1px solid #e8eaed; padding: 12px 24px; position: sticky; top: 0; z-index: 50; }
+  .banner-inner { max-width: 1400px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .banner-left h1 { font-size: 16px; font-weight: 600; color: #1a1a2e; }
+  .banner-left p  { font-size: 11px; color: #6b7280; margin-top: 1px; }
+  .banner-stats   { display: flex; gap: 20px; flex-wrap: wrap; }
+  .stat-item      { text-align: center; }
+  .stat-num       { font-size: 14px; font-weight: 600; color: #166534; }
+  .stat-label     { font-size: 10px; color: #6b7280; margin-top: 1px; }
+  .desc-bar { background: #f0fdf4; border-bottom: 1px solid #bbf7d0; padding: 6px 24px; }
+  .desc-bar p { max-width: 1400px; margin: 0 auto; font-size: 11px; color: #15803d; }
+  .page { max-width: 1400px; margin: 0 auto; padding: 16px 24px; }
+  .back-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: #6b7280; background: none; border: none; cursor: pointer; padding: 4px 0; margin-bottom: 14px; }
+  .back-btn:hover { color: #1a1a2e; }
+  .page-header { margin-bottom: 14px; }
+  .page-header h2 { font-size: 17px; font-weight: 600; }
+  .page-header .sub { font-size: 12px; color: #6b7280; margin-top: 2px; }
+  .sku-card { background: #fff; border: 1px solid #e8eaed; border-radius: 8px; padding: 12px 18px; margin-bottom: 14px; display: flex; gap: 28px; flex-wrap: wrap; }
+  .sku-field-label { font-size: 10px; color: #6b7280; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .sku-field-value { font-size: 13px; font-weight: 500; }
+  .card { background: #fff; border: 1px solid #e8eaed; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .card-header { padding: 11px 16px; border-bottom: 1px solid #e8eaed; display: flex; align-items: center; justify-content: space-between; }
+  .card-title { font-size: 13px; font-weight: 600; }
+  .card-body { padding: 14px 16px; }
+  .toolbar { padding: 9px 14px; border-bottom: 1px solid #e8eaed; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .search-wrap { position: relative; flex: 1; min-width: 200px; }
+  .search-wrap input { width: 100%; padding: 6px 10px 6px 30px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; background: #f9fafb; outline: none; color: #1a1a2e; }
+  .search-wrap input:focus { border-color: #16a34a; background: #fff; }
+  .search-icon { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-size: 13px; color: #9ca3af; pointer-events: none; }
+  .count-label { font-size: 12px; color: #6b7280; white-space: nowrap; }
+  .icon-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background: #f9fafb; color: #374151; cursor: pointer; white-space: nowrap; }
+  .icon-btn:hover { background: #f3f4f6; }
+  .filter-bar { padding: 7px 14px; border-bottom: 1px solid #e8eaed; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+  .filter-label { font-size: 11px; color: #6b7280; margin-right: 2px; }
+  .pill { padding: 3px 11px; border-radius: 20px; font-size: 12px; border: 1px solid #d1d5db; background: #f9fafb; color: #374151; cursor: pointer; transition: all .12s; }
+  .pill:hover { border-color: #16a34a; color: #15803d; }
+  .pill.active { background: #16a34a; border-color: #16a34a; color: #fff; }
+  .select-f { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background: #f9fafb; color: #1a1a2e; outline: none; cursor: pointer; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead tr { background: #f8fafc; }
+  th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; }
+  th:hover { color: #1a1a2e; }
+  .sort-icon { margin-left: 3px; opacity: 0.4; }
+  th.sorted .sort-icon { opacity: 1; color: #16a34a; }
+  td { padding: 8px 12px; border-bottom: 1px solid #f1f3f5; color: #1a1a2e; vertical-align: middle; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #f0fdf4; }
+  .link-cell { color: #1d4ed8; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%; }
+  .link-cell:hover { color: #1e3a8a; }
+  .email-cell { color: #6b7280; font-size: 12px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; margin: 1px; white-space: nowrap; }
+  .b-green  { background: #dcfce7; color: #15803d; }
+  .b-blue   { background: #dbeafe; color: #1d4ed8; }
+  .b-gray   { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+  .b-orange { background: #ffedd5; color: #c2410c; }
+  .b-red    { background: #fee2e2; color: #b91c1c; }
+  .b-teal   { background: #ccfbf1; color: #0f766e; }
+  .b-count  { background: none; color: #1a1a2e; font-weight: 600; }
+  .b-mc     { background: none; color: #1a1a2e; }
+  .b-cat    { background: none; color: #1a1a2e; }
+  .pagination { padding: 9px 14px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #e8eaed; flex-wrap: wrap; gap: 6px; }
+  .page-btns { display: flex; gap: 3px; }
+  .page-btn { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 5px; font-size: 12px; cursor: pointer; background: #f9fafb; color: #374151; }
+  .page-btn:hover { background: #f3f4f6; }
+  .page-btn.active { background: #16a34a; border-color: #16a34a; color: #fff; }
+  .page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .mfr-header { background: #fff; border: 1px solid #e8eaed; border-radius: 8px; padding: 18px 22px; margin-bottom: 12px; }
+  .mfr-country { font-size: 11px; color: #6b7280; margin-bottom: 3px; }
+  .mfr-name    { font-size: 20px; font-weight: 600; margin-bottom: 2px; word-break: break-word; }
+  .mfr-factory { font-size: 13px; color: #6b7280; margin-bottom: 4px; word-break: break-word; }
+  .badge-row   { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 10px; }
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 720px) { .detail-grid { grid-template-columns: 1fr; } }
+  .detail-row { display: flex; padding: 6px 0; border-bottom: 1px solid #f1f3f5; gap: 10px; }
+  .detail-row:last-child { border-bottom: none; }
+  .dk { font-size: 11px; color: #6b7280; width: 100px; flex-shrink: 0; padding-top: 2px; }
+  .dv { font-size: 13px; flex: 1; word-break: break-word; }
+  .detail-link { color: #1d4ed8; text-decoration: underline; text-underline-offset: 2px; }
+  .acc-toggle { width: 100%; background: none; border: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 11px 16px; font-size: 13px; font-weight: 600; color: #1a1a2e; }
+  .acc-toggle:hover { background: #f8fafc; }
+  .skeleton { background: linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 4px; height: 13px; margin: 5px 0; }
+  @keyframes shimmer { 0%{background-position:200% 0}100%{background-position:-200% 0} }
+  .empty-state { padding: 40px; text-align: center; color: #9ca3af; font-size: 13px; }
+  .error-box { padding: 10px 14px; background: #fee2e2; border: 1px solid #fecaca; border-radius: 6px; color: #b91c1c; font-size: 13px; margin: 10px 14px; }
+  .upload-btn { display: inline-flex; align-items: center; gap: 5px; padding: 7px 14px; background: #16a34a; color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; }
+  .upload-btn:hover { background: #15803d; }
+  .upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .contact-edit-box { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f3f5; }
+  .contact-edit-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: #374151; }
+  .contact-edit-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .contact-edit-field label { display: block; font-size: 11px; color: #6b7280; margin-bottom: 4px; }
+  .contact-edit-field input { width: 100%; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; outline: none; background: #f9fafb; color: #1a1a2e; }
+  .contact-edit-field input:focus { border-color: #16a34a; background: #fff; }
+  .contact-msg { margin-top: 8px; font-size: 12px; }
+  .contact-msg.ok { color: #15803d; }
+  .contact-msg.fail { color: #b91c1c; }
+  .col-wrap { position: relative; }
+  .col-dropdown { position: absolute; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 6px; z-index: 100; min-width: 150px; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+  .col-item { display: flex; align-items: center; gap: 7px; padding: 4px 8px; cursor: pointer; border-radius: 4px; font-size: 12px; }
+  .col-item:hover { background: #f3f4f6; }
+  .hero { background: #f0fdf4; border-bottom: 1px solid #bbf7d0; padding: 32px 0 28px; }
+  .hero-inner { max-width: 1400px; margin: 0 auto; padding: 0 32px; }
+  .hero-title { font-size: 32px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; margin-bottom: 8px; }
+  .hero-desc  { font-size: 16px; color: #475569; margin-bottom: 28px; line-height: 1.6; }
+  .hero-kpi   { display: flex; gap: 0; border-top: 1px solid #e8eaed; padding-top: 24px; }
+  .hero-kpi-item { flex: 1; padding: 0 28px 0 0; }
+  .hero-kpi-item + .hero-kpi-item { padding-left: 28px; border-left: 1px solid #e8eaed; }
+  .hero-kpi-label { font-size: 13px; font-weight: 600; color: #64748b; letter-spacing: 0.3px; margin-bottom: 6px; }
+  .hero-kpi-num   { font-size: 28px; font-weight: 700; color: #0f172a; line-height: 1; }
+  .hero-kpi-unit  { font-size: 13px; font-weight: 400; color: #64748b; margin-left: 3px; }
+  .notice { padding: 8px 14px; margin: 0 0 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; font-size: 12px; color: #92400e; }
+  .competitor-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 4px; }
+  .comp-card { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; border: 1.5px solid #e2e8f0; background: #f9fafb; cursor: pointer; transition: all .15s; text-align: left; }
+  .comp-card:hover { border-color: #16a34a; box-shadow: 0 2px 8px rgba(22,163,74,.12); }
+  .comp-card.active { color: #fff; border-color: transparent; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  .comp-card-name { font-size: 11px; font-weight: 600; }
+  .comp-card-num  { font-size: 20px; font-weight: 700; line-height: 1; }
+  .comp-card-label { font-size: 10px; opacity: .7; margin-top: -2px; }
+`;
+
+// ─── 유틸 ─────────────────────────────────────────────────────────────────────
+function OemBadge({ value }) {
+  if (!value) return <span className="badge b-gray">-</span>;
+  if (value === "OEM" || (value.includes("가능") && !value.includes("문의"))) return <span className="badge b-green">{value}</span>;
+  if (value.includes("문의")) return <span className="badge b-orange">{value}</span>;
+  if (value === "수입" || value.includes("불가")) return <span className="badge b-gray">{value}</span>;
+  return <span className="badge b-gray">{value}</span>;
+}
+
+function SortIcon({ col, sortCol, sortDir }) {
+  if (sortCol !== col) return <span className="sort-icon">↕</span>;
+  return <span className="sort-icon">{sortDir === "asc" ? "↑" : "↓"}</span>;
+}
+
+function SkeletonRows({ cols = 9, rows = 10 }) {
+  return Array.from({ length: rows }).map((_, i) => (
+    <tr key={i}>{Array.from({ length: cols }).map((__, j) => (
+      <td key={j}><div className="skeleton" style={{ width: `${55 + Math.random() * 40}%` }} /></td>
+    ))}</tr>
+  ));
+}
+
+function Pagination({ meta, page, setPage }) {
+  if (!meta || meta.total_pages <= 1) return null;
+  const start = Math.max(1, Math.min(meta.total_pages - 4, page - 2));
+  const pages = Array.from({ length: Math.min(5, meta.total_pages) }, (_, i) => start + i);
+  return (
+    <div className="pagination">
+      <span className="count-label">총 {meta.total.toLocaleString()}건 | 페이지 {page}/{meta.total_pages}</span>
+      <div className="page-btns">
+        <button className="page-btn" disabled={page===1} onClick={()=>setPage(1)}>«</button>
+        <button className="page-btn" disabled={page===1} onClick={()=>setPage(p=>p-1)}>‹</button>
+        {pages.map(p=><button key={p} className={`page-btn${page===p?" active":""}`} onClick={()=>setPage(p)}>{p}</button>)}
+        <button className="page-btn" disabled={page===meta.total_pages} onClick={()=>setPage(p=>p+1)}>›</button>
+        <button className="page-btn" disabled={page===meta.total_pages} onClick={()=>setPage(meta.total_pages)}>»</button>
+      </div>
+    </div>
+  );
+}
+
+function downloadCSV(data, filename) {
+  if (!data?.length) return;
+  const keys = Object.keys(data[0]);
+  const rows = [keys.join(","), ...data.map(r=>keys.map(k=>`"${(r[k]??"").toString().replace(/"/g,'""')}"`).join(","))];
+  const blob = new Blob(["\uFEFF"+rows.join("\n")], {type:"text/csv;charset=utf-8;"});
+  const a = document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=filename; a.click();
+}
+
+// ─── 컬럼 정의 (실제 DB 필드 기준) ──────────────────────────────────────────
+const ALL_COLS = [
+  { key:"category",     label:"구분",      w:90  },
+  { key:"mc",           label:"MC",        w:120, isMc:true },
+  { key:"sku_name",     label:"제품명",    w:240, clickable:"sku" },
+  { key:"import_type",  label:"OEM/수입",  w:85  },
+  { key:"importer",     label:"수입업체",  w:160 },
+  { key:"import_count", label:"수입횟수",  w:75  },
+  { key:"factory",      label:"해외제조업소", w:220, clickable:"mfr" },
+  { key:"country",      label:"제조국",    w:85  },
+  { key:"email",        label:"이메일",    w:160 },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAGE 1: 메인 대시보드
+// ═══════════════════════════════════════════════════════════════════════════════
+function MainDashboard({ navigate }) {
+  const [stats,       setStats]       = useState(null);
+  const [competitorStats, setCompetitorStats] = useState({});
+  const [data,        setData]        = useState([]);
+  const [meta,        setMeta]        = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState(null);
+  const [search,      setSearch]      = useState("");
+  const [debSearch,   setDebSearch]   = useState("");
+  const [competitor,  setCompetitor]  = useState("전체");
+  const [sortBy,      setSortBy]      = useState("import_count");
+  const [sortDir,     setSortDir]     = useState("desc");
+  const [page,        setPage]        = useState(1);
+  const [visibleCols, setVisibleCols] = useState(ALL_COLS.map(c=>c.key));
+  const [showColMenu, setShowColMenu] = useState(false);
+  const [uploading,   setUploading]   = useState(false);
+  const [uploadMsg,   setUploadMsg]   = useState(null);
+  const colMenuRef = useRef(null);
+  const fileRef    = useRef(null);
+
+  // 검색 디바운스 500ms
+  useEffect(()=>{ const t=setTimeout(()=>{setDebSearch(search);setPage(1);},500); return()=>clearTimeout(t); },[search]);
+
+  // 통계
+  useEffect(()=>{ fetchStats().then(setStats).catch(()=>{}); },[]);
+  useEffect(()=>{ fetchCompetitorStats().then(setCompetitorStats).catch(()=>{}); },[]);
+
+  // 데이터
+  useEffect(()=>{
+    setLoading(true); setError(null);
+    fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50})
+      .then(r=>{setData(r.data);setMeta(r.meta);})
+      .catch(e=>setError(e.message))
+      .finally(()=>setLoading(false));
+  },[debSearch,competitor,sortBy,sortDir,page]);
+
+  useEffect(()=>{
+    const h=e=>{if(colMenuRef.current&&!colMenuRef.current.contains(e.target))setShowColMenu(false);};
+    document.addEventListener("mousedown",h); return()=>document.removeEventListener("mousedown",h);
+  },[]);
+
+  function handleSort(col){
+    if(sortBy===col) setSortDir(d=>d==="asc"?"desc":"asc");
+    else{setSortBy(col);setSortDir("asc");}
+    setPage(1);
+  }
+
+  async function handleUpload(e){
+    const file=e.target.files?.[0]; if(!file)return;
+    setUploading(true); setUploadMsg(null);
+    try{
+      const res=await uploadExcel(file);
+      setUploadMsg({ok:true,text:res.message});
+      const r2=await fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50});
+      setData(r2.data); setMeta(r2.meta);
+      fetchStats().then(setStats).catch(()=>{});
+    }catch(err){setUploadMsg({ok:false,text:err.message});}
+    finally{setUploading(false); e.target.value="";}
+  }
+  async function handleContactExcelUpload(e) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  setUploading(true);
+  setUploadMsg(null);
+
+  try {
+    const res = await uploadContacts(file, true);
+
+    setUploadMsg({
+      ok: true,
+      text: res.message,
+    });
+
+    const statsRes = await fetchStats();
+    setStats(statsRes);
+
+    const refreshed = await fetchSkuHistory({
+      search: debSearch,
+      competitor,
+      sortBy,
+      sortDir,
+      page,
+      pageSize: 50,
+    });
+
+    setData(refreshed.data);
+    setMeta(refreshed.meta);
+    setError(null);
+  } catch (err) {
+    setUploadMsg({
+      ok: false,
+      text: err.message || "연락처 보강 업로드 실패",
+    });
+  } finally {
+    setUploading(false);
+    e.target.value = "";
+  }
+}
+
+  const cols = ALL_COLS.filter(c=>visibleCols.includes(c.key));
+
+  return (
+    <div className="app">
+      <style>{styles}</style>
+      {/* Hero */}
+      <div className="hero">
+        <div className="hero-inner">
+          <div className="hero-title">해외 제조업체 발굴 대시보드</div>
+          <div className="hero-desc">국내 식품 수입 이력을 기반으로 해외 제조업체와 관련 상품 정보를 한눈에 확인하는 대시보드입니다.</div>
+          <div className="hero-kpi">
+            {[
+              { label: "해외 제조업체", val: stats?.manufacturerCount,  unit: "개" },
+              { label: "OEM 업체",      val: stats?.oemCount,           unit: "개" },
+              { label: "제조국",         val: stats?.countryCount,       unit: "개" },
+              { label: "식품 SKU",       val: stats?.skuCount,           unit: "개" },
+              { label: "식품 수입 이력", val: stats?.importHistoryCount, unit: "건" },
+            ].map(({ label, val, unit }) => (
+              <div key={label} className="hero-kpi-item">
+                <div className="hero-kpi-label">{label}</div>
+                <div className="hero-kpi-num">
+                  {val != null ? Number(val).toLocaleString() : "—"}
+                  <span className="hero-kpi-unit">{unit}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="page">
+        {uploadMsg && (
+          <div className={uploadMsg.ok?"notice":"error-box"} style={{marginBottom:10}}>
+            {uploadMsg.text}
+          </div>
+        )}
+
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">수입/OEM SKU 이력</span>
+            <div style={{display:"flex",gap:8}}>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                ref={fileRef}
+                style={{display:"none"}}
+                onChange={handleUpload}
+              />
+
+              <button
+                className="upload-btn"
+                disabled={uploading}
+                onClick={()=>fileRef.current?.click()}
+              >
+                {uploading ? "업로드 중..." : "📤 Excel 업로드"}
+              </button>
+
+              <label
+                className="upload-btn"
+                style={{
+                  background: "#0f766e",
+                  cursor: uploading ? "not-allowed" : "pointer",
+                  opacity: uploading ? 0.5 : 1,
+                }}
+              >
+                {uploading ? "업로드 중..." : "📇 연락처 보강 업로드"}
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleContactExcelUpload}
+                  disabled={uploading}
+                  style={{display:"none"}}
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* 경쟁사 카드 */}
+          <div style={{padding:"12px 14px 0"}}>
+            <div className="competitor-cards">
+              {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡"].map(name => {
+                const theme = CARD_THEMES[name];
+                const isActive = competitor === name;
+                const count = competitorStats[name] ?? "…";
+                return (
+                  <button
+                    key={name}
+                    className={`comp-card${isActive ? " active" : ""}`}
+                    style={{ background: isActive ? theme.active : theme.bg, borderColor: isActive ? theme.active : "#e2e8f0" }}
+                    onClick={() => { setCompetitor(name); setPage(1); }}
+                  >
+                    <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151", fontSize:"15px"}}>{name}</span>
+                    <span className="comp-card-num"  style={{color: isActive ? "#fff" : "#1a1a2e"}}>
+                      {typeof count === "number" ? count.toLocaleString() : count}
+                    </span>
+                    <span className="comp-card-label">해외제조업체</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 검색 툴바 */}
+          <div className="toolbar">
+            <div className="search-wrap">
+              <span className="search-icon">🔍</span>
+              <input placeholder="제품명, 해외제조업소, MC, 수입업체, 제조국 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+            </div>
+            <span className="count-label">{meta?`총 ${meta.total.toLocaleString()}건 중 표시`:""}</span>
+            <button className="icon-btn" onClick={()=>downloadCSV(data,"sku_history.csv")}>⬇ CSV</button>
+            <div className="col-wrap" ref={colMenuRef}>
+              <button className="icon-btn" onClick={()=>setShowColMenu(v=>!v)}>⚙ 열 설정</button>
+              {showColMenu&&(
+                <div className="col-dropdown">
+                  {ALL_COLS.map(c=>(
+                    <label key={c.key} className="col-item">
+                      <input type="checkbox" checked={visibleCols.includes(c.key)}
+                        onChange={e=>setVisibleCols(prev=>e.target.checked?[...prev,c.key]:prev.filter(k=>k!==c.key))}/>
+                      {c.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {error&&<div className="error-box">오류: {error}</div>}
+
+          {/* 테이블 */}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  {cols.map(c=>(
+                    <th key={c.key} className={sortBy===c.key?"sorted":""} onClick={()=>handleSort(c.key)} style={{minWidth:c.w}}>
+                      {c.label}<SortIcon col={c.key} sortCol={sortBy} sortDir={sortDir}/>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? <SkeletonRows cols={cols.length}/>
+                : data.length===0
+                  ? <tr><td colSpan={cols.length}><div className="empty-state">조건에 맞는 SKU 이력이 없습니다.</div></td></tr>
+                  : data.map((row,i)=>(
+                    <tr key={i}>
+                      {cols.map(c=>(
+                        <td key={c.key} title={row[c.key]}>
+                          {c.clickable==="sku"
+                            ? <span className="link-cell" onClick={()=>navigate("sku",{row})}>{row[c.key]}</span>
+                            : c.clickable==="mfr"
+                            ? <span className="link-cell" onClick={()=>navigate("mfr",{row,from:"main"})}>{row[c.key]}</span>
+                            : c.key==="import_count"
+                            ? <span className="badge b-count">{row[c.key]}</span>
+                            : c.isMc
+                            ? <span className="badge b-mc">{row[c.key]}</span>
+                            : c.key==="email"
+                            ? <span className="email-cell">{row[c.key]||"-"}</span>
+                            : c.key==="import_type"
+                            ? <OemBadge value={row[c.key]}/>
+                            : c.key==="category"
+                            ? <span className="badge b-cat">{row[c.key]}</span>
+                            : row[c.key]||"-"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination meta={meta} page={page} setPage={setPage}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAGE 2: SKU 취급 제조사
+// ═══════════════════════════════════════════════════════════════════════════════
+function SkuManufacturers({ navigate, state }) {
+  const { row } = state;
+  const skuName = row.sku_name;
+  const [res,          setRes]         = useState(null);
+  const [loading,      setLoading]     = useState(true);
+  const [error,        setError]       = useState(null);
+  const [search,       setSearch]      = useState("");
+  const [debSearch,    setDebSearch]   = useState("");
+  const [countryF,     setCountryF]    = useState("");
+  const [contactF,     setContactF]    = useState("");
+  const [oemF,         setOemF]        = useState("");
+  const [page,         setPage]        = useState(1);
+  const [skuSort, setSkuSort] = useState("sku_name");
+  const [skuDir,  setSkuDir]  = useState("asc");
+
+  function handleSkuSort(col) {
+    if (skuSort === col) setSkuDir(d => d === "asc" ? "desc" : "asc");
+    else { setSkuSort(col); setSkuDir("asc"); }
+  }
+
+  const sortedRows = useMemo(() => {
+    if (!res?.data) return [];
+    return [...res.data].sort((a, b) => {
+      let av, bv;
+      if (skuSort === "sku_name")  { av = a.skus?.[0]||""; bv = b.skus?.[0]||""; }
+      else if (skuSort === "mc") { av = a.mc||""; bv = b.mc||""; }
+      else if (skuSort === "factory")   { av = a.factory||""; bv = b.factory||""; }
+      else if (skuSort === "country")   { av = a.country||""; bv = b.country||""; }
+      else if (skuSort === "email")     { av = a.email||""; bv = b.email||""; }
+      else if (skuSort === "oem")       { av = a.import_types?.join()||""; bv = b.import_types?.join()||""; }
+      else if (skuSort === "importers") { av = a.importers?.[0]||""; bv = b.importers?.[0]||""; }
+      else { av = ""; bv = ""; }
+      return skuDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+  }, [res, skuSort, skuDir]);
+
+  useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
+
+  useEffect(()=>{
+    setLoading(true); setError(null);
+    fetchSkuFactories(skuName,{
+      search:debSearch,
+      countryFilter:countryF||undefined,
+      hasContact:contactF==="있음"?true:contactF==="없음"?false:undefined,
+      oemPossible:oemF==="가능"?true:undefined,
+      page,pageSize:50,
+    }).then(setRes).catch(e=>setError(e.message)).finally(()=>setLoading(false));
+  },[skuName,debSearch,countryF,contactF,oemF,page]);
+
+  const countries = useMemo(()=>{
+    if(!res)return[];
+    return Array.from(new Set(res.data.map(r=>r.country).filter(Boolean))).sort();
+  },[res]);
+
+  const info = res?.sku_info;
+
+  return (
+    <div className="app">
+      <style>{styles}</style>
+      <div className="banner">
+        <div className="banner-inner">
+          <div className="banner-left">
+            <h1>🌐 Global Factory Sourcing Database</h1>
+            <p>수입식품정보 기반으로 구축한 해외 제조업체 · SKU · 수입/OEM 이력 통합 DB</p>
+          </div>
+        </div>
+      </div>
+      <div className="page">
+        <button className="back-btn" onClick={()=>navigate("main")}>← 수입/OEM SKU 이력으로 돌아가기</button>
+        <div className="page-header">
+          <h2>선택 SKU 취급 제조사</h2>
+          <div className="sub">해당 SKU를 취급한 해외 제조업체 후보를 비교합니다.</div>
+        </div>
+        <div className="sku-card">
+          <div><div className="sku-field-label">제품명</div><div className="sku-field-value">{skuName}</div></div>
+          <div><div className="sku-field-label">MC (카테고리)</div><div className="sku-field-value"><span className="badge b-mc">{info?.mc||row.mc||"-"}</span></div></div>
+          <div><div className="sku-field-label">구분</div><div className="sku-field-value"><span className="badge b-cat">{info?.category||row.category||"-"}</span></div></div>
+          <div style={{flex:1}}><div className="sku-field-label">수입업체</div><div className="sku-field-value" style={{fontSize:12}}>
+            {(() => {
+              const BIG5 = ["이마트","홈플러스","롯데마트","쿠팡","코스트코"];
+              const all = info?.importers || (row.importer ? [row.importer] : []);
+              const big = all.filter(i => BIG5.some(b => i.includes(b)));
+              const rest = all.filter(i => !BIG5.some(b => i.includes(b)));
+              return <>{big.map((i,j)=><span key={j} className="badge b-gray" style={{marginRight:3}}>{i}</span>)}{rest.length>0&&<span className="badge b-gray">외 {rest.length}개</span>}</>;
+            })()}
+          </div></div>
+        </div>
+        <div className="card">
+          <div className="card-header"><span className="card-title">해당 SKU 취급 제조사 목록</span></div>
+          <div className="toolbar">
+            <div className="search-wrap">
+              <span className="search-icon">🔍</span>
+              <input placeholder="해외제조업소, 국가, 수입업체 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+            </div>
+            <span className="count-label">{res?`${res.meta.total}개 제조사`:""}</span>
+          </div>
+          {error&&<div className="error-box">오류: {error}</div>}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{minWidth:110}} onClick={()=>handleSkuSort("mc")}>MC <SortIcon col="mc" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:200}} onClick={()=>handleSkuSort("sku_name")}>SKU <SortIcon col="sku_name" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:160}} onClick={()=>handleSkuSort("importers")}>수입업체 <SortIcon col="importers" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:90}}  onClick={()=>handleSkuSort("oem")}>OEM 여부 <SortIcon col="oem" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:220}} onClick={()=>handleSkuSort("factory")}>제조업체 <SortIcon col="factory" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:80}}  onClick={()=>handleSkuSort("country")}>제조국 <SortIcon col="country" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:160}} onClick={()=>handleSkuSort("email")}>연락처 <SortIcon col="email" sortCol={skuSort} sortDir={skuDir}/></th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? <SkeletonRows cols={6}/>
+                : !sortedRows?.length
+                  ? <tr><td colSpan={6}><div className="empty-state">선택한 SKU와 연결된 제조사 정보가 없습니다.</div></td></tr>
+                  : sortedRows.map((g,i)=>(
+                    <tr key={i}>
+                      <td><span style={{fontSize:12,color:"#1a1a2e"}}>{g.mc||"-"}</span></td>
+                      <td title={g.skus?.[0]}><span style={{fontSize:12}}>{g.skus?.[0]||"-"}</span></td>
+                      <td>
+                        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                          {(() => {
+                            const BIG5 = ["이마트","홈플러스","롯데마트","쿠팡","코스트코"];
+                            const big = g.importers?.filter(i => BIG5.some(b => i.includes(b))) || [];
+                            const rest = g.importers?.filter(i => !BIG5.some(b => i.includes(b))) || [];
+                            return <>
+                              {big.map((imp,j)=><span key={j} className="badge b-gray">{imp}</span>)}
+                              {rest.length>0&&<span className="badge b-gray">외 {rest.length}개</span>}
+                            </>;
+                          })()}
+                        </div>
+                      </td>
+                      <td><OemBadge value={g.import_types?.join(", ")}/></td>
+                      <td title={g.factory}>
+                        <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:g.manufacturer,factory:g.factory,...g},from:"sku",skuState:state})}>
+                          {g.factory}
+                        </span>
+                      </td>
+                      <td>{g.country||"-"}</td>
+                      <td>
+                        {g.email ? <a href={`mailto:${g.email}`} style={{color:"#1d4ed8",fontSize:12}}>{g.email}</a>
+                          : g.homepage ? <a href={g.homepage} target="_blank" rel="noopener noreferrer" style={{color:"#1d4ed8",fontSize:12}}>{g.homepage}</a>
+                          : <span style={{color:"#9ca3af",fontSize:12}}>-</span>}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination meta={res?.meta} page={page} setPage={setPage}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PAGE 3: 제조사 상세
+// ═══════════════════════════════════════════════════════════════════════════════
+function ManufacturerDetail({ navigate, state }) {
+  const { row, from, skuState } = state;
+  const manufacturer = row.manufacturer||row.factory||"";
+  const factory      = row.factory||"";
+  const [res,     setRes]     = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+  const [skuOpen, setSkuOpen] = useState(true);
+  const [contactForm, setContactForm] = useState({
+    email: "",
+    homepage: "",
+    certificates: "",
+  });
+  const [contactSaving, setContactSaving] = useState(false);
+  const [contactMsg, setContactMsg] = useState(null);
+
+  useEffect(()=>{
+    setLoading(true); setError(null);
+    fetchManufacturerDetail(manufacturer,factory)
+      .then(setRes).catch(e=>setError(e.message)).finally(()=>setLoading(false));
+  },[manufacturer,factory]);
+
+  const d = res?.detail;
+
+  useEffect(() => {
+    if (!d) return;
+
+    setContactForm({
+      email: d.emails?.[0] || "",
+      homepage: d.homepage || "",
+      certificates: Array.isArray(d.certificates) ? d.certificates.join(", ") : "",
+    });
+    setContactMsg(null);
+  }, [d]);
+
+  const statusBadges = d ? [
+    d.emails?.length       && {label:"연락 가능",       cls:"b-green"},
+    d.oem_status==="OEM"   && {label:"OEM 이력 있음",   cls:"b-teal"},
+    d.export_count>0       && {label:"한국 수출이력 있음",cls:"b-blue"},
+    d.manager_mc           && {label:`담당: ${d.manager_mc}`, cls:"b-gray"},
+  ].filter(Boolean) : [];
+
+    async function handleSaveContact() {
+    if (!d) {
+      setContactMsg({ ok: false, text: "제조사 상세 정보를 먼저 불러와야 합니다." });
+      return;
+    }
+
+    setContactSaving(true);
+    setContactMsg(null);
+
+    try {
+      const saveRes = await updateManufacturerContact({
+        factory,
+        manufacturer,
+        country: d.country || undefined,
+        email: contactForm.email,
+        homepage: contactForm.homepage,
+        certificates: contactForm.certificates,
+      });
+
+      const refreshed = await fetchManufacturerDetail(manufacturer, factory);
+      setRes(refreshed);
+
+      setContactMsg({
+        ok: true,
+        text: saveRes.message || "연락처 저장 완료",
+      });
+    } catch (err) {
+      setContactMsg({
+        ok: false,
+        text: err.message || "연락처 저장 실패",
+      });
+    } finally {
+      setContactSaving(false);
+    }
+  }
+  return (
+    <div className="app">
+      <style>{styles}</style>
+      <div className="banner">
+        <div className="banner-inner">
+          <div className="banner-left">
+            <h1>🌐 Global Factory Sourcing Database</h1>
+            <p>수입식품정보 기반으로 구축한 해외 제조업체 · SKU · 수입/OEM 이력 통합 DB</p>
+          </div>
+        </div>
+      </div>
+      <div className="page">
+        <button className="back-btn" onClick={()=>from==="sku"?navigate("sku",skuState):navigate("main")}>
+          ← {from==="sku"?"선택 SKU 취급 제조사로 돌아가기":"수입/OEM SKU 이력으로 돌아가기"}
+        </button>
+
+        {error&&<div className="error-box">오류: {error}</div>}
+
+        <div className="mfr-header">
+          {loading ? (
+            <>
+              <div className="skeleton" style={{width:"30%",height:11,marginBottom:8}}/>
+              <div className="skeleton" style={{width:"75%",height:22,marginBottom:6}}/>
+              <div className="skeleton" style={{width:"55%",height:13}}/>
+            </>
+          ) : d ? (
+            <>
+              <div className="mfr-country">📍 {d.country||"-"}</div>
+              <div className="mfr-name">{factory}</div>
+              <div className="mfr-factory">{d.location||""}</div>
+              <div className="badge-row">{statusBadges.map((b,i)=><span key={i} className={`badge ${b.cls}`}>{b.label}</span>)}</div>
+            </>
+          ):null}
+        </div>
+
+        {d&&(
+          <>
+            <div className="detail-grid">
+              {/* 연락처 */}
+              <div className="card">
+                <div className="card-header"><span className="card-title">📧 연락처 정보</span></div>
+                <div className="card-body">
+                  <div className="detail-row">
+                    <div className="dk">이메일</div>
+                    <div className="dv">
+                      {d.emails?.length
+                        ? d.emails.map((e,i)=><div key={i}><a href={`mailto:${e}`} className="detail-link">{e}</a></div>)
+                        : <span style={{color:"#9ca3af"}}>-</span>}
+                    </div>
+                  </div>
+                  <div className="detail-row">
+                    <div className="dk">홈페이지</div>
+                    <div className="dv">
+                      {d.homepage ? <a href={d.homepage} target="_blank" rel="noopener noreferrer" className="detail-link">{d.homepage}</a> : "-"}
+                    </div>
+                  </div>
+                  <div className="detail-row">
+                    <div className="dk">연락 상태</div>
+                    <div className="dv">{d.emails?.length ? <span className="badge b-green">연락처 확보</span> : <span className="badge b-gray">미확보</span>}</div>
+                  </div>
+                      <div className="contact-edit-box">
+      <div className="contact-edit-title">연락처 직접 입력</div>
+
+      <div className="contact-edit-grid">
+        <div className="contact-edit-field">
+          <label>이메일</label>
+          <input
+            type="text"
+            value={contactForm.email}
+            onChange={(e) =>
+              setContactForm((prev) => ({
+                ...prev,
+                email: e.target.value,
+              }))
+            }
+            placeholder="예: contact@company.com"
+          />
+        </div>
+
+        <div className="contact-edit-field">
+          <label>홈페이지</label>
+          <input
+            type="text"
+            value={contactForm.homepage}
+            onChange={(e) =>
+              setContactForm((prev) => ({
+                ...prev,
+                homepage: e.target.value,
+              }))
+            }
+            placeholder="예: https://www.company.com"
+          />
+        </div>
+
+        <div className="contact-edit-field">
+          <label>인증서</label>
+          <input
+            type="text"
+            value={contactForm.certificates}
+            onChange={(e) =>
+              setContactForm((prev) => ({
+                ...prev,
+                certificates: e.target.value,
+              }))
+            }
+            placeholder="예: HACCP, BRC, ISO22000"
+          />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        className="upload-btn"
+        onClick={handleSaveContact}
+        disabled={contactSaving}
+        style={{ marginTop: 10 }}
+      >
+        {contactSaving ? "저장 중..." : "연락처 저장"}
+      </button>
+
+      {contactMsg && (
+        <div className={`contact-msg ${contactMsg.ok ? "ok" : "fail"}`}>
+          {contactMsg.text}
+        </div>
+      )}
+    </div>
+                </div>
+              </div>
+
+              {/* 상품 정보 */}
+              <div className="card">
+                <div className="card-header"><span className="card-title">🛒 상품 정보</span></div>
+                <div className="card-body">
+                  <div className="detail-row">
+                    <div className="dk">MC (카테고리)</div>
+                    <div className="dv">{d.mc_list?.map((m,i)=><span key={i} className="badge b-mc">{m}</span>)}</div>
+                  </div>
+                  <div className="detail-row">
+                    <div className="dk">구분</div>
+                    <div className="dv">
+                      {Array.from(new Set(res?.skus?.map(s=>s.category).filter(Boolean)||[])).map((c,i)=>(
+                        <span key={i} className="badge b-cat">{c}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="detail-row">
+                    <div className="dk">제조국</div>
+                    <div className="dv">{d.country||"-"}</div>
+                  </div>
+                  <div className="detail-row">
+                    <div className="dk">주요 제품</div>
+                    <div className="dv" style={{fontSize:12}}>
+                      {Array.from(new Set(res?.skus?.map(s=>s.sku_name)||[])).slice(0,5).join(", ")}
+                      {(res?.skus?.length||0)>5&&` 외 ${(res?.skus?.length||0)-5}건`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* OEM/소싱 */}
+              <div className="card">
+                <div className="card-header"><span className="card-title">🏭 OEM / 소싱 정보</span></div>
+                <div className="card-body">
+                  <div className="detail-row">
+                    <div className="dk">OEM 이력</div>
+                    <div className="dv">
+                      {d.oem_status==="OEM"
+                        ? <span className="badge b-green">OEM 이력 있음</span>
+                        : <span className="badge b-gray">수입만 있음</span>}
+                    </div>
+                  </div>
+                  <div className="detail-row">
+                    <div className="dk">거래 수입업체</div>
+                    <div className="dv">
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                        {d.importers?.slice(0,5).map((imp,i)=><span key={i} className="badge b-gray">{imp}</span>)}
+                        {(d.importers?.length||0)>5&&<span className="badge b-gray">+{d.importers.length-5}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="detail-row">
+                    <div className="dk">한국 수출이력</div>
+                    <div className="dv"><span className="badge b-count">{d.export_count}건</span></div>
+                  </div>
+                  <div className="detail-row">
+                    <div className="dk">최근 수입일</div>
+                    <div className="dv">{d.latest_import||"-"}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 인증서 */}
+              <div className="card">
+                <div className="card-header"><span className="card-title">✅ 인증서</span></div>
+                <div className="card-body">
+                  <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                    {d.certificates?.length
+                      ? d.certificates.map((c,i)=><span key={i} className="badge b-teal">{c}</span>)
+                      : <span style={{color:"#9ca3af",fontSize:12}}>인증 정보 없음 (추후 업데이트 예정)</span>}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 취급 SKU 목록 */}
+            <div className="card" style={{marginTop:12}}>
+              <button className="acc-toggle" onClick={()=>setSkuOpen(v=>!v)} aria-expanded={skuOpen}>
+                <span>📦 취급 제품 목록 ({res?.skus?.length||0}건)</span>
+                <span>{skuOpen?"▲":"▼"}</span>
+              </button>
+              {skuOpen&&(
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{minWidth:240}}>제품명</th>
+                        <th style={{minWidth:120}}>MC (카테고리)</th>
+                        <th style={{minWidth:90}}>구분</th>
+                        <th style={{minWidth:150}}>수입업체</th>
+                        <th style={{minWidth:70}}>수입횟수</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {res?.skus?.map((r,i)=>(
+                        <tr key={i}>
+                          <td title={r.sku_name}>
+                            <span className="link-cell" onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category,importer:r.importer}})}>
+                              {r.sku_name}
+                            </span>
+                          </td>
+                          <td><span className="badge b-mc">{r.mc||"-"}</span></td>
+                          <td><span className="badge b-cat">{r.category||"-"}</span></td>
+                          <td style={{fontSize:12}} title={r.importer}>{r.importer||"-"}</td>
+                          <td><span className="badge b-count">{r.import_count}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ROOT
+// ═══════════════════════════════════════════════════════════════════════════════
+export default function App() {
+  const [page, setPage] = useState({ name:"main", state:null });
+  function navigate(name, state) { setPage({name,state}); window.scrollTo({top:0,behavior:"smooth"}); }
+  if (page.name==="sku") return <SkuManufacturers navigate={navigate} state={page.state}/>;
+  if (page.name==="mfr") return <ManufacturerDetail navigate={navigate} state={page.state}/>;
+  return <MainDashboard navigate={navigate}/>;
+}
