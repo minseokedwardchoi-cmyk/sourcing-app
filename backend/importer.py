@@ -282,38 +282,37 @@ async def import_excel(file_bytes: bytes, db: AsyncSession) -> dict:
 
     inserted = 0
     skipped  = 0
-    CHUNK    = 1000  # 청크 크기
+    CHUNK    = 2000
 
-    for i, row in enumerate(df.itertuples(index=False)):
+    records = []
+    for row in df.itertuples(index=False):
         try:
             sku = safe_str(getattr(row, "sku_name", None))
             if not sku:
                 skipped += 1
                 continue
-
-            obj = ImportHistory(
-                category  = safe_str(getattr(row, "category",    None)),
-                mc        = safe_str(getattr(row, "mc",          None)),
-                sku_name  = sku,
-                importer  = normalize_importer(getattr(row, "importer",    None)),
-                import_type = normalize_oem(getattr(row, "import_type", None)),
-                factory   = safe_str(getattr(row, "factory",    None)),
-                manufacturer = normalize_name(getattr(row, "factory", None)),  # 제조사명 = 해외제조업소 기본값
-                country   = safe_str(getattr(row, "country",    None)),
-                email     = safe_str(getattr(row, "email",      None)) if hasattr(row, "email") else None,
-                homepage  = safe_str(getattr(row, "homepage",   None)) if hasattr(row, "homepage") else None,
-                import_date = None,
-                oem_status  = "OEM 가능" if normalize_oem(getattr(row, "import_type", None)) == "OEM" else None,
-            )
-            db.add(obj)
+            records.append({
+                "category":    safe_str(getattr(row, "category", None)),
+                "mc":          safe_str(getattr(row, "mc", None)),
+                "sku_name":    sku,
+                "importer":    normalize_importer(getattr(row, "importer", None)),
+                "import_type": normalize_oem(getattr(row, "import_type", None)),
+                "factory":     safe_str(getattr(row, "factory", None)),
+                "manufacturer": normalize_name(getattr(row, "factory", None)),
+                "country":     safe_str(getattr(row, "country", None)),
+                "email":       safe_str(getattr(row, "email", None)) if hasattr(row, "email") else None,
+                "homepage":    safe_str(getattr(row, "homepage", None)) if hasattr(row, "homepage") else None,
+                "import_date": None,
+                "oem_status":  "OEM 가능" if normalize_oem(getattr(row, "import_type", None)) == "OEM" else None,
+            })
             inserted += 1
-
-            if inserted % CHUNK == 0:
-                await db.flush()
-
         except Exception:
             skipped += 1
             continue
+
+    for i in range(0, len(records), CHUNK):
+        await db.execute(ImportHistory.__table__.insert(), records[i:i+CHUNK])
+        await db.flush()
 
     await db.commit()
 
