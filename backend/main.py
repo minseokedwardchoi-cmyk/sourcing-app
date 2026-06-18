@@ -62,6 +62,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 _MV_INDEXES = [
+    # sku_history_mv 인덱스
     "CREATE INDEX IF NOT EXISTS idx_mv_import_count ON sku_history_mv (import_count DESC)",
     "CREATE INDEX IF NOT EXISTS idx_mv_sku_name    ON sku_history_mv (sku_name)",
     "CREATE INDEX IF NOT EXISTS idx_mv_factory     ON sku_history_mv (factory)",
@@ -74,6 +75,11 @@ _MV_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_mv_gin_importer ON sku_history_mv USING gin (importer      gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS idx_mv_gin_country  ON sku_history_mv USING gin (country       gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS idx_mv_gin_mc       ON sku_history_mv USING gin (mc            gin_trgm_ops)",
+    # sku_factory_mv 인덱스
+    "CREATE INDEX IF NOT EXISTS idx_sfmv_sku_name   ON sku_factory_mv USING gin (sku_name gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_sfmv_factory    ON sku_factory_mv (factory)",
+    "CREATE INDEX IF NOT EXISTS idx_sfmv_country    ON sku_factory_mv (country)",
+    "CREATE INDEX IF NOT EXISTS idx_sfmv_count      ON sku_factory_mv (import_count DESC)",
 ]
 
 async def _build_indexes_bg():
@@ -116,6 +122,19 @@ async def startup():
                 MAX(import_date)    AS latest_import
             FROM import_history
             GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+        """))
+        await conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS sku_factory_mv AS
+            SELECT
+                sku_name, factory, manufacturer, country, mc,
+                COUNT(*)            AS import_count,
+                MIN(email)          AS email,
+                MIN(homepage)       AS homepage,
+                MAX(oem_status)     AS oem_status,
+                array_agg(DISTINCT import_type) FILTER (WHERE import_type IS NOT NULL) AS import_types,
+                array_agg(DISTINCT importer)    FILTER (WHERE importer IS NOT NULL)    AS importers
+            FROM import_history
+            GROUP BY sku_name, factory, manufacturer, country, mc
         """))
     # 인덱스 생성은 백그라운드에서 (헬스체크 타임아웃 방지)
     asyncio.create_task(_build_indexes_bg())
@@ -244,17 +263,16 @@ async def get_sku_factories(
     page_size:      int           = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    # 유사 SKU 찾기: GIN 인덱스 활용하는 % 연산자 사용
+    # 유사 SKU 찾기: sku_factory_mv에서 GIN 인덱스 활용
     similar_skus_r = await db.execute(text("""
         SELECT DISTINCT sku_name
-        FROM import_history
+        FROM sku_factory_mv
         WHERE sku_name = :sku_name
            OR sku_name % :sku_name
         LIMIT 30
     """), {"sku_name": sku_name})
     similar_skus = [r[0] for r in similar_skus_r.fetchall()]
 
-    # 유사 SKU가 없으면 원본만
     if not similar_skus:
         similar_skus = [sku_name]
 
@@ -272,43 +290,29 @@ async def get_sku_factories(
     if oem_possible is True:
         extra_conds.append("oem_status ILIKE '%가능%'")
     if search and search.strip():
-        extra_conds.append("(factory ILIKE :q OR country ILIKE :q OR importer ILIKE :q)")
+        extra_conds.append("(factory ILIKE :q OR country ILIKE :q OR importers::text ILIKE :q)")
         params["q"] = f"%{search.strip()}%"
 
     extra_where = ("AND " + " AND ".join(extra_conds)) if extra_conds else ""
 
-    # IN 절용 파라미터
     in_params = {f"s{i}": s for i, s in enumerate(similar_skus)}
     in_clause = ", ".join(f":s{i}" for i in range(len(similar_skus)))
 
     agg_sql = f"""
-        SELECT
-            sku_name,
-            factory,
-            manufacturer,
-            country,
-            mc,
-            MIN(email)                                                      AS email,
-            MIN(homepage)                                                   AS homepage,
-            MAX(oem_status)                                                 AS oem_status,
-            array_agg(DISTINCT import_type) FILTER (WHERE import_type IS NOT NULL) AS import_types,
-            array_agg(DISTINCT importer)    FILTER (WHERE importer IS NOT NULL)    AS importers,
-            COUNT(*)                                                        AS import_count
-        FROM import_history
+        SELECT sku_name, factory, manufacturer, country, mc,
+               import_count, email, homepage, oem_status, import_types, importers
+        FROM sku_factory_mv
         WHERE sku_name IN ({in_clause})
         {extra_where}
-        GROUP BY sku_name, factory, manufacturer, country, mc
         ORDER BY import_count DESC
         LIMIT :limit OFFSET :offset
     """
 
     count_sql = f"""
-        SELECT COUNT(*) FROM (
-            SELECT 1 FROM import_history
-            WHERE sku_name IN ({in_clause})
-            {extra_where}
-            GROUP BY sku_name, factory, manufacturer, country, importer, import_type
-        ) sub
+        SELECT COUNT(*)
+        FROM sku_factory_mv
+        WHERE sku_name IN ({in_clause})
+        {extra_where}
     """
 
     all_params = {**params, **in_params, "limit": page_size, "offset": (page - 1) * page_size}
@@ -606,6 +610,7 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
         await db.execute(ImportHistory.__table__.insert(), records)
         await db.commit()
         await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
+        await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
         for sql in _MV_INDEXES:
             await db.execute(text(sql))
         await db.commit()
