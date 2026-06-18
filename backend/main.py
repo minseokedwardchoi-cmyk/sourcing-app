@@ -230,18 +230,13 @@ async def get_sku_factories(
     page_size:      int           = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    # pg_trgm 활성화 (없으면 무시)
-    await db.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-
-    # 유사 SKU 찾기: trigram 유사도 0.15 이상인 sku_name들
+    # 유사 SKU 찾기: GIN 인덱스 활용하는 % 연산자 사용
     similar_skus_r = await db.execute(text("""
-        SELECT sku_name, MAX(similarity(sku_name, :sku_name)) AS sim
+        SELECT DISTINCT sku_name
         FROM import_history
-        WHERE similarity(sku_name, :sku_name) > 0.3
-           OR sku_name = :sku_name
-        GROUP BY sku_name
-        ORDER BY sim DESC
-        LIMIT 50
+        WHERE sku_name = :sku_name
+           OR sku_name % :sku_name
+        LIMIT 30
     """), {"sku_name": sku_name})
     similar_skus = [r[0] for r in similar_skus_r.fetchall()]
 
@@ -289,7 +284,7 @@ async def get_sku_factories(
         WHERE sku_name IN ({in_clause})
         {extra_where}
         GROUP BY sku_name, factory, manufacturer, country, mc
-        ORDER BY similarity(sku_name, :sku_name) DESC, import_count DESC
+        ORDER BY import_count DESC
         LIMIT :limit OFFSET :offset
     """
 
