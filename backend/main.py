@@ -61,10 +61,26 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+_MV_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_mv_import_count ON sku_history_mv (import_count DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_sku_name    ON sku_history_mv (sku_name)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_factory     ON sku_history_mv (factory)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_country     ON sku_history_mv (country)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_latest      ON sku_history_mv (latest_import DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_importer    ON sku_history_mv (importer)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_gin_sku      ON sku_history_mv USING gin (sku_name      gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_gin_factory  ON sku_history_mv USING gin (factory       gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_gin_mfr      ON sku_history_mv USING gin (manufacturer  gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_gin_importer ON sku_history_mv USING gin (importer      gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_gin_country  ON sku_history_mv USING gin (country       gin_trgm_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_gin_mc       ON sku_history_mv USING gin (mc            gin_trgm_ops)",
+]
+
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.execute(text("""
             CREATE MATERIALIZED VIEW IF NOT EXISTS sku_history_mv AS
             SELECT
@@ -76,18 +92,8 @@ async def startup():
             FROM import_history
             GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
         """))
-        await conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS idx_mv_import_count ON sku_history_mv (import_count DESC)
-        """))
-        await conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS idx_mv_sku_name ON sku_history_mv (sku_name)
-        """))
-        await conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS idx_mv_importer ON sku_history_mv (importer)
-        """))
-        await conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS idx_mv_factory ON sku_history_mv (factory)
-        """))
+        for sql in _MV_INDEXES:
+            await conn.execute(text(sql))
 
 
 class ContactUpdateRequest(BaseModel):
@@ -521,6 +527,8 @@ async def upload_excel(
     content = await file.read()
     result  = await import_excel(content, db)
     await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
+    for sql in _MV_INDEXES:
+        await db.execute(text(sql))
     await db.commit()
     print("UPLOAD_RESULT:", result)
 
@@ -578,6 +586,8 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
         await db.execute(ImportHistory.__table__.insert(), records)
         await db.commit()
         await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
+        for sql in _MV_INDEXES:
+            await db.execute(text(sql))
         await db.commit()
 
     return {"inserted": inserted, "skipped": skipped}
