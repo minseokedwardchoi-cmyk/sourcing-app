@@ -505,6 +505,55 @@ async def upload_excel(
         message    = f"업로드 완료: {result['inserted']}건 적재, {result['skipped']}건 스킵",
     )
 
+# ─── 4-2. JSON 업로드 ────────────────────────────────────────────────────────
+class JsonUploadRequest(BaseModel):
+    rows: list[dict]
+
+@app.post("/api/upload-json")
+async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get_db)):
+    from importer import normalize_importer, normalize_oem, normalize_name, safe_str, FIELD_MAP
+
+    inserted = 0
+    skipped = 0
+    records = []
+
+    for row in payload.rows:
+        # 컬럼명 매핑
+        mapped = {}
+        for k, v in row.items():
+            key = str(k).strip()
+            mapped[FIELD_MAP.get(key, key)] = v
+
+        try:
+            sku = safe_str(mapped.get("sku_name"))
+            if not sku:
+                skipped += 1
+                continue
+            records.append({
+                "category":     safe_str(mapped.get("category")),
+                "mc":           safe_str(mapped.get("mc")),
+                "sku_name":     sku,
+                "importer":     normalize_importer(mapped.get("importer")),
+                "import_type":  normalize_oem(mapped.get("import_type")),
+                "factory":      safe_str(mapped.get("factory")),
+                "manufacturer": normalize_name(mapped.get("factory")),
+                "country":      safe_str(mapped.get("country")),
+                "email":        safe_str(mapped.get("email")),
+                "homepage":     safe_str(mapped.get("homepage")),
+                "import_date":  None,
+                "oem_status":   "OEM 가능" if normalize_oem(mapped.get("import_type")) == "OEM" else None,
+            })
+            inserted += 1
+        except Exception:
+            skipped += 1
+            continue
+
+    if records:
+        await db.execute(ImportHistory.__table__.insert(), records)
+        await db.commit()
+
+    return {"inserted": inserted, "skipped": skipped}
+
 # ─── 5. DB 통계 ───────────────────────────────────────────────────────────────
 @app.get("/api/stats")
 async def get_stats(db: AsyncSession = Depends(get_db)):
