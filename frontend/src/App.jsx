@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
   fetchSkuHistory, fetchSkuFactories,
-  fetchManufacturerDetail, fetchStats, uploadExcel,
-  updateManufacturerContact, uploadContacts, fetchCompetitorStats,
+  fetchManufacturerDetail, uploadExcel,
+  updateManufacturerContact, uploadContacts,
 } from "./api.js";
 
 // ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
@@ -206,8 +206,6 @@ const ALL_COLS = [
 // PAGE 1: 메인 대시보드
 // ═══════════════════════════════════════════════════════════════════════════════
 function MainDashboard({ navigate }) {
-  const [stats,       setStats]       = useState(null);
-  const [competitorStats, setCompetitorStats] = useState({});
   const [data,        setData]        = useState([]);
   const [meta,        setMeta]        = useState(null);
   const [loading,     setLoading]     = useState(true);
@@ -227,10 +225,6 @@ function MainDashboard({ navigate }) {
 
   // 검색 디바운스 500ms
   useEffect(()=>{ const t=setTimeout(()=>{setDebSearch(search);setPage(1);},500); return()=>clearTimeout(t); },[search]);
-
-  // 통계
-  useEffect(()=>{ fetchStats().then(setStats).catch(()=>{}); },[]);
-  useEffect(()=>{ fetchCompetitorStats().then(setCompetitorStats).catch(()=>{}); },[]);
 
   // 데이터
   useEffect(()=>{
@@ -260,7 +254,6 @@ function MainDashboard({ navigate }) {
       setUploadMsg({ok:true,text:res.message});
       const r2=await fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50});
       setData(r2.data); setMeta(r2.meta);
-      fetchStats().then(setStats).catch(()=>{});
     }catch(err){setUploadMsg({ok:false,text:err.message});}
     finally{setUploading(false); e.target.value="";}
   }
@@ -278,9 +271,6 @@ function MainDashboard({ navigate }) {
       ok: true,
       text: res.message,
     });
-
-    const statsRes = await fetchStats();
-    setStats(statsRes);
 
     const refreshed = await fetchSkuHistory({
       search: debSearch,
