@@ -65,6 +65,29 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS sku_history_mv AS
+            SELECT
+                category, mc, sku_name, import_type, importer,
+                COUNT(*)            AS import_count,
+                manufacturer, factory, country,
+                MIN(email)          AS email,
+                MAX(import_date)    AS latest_import
+            FROM import_history
+            GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_import_count ON sku_history_mv (import_count DESC)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_sku_name ON sku_history_mv (sku_name)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_importer ON sku_history_mv (importer)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_mv_factory ON sku_history_mv (factory)
+        """))
 
 
 class ContactUpdateRequest(BaseModel):
@@ -122,56 +145,45 @@ async def get_sku_history(
     if sort_by == "import_type":
         sort_by = "CASE WHEN import_type = 'OEM' THEN 0 ELSE 1 END"
 
-    # 검색 조건
+    # 검색 조건 (MV는 search_vector 없으므로 ILIKE 사용)
     search_cond = ""
     if search and search.strip():
-        search_cond = "AND search_vector @@ plainto_tsquery('simple', :search)"
+        search_cond = """AND (
+            sku_name    ILIKE :search OR
+            factory     ILIKE :search OR
+            manufacturer ILIKE :search OR
+            importer    ILIKE :search OR
+            country     ILIKE :search OR
+            mc          ILIKE :search
+        )"""
 
     competitor_cond = _competitor_condition(competitor)
 
     base_sql = f"""
-        FROM import_history
+        FROM sku_history_mv
         WHERE 1=1
         {search_cond}
         {competitor_cond}
     """
 
-    # 집계 쿼리 (수입횟수 = COUNT(*))
     agg_sql = f"""
         SELECT
-            category,
-            mc,
-            sku_name,
-            import_type,
-            importer,
-            COUNT(*)                        AS import_count,
-            manufacturer,
-            factory,
-            country,
-            MIN(email)                      AS email,
-            MAX(import_date)                AS latest_import
+            category, mc, sku_name, import_type, importer,
+            import_count, manufacturer, factory, country,
+            email, latest_import
         {base_sql}
-        GROUP BY
-            category, mc, sku_name, import_type,
-            importer, manufacturer, factory, country
         ORDER BY {sort_by} {sort_dir} NULLS LAST, latest_import DESC
         LIMIT :limit OFFSET :offset
     """
 
-    count_sql = f"""
-        SELECT COUNT(*) FROM (
-            SELECT 1 {base_sql}
-            GROUP BY category, mc, sku_name, import_type,
-                     importer, manufacturer, factory, country
-        ) sub
-    """
+    count_sql = f"SELECT COUNT(*) {base_sql}"
 
     params: dict = {
         "limit":  page_size,
         "offset": (page - 1) * page_size,
     }
     if search and search.strip():
-        params["search"] = search.strip()
+        params["search"] = f"%{search.strip()}%"
 
     rows_result  = await db.execute(text(agg_sql),  params)
     count_result = await db.execute(text(count_sql), params)
@@ -508,7 +520,8 @@ async def upload_excel(
 
     content = await file.read()
     result  = await import_excel(content, db)
-    
+    await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
+    await db.commit()
     print("UPLOAD_RESULT:", result)
 
     return UploadResponse(
@@ -563,6 +576,8 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
 
     if records:
         await db.execute(ImportHistory.__table__.insert(), records)
+        await db.commit()
+        await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
         await db.commit()
 
     return {"inserted": inserted, "skipped": skipped}
