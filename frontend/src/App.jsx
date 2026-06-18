@@ -317,16 +317,16 @@ function MainDashboard({ navigate }) {
           <div className="hero-desc">국내 식품 수입 이력을 기반으로 해외 제조업체와 관련 상품 정보를 한눈에 확인하는 대시보드입니다.</div>
           <div className="hero-kpi">
             {[
-              { label: "해외 제조업체", val: stats?.manufacturerCount,  unit: "개" },
-              { label: "OEM 업체",      val: stats?.oemCount,           unit: "개" },
-              { label: "제조국",         val: stats?.countryCount,       unit: "개" },
-              { label: "식품 SKU",       val: stats?.skuCount,           unit: "개" },
-              { label: "식품 수입 이력", val: stats?.importHistoryCount, unit: "건" },
+              { label: "해외 제조업체", val: 40658,    unit: "개" },
+              { label: "OEM 업체",      val: 2249,     unit: "개" },
+              { label: "제조국",         val: 162,      unit: "개" },
+              { label: "식품 SKU",       val: 172178,   unit: "개" },
+              { label: "식품 수입 이력", val: 1045692,  unit: "건" },
             ].map(({ label, val, unit }) => (
               <div key={label} className="hero-kpi-item">
                 <div className="hero-kpi-label">{label}</div>
                 <div className="hero-kpi-num">
-                  {val != null ? Number(val).toLocaleString() : "—"}
+                  {Number(val).toLocaleString()}
                   <span className="hero-kpi-unit">{unit}</span>
                 </div>
               </div>
@@ -387,7 +387,8 @@ function MainDashboard({ navigate }) {
               {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡"].map(name => {
                 const theme = CARD_THEMES[name];
                 const isActive = competitor === name;
-                const count = competitorStats[name] ?? "…";
+                const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375 };
+                const count = FIXED_COUNTS[name];
                 return (
                   <button
                     key={name}
