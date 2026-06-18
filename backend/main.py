@@ -94,6 +94,17 @@ async def startup():
         """))
         for sql in _MV_INDEXES:
             await conn.execute(text(sql))
+        # import_history 원본 테이블 인덱스 (SKU 상세 페이지용)
+        for sql in [
+            "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+            "CREATE INDEX IF NOT EXISTS idx_ih_sku_name    ON import_history (sku_name)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_factory     ON import_history (factory)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_mfr         ON import_history (manufacturer)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_gin_sku     ON import_history USING gin (sku_name     gin_trgm_ops)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_gin_factory ON import_history USING gin (factory      gin_trgm_ops)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_gin_importer ON import_history USING gin (importer    gin_trgm_ops)",
+        ]:
+            await conn.execute(text(sql))
 
 
 class ContactUpdateRequest(BaseModel):
