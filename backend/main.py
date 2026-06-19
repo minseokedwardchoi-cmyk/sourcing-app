@@ -598,7 +598,7 @@ class JsonUploadRequest(BaseModel):
 
 @app.post("/api/upload-json")
 async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get_db)):
-    from importer import normalize_importer, normalize_oem, normalize_name, safe_str, FIELD_MAP
+    from importer import normalize_importer, normalize_oem, normalize_name, safe_str, safe_date, FIELD_MAP
 
     inserted = 0
     skipped = 0
@@ -627,7 +627,8 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
                 "country":      safe_str(mapped.get("country")),
                 "email":        safe_str(mapped.get("email")),
                 "homepage":     safe_str(mapped.get("homepage")),
-                "import_date":  None,
+                "import_date":  safe_date(mapped.get("import_date")),
+                "process_date": safe_date(mapped.get("process_date")),
                 "oem_status":   "OEM 가능" if normalize_oem(mapped.get("import_type")) == "OEM" else None,
             })
             inserted += 1
