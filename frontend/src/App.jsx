@@ -190,13 +190,22 @@ function downloadCSV(data, filename) {
 }
 
 // ─── 컬럼 정의 (실제 DB 필드 기준) ──────────────────────────────────────────
+// 연도별 컬럼 레이블 (base_year는 첫 데이터 행에서 읽음, 없으면 현재연도 사용)
+function yearLabel(offset, baseYear) {
+  const y = (baseYear || new Date().getFullYear()) - offset;
+  return `${y}년`;
+}
+
 const ALL_COLS = [
   { key:"category",     label:"구분",      w:90  },
   { key:"mc",           label:"MC",        w:120, isMc:true },
   { key:"sku_name",     label:"제품명",    w:240, clickable:"sku" },
   { key:"import_type",  label:"OEM/수입",  w:85  },
   { key:"importer",     label:"수입업체",  w:160 },
-  { key:"import_count", label:"수입횟수",  w:75  },
+  { key:"import_count", label:"수입횟수(전체)", w:90 },
+  { key:"count_year1",  label:"N-1년",     w:75, isYearCount:1 },
+  { key:"count_year2",  label:"N-2년",     w:75, isYearCount:2 },
+  { key:"count_year3",  label:"N-3년",     w:75, isYearCount:3 },
   { key:"factory",      label:"해외제조업소", w:220, clickable:"mfr" },
   { key:"country",      label:"제조국",    w:85  },
   { key:"email",        label:"이메일",    w:160 },
@@ -295,7 +304,10 @@ function MainDashboard({ navigate }) {
   }
 }
 
-  const cols = ALL_COLS.filter(c=>visibleCols.includes(c.key));
+  const baseYear = data[0]?.base_year || new Date().getFullYear();
+  const cols = ALL_COLS
+    .filter(c=>visibleCols.includes(c.key))
+    .map(c => c.isYearCount ? { ...c, label: yearLabel(c.isYearCount, baseYear) } : c);
 
   return (
     <div className="app">
@@ -449,6 +461,10 @@ function MainDashboard({ navigate }) {
                             ? <span className="link-cell" onClick={()=>navigate("mfr",{row,from:"main"})}>{row[c.key]}</span>
                             : c.key==="import_count"
                             ? <span className="badge b-count">{row[c.key]}</span>
+                            : c.isYearCount
+                            ? <span style={{color: row[c.key]>0?"#15803d":"#9ca3af", fontWeight: row[c.key]>0?600:400}}>
+                                {row[c.key]>0 ? row[c.key] : "-"}
+                              </span>
                             : c.isMc
                             ? <span className="badge b-mc">{row[c.key]}</span>
                             : c.key==="email"

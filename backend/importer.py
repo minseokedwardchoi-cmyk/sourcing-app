@@ -58,6 +58,12 @@ FIELD_MAP: dict[str, str] = {
     "연락처": "email",
     "email": "email",
     "Email": "email",
+
+    "수입처리일자": "process_date",
+    "처리일자": "process_date",
+    "처리 일자": "process_date",
+    "수입일자": "import_date",
+    "수입 일자": "import_date",
 }
 
 # ─── 파일 2: 헤더 없는 경우 컬럼 순서 매핑 ──────────────────────────────────
@@ -137,6 +143,19 @@ def normalize_oem(val) -> str:
         return "수입"
     s = str(val).strip()
     return "OEM" if s else "수입"
+
+
+def safe_date(val):
+    """Excel 날짜 값을 Python date로 변환"""
+    from datetime import date as date_type
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    if isinstance(val, date_type):
+        return val
+    try:
+        return pd.to_datetime(str(val)).date()
+    except Exception:
+        return None
 
 
 def safe_str(val) -> str | None:
@@ -292,18 +311,19 @@ async def import_excel(file_bytes: bytes, db: AsyncSession) -> dict:
                 skipped += 1
                 continue
             records.append({
-                "category":    safe_str(getattr(row, "category", None)),
-                "mc":          safe_str(getattr(row, "mc", None)),
-                "sku_name":    sku,
-                "importer":    normalize_importer(getattr(row, "importer", None)),
-                "import_type": normalize_oem(getattr(row, "import_type", None)),
-                "factory":     safe_str(getattr(row, "factory", None)),
+                "category":     safe_str(getattr(row, "category", None)),
+                "mc":           safe_str(getattr(row, "mc", None)),
+                "sku_name":     sku,
+                "importer":     normalize_importer(getattr(row, "importer", None)),
+                "import_type":  normalize_oem(getattr(row, "import_type", None)),
+                "factory":      safe_str(getattr(row, "factory", None)),
                 "manufacturer": normalize_name(getattr(row, "factory", None)),
-                "country":     safe_str(getattr(row, "country", None)),
-                "email":       safe_str(getattr(row, "email", None)) if hasattr(row, "email") else None,
-                "homepage":    safe_str(getattr(row, "homepage", None)) if hasattr(row, "homepage") else None,
-                "import_date": None,
-                "oem_status":  "OEM 가능" if normalize_oem(getattr(row, "import_type", None)) == "OEM" else None,
+                "country":      safe_str(getattr(row, "country", None)),
+                "email":        safe_str(getattr(row, "email", None)) if hasattr(row, "email") else None,
+                "homepage":     safe_str(getattr(row, "homepage", None)) if hasattr(row, "homepage") else None,
+                "import_date":  safe_date(getattr(row, "import_date", None)) if hasattr(row, "import_date") else None,
+                "process_date": safe_date(getattr(row, "process_date", None)) if hasattr(row, "process_date") else None,
+                "oem_status":   "OEM 가능" if normalize_oem(getattr(row, "import_type", None)) == "OEM" else None,
             })
             inserted += 1
         except Exception:

@@ -28,6 +28,10 @@ class SkuHistoryRow(BaseModel):
     country:       Optional[str] = Field(None, description="제조국")
     email:         Optional[str] = Field(None, description="대표 이메일")
     latest_import: Optional[date]= Field(None, description="최근 수입일")
+    base_year:     Optional[int] = Field(None, description="집계 기준연도")
+    count_year1:   int           = Field(0,    description="기준연도-1 수입횟수")
+    count_year2:   int           = Field(0,    description="기준연도-2 수입횟수")
+    count_year3:   int           = Field(0,    description="기준연도-3 수입횟수")
 
 
 class SkuHistoryResponse(BaseModel):

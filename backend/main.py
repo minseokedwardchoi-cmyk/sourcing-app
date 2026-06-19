@@ -106,23 +106,45 @@ async def _build_indexes_bg():
                 pass
     print("INDEX BUILD COMPLETE")
 
+_SKU_HISTORY_MV_SQL = """
+    CREATE MATERIALIZED VIEW sku_history_mv AS
+    SELECT
+        category, mc, sku_name, import_type, importer,
+        COUNT(*)                                AS import_count,
+        manufacturer, factory, country,
+        MIN(email)                              AS email,
+        MAX(import_date)                        AS latest_import,
+        EXTRACT(YEAR FROM CURRENT_DATE)::int    AS base_year,
+        COUNT(CASE WHEN EXTRACT(YEAR FROM process_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
+              THEN 1 END)::int                  AS count_year1,
+        COUNT(CASE WHEN EXTRACT(YEAR FROM process_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
+              THEN 1 END)::int                  AS count_year2,
+        COUNT(CASE WHEN EXTRACT(YEAR FROM process_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
+              THEN 1 END)::int                  AS count_year3
+    FROM import_history
+    GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+"""
+
 @app.on_event("startup")
 async def startup():
     import asyncio
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-        await conn.execute(text("""
-            CREATE MATERIALIZED VIEW IF NOT EXISTS sku_history_mv AS
-            SELECT
-                category, mc, sku_name, import_type, importer,
-                COUNT(*)            AS import_count,
-                manufacturer, factory, country,
-                MIN(email)          AS email,
-                MAX(import_date)    AS latest_import
-            FROM import_history
-            GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+
+        # MV에 연도별 컬럼이 없으면 DROP 후 재생성
+        col_check = await conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'sku_history_mv' AND column_name = 'count_year1'
         """))
+        if col_check.fetchone() is None:
+            await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_factory_mv"))
+            await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_history_mv"))
+
+        await conn.execute(text(
+            _SKU_HISTORY_MV_SQL.replace("CREATE MATERIALIZED VIEW",
+                                        "CREATE MATERIALIZED VIEW IF NOT EXISTS")
+        ))
         await conn.execute(text("""
             CREATE MATERIALIZED VIEW IF NOT EXISTS sku_factory_mv AS
             SELECT
@@ -136,7 +158,6 @@ async def startup():
             FROM import_history
             GROUP BY sku_name, factory, manufacturer, country, mc
         """))
-    # 인덱스 생성은 백그라운드에서 (헬스체크 타임아웃 방지)
     asyncio.create_task(_build_indexes_bg())
 
 
@@ -156,6 +177,12 @@ class ContactUpdateResponse(BaseModel):
 class ContactBulkUploadResponse(BaseModel):
     total_rows: int
     matched_rows: int
+    skipped: int
+    message: str
+
+class DateBulkUploadResponse(BaseModel):
+    total_rows: int
+    updated_rows: int
     skipped: int
     message: str
 
@@ -220,7 +247,8 @@ async def get_sku_history(
         SELECT
             category, mc, sku_name, import_type, importer,
             import_count, manufacturer, factory, country,
-            email, latest_import
+            email, latest_import,
+            base_year, count_year1, count_year2, count_year3
         {base_sql}
         ORDER BY {sort_by} {sort_dir} NULLS LAST, latest_import DESC
         LIMIT :limit OFFSET :offset
@@ -551,6 +579,7 @@ async def upload_excel(
     content = await file.read()
     result  = await import_excel(content, db)
     await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
+    await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
     for sql in _MV_INDEXES:
         await db.execute(text(sql))
     await db.commit()
