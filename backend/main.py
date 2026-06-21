@@ -11,7 +11,7 @@ main.py — FastAPI 앱 진입점
 from __future__ import annotations
 import os
 import math
-from typing import Optional
+from typing import Optional, List
 from fastapi import FastAPI, Depends, Query, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -199,15 +199,51 @@ def _competitor_condition(competitor: str | None) -> str:
     return f"AND ({conditions})"
 
 
+# ─── 0-1. 컬럼별 고유값 목록 ─────────────────────────────────────────────────
+@app.get("/api/column-values")
+async def get_column_values(
+    col: str = Query(..., description="컬럼명"),
+    search: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    allowed = {"category", "mc", "import_type", "importer", "country", "factory", "email", "sku_name"}
+    if col not in allowed:
+        raise HTTPException(status_code=400, detail="허용되지 않은 컬럼")
+
+    search_cond = ""
+    params: dict = {}
+    if search and search.strip():
+        search_cond = f"AND {col} ILIKE :search"
+        params["search"] = f"%{search.strip()}%"
+
+    r = await db.execute(text(f"""
+        SELECT DISTINCT {col}
+        FROM sku_history_mv
+        WHERE {col} IS NOT NULL
+        {search_cond}
+        ORDER BY {col}
+        LIMIT 300
+    """), params)
+    return [row[0] for row in r.fetchall()]
+
+
 # ─── 1. 메인 대시보드: SKU 이력 집계 ─────────────────────────────────────────
 @app.get("/api/sku-history", response_model=SkuHistoryResponse)
 async def get_sku_history(
-    search:     Optional[str] = Query(None,   description="검색 키워드"),
-    competitor: Optional[str] = Query("전체", description="경쟁사 필터"),
-    sort_by:    str           = Query("import_count", description="정렬 컬럼"),
-    sort_dir:   str           = Query("desc",          description="asc | desc"),
-    page:       int           = Query(1,    ge=1),
-    page_size:  int           = Query(50,   ge=1, le=200),
+    search:          Optional[str]       = Query(None,   description="검색 키워드"),
+    competitor:      Optional[str]       = Query("전체", description="경쟁사 필터"),
+    sort_by:         str                 = Query("import_count", description="정렬 컬럼"),
+    sort_dir:        str                 = Query("desc",          description="asc | desc"),
+    page:            int                 = Query(1,    ge=1),
+    page_size:       int                 = Query(50,   ge=1, le=200),
+    filter_category:    Optional[List[str]] = Query(None),
+    filter_mc:          Optional[List[str]] = Query(None),
+    filter_import_type: Optional[List[str]] = Query(None),
+    filter_importer:    Optional[List[str]] = Query(None),
+    filter_country:     Optional[List[str]] = Query(None),
+    filter_factory:     Optional[List[str]] = Query(None),
+    filter_email:       Optional[List[str]] = Query(None),
+    filter_sku_name:    Optional[List[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     # 정렬 컬럼 화이트리스트
@@ -236,11 +272,35 @@ async def get_sku_history(
 
     competitor_cond = _competitor_condition(competitor)
 
+    # 컬럼별 체크박스 필터
+    col_filter_map = {
+        "category":    filter_category,
+        "mc":          filter_mc,
+        "import_type": filter_import_type,
+        "importer":    filter_importer,
+        "country":     filter_country,
+        "factory":     filter_factory,
+        "email":       filter_email,
+        "sku_name":    filter_sku_name,
+    }
+    col_filter_conds = ""
+    params: dict = {
+        "limit":  page_size,
+        "offset": (page - 1) * page_size,
+    }
+    for col, values in col_filter_map.items():
+        if values:
+            in_keys = {f"cf_{col}_{i}": v for i, v in enumerate(values)}
+            in_clause = ", ".join(f":cf_{col}_{i}" for i in range(len(values)))
+            col_filter_conds += f" AND {col} IN ({in_clause})"
+            params.update(in_keys)
+
     base_sql = f"""
         FROM sku_history_mv
         WHERE 1=1
         {search_cond}
         {competitor_cond}
+        {col_filter_conds}
     """
 
     agg_sql = f"""
@@ -256,10 +316,6 @@ async def get_sku_history(
 
     count_sql = f"SELECT COUNT(*) {base_sql}"
 
-    params: dict = {
-        "limit":  page_size,
-        "offset": (page - 1) * page_size,
-    }
     if search and search.strip():
         params["search"] = f"%{search.strip()}%"
 

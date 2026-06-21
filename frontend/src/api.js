@@ -20,16 +20,40 @@ async function request(path, params = {}) {
   return res.json();
 }
 
+/** 컬럼별 고유값 목록 */
+export async function fetchColumnValues(col, search = "") {
+  const url = new URL(`${BASE_URL}/api/column-values`, window.location.origin);
+  url.searchParams.set("col", col);
+  if (search) url.searchParams.set("search", search);
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error("컬럼값 로드 실패");
+  return res.json();
+}
+
 /** 메인 대시보드: SKU 이력 집계 */
-export function fetchSkuHistory({ search, competitor, sortBy, sortDir, page, pageSize }) {
-  return request("/api/sku-history", {
-    search,
-    competitor,
-    sort_by:   sortBy,
-    sort_dir:  sortDir,
-    page,
-    page_size: pageSize,
+export async function fetchSkuHistory({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {} }) {
+  const url = new URL(`${BASE_URL}/api/sku-history`, window.location.origin);
+  const params = { search, competitor, sort_by: sortBy, sort_dir: sortDir, page, page_size: pageSize };
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== null && v !== undefined && v !== "") url.searchParams.set(k, String(v));
   });
+  // 컬럼별 체크박스 필터 (multi-value)
+  const colMap = {
+    category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
+    importer: "filter_importer", country: "filter_country", factory: "filter_factory",
+    email: "filter_email", sku_name: "filter_sku_name",
+  };
+  Object.entries(colFilters).forEach(([col, values]) => {
+    if (values && values.length > 0 && colMap[col]) {
+      values.forEach(v => url.searchParams.append(colMap[col], v));
+    }
+  });
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "API 오류");
+  }
+  return res.json();
 }
 
 /** SKU 취급 제조사 목록 */
