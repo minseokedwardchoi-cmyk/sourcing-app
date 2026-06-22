@@ -382,7 +382,7 @@ async def get_sku_history_monthly(
     rows_r = await db.execute(text(f"""
         WITH months AS (
             SELECT generate_series(
-                date_trunc('month', :min_date::date),
+                date_trunc('month', CAST(:min_date AS date)),
                 date_trunc('month', CURRENT_DATE),
                 interval '1 month'
             ) AS m
