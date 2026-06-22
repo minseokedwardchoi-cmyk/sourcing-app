@@ -151,7 +151,7 @@ const styles = `
   @keyframes monthlySlide { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }
   .monthly-table { border-collapse: collapse; font-size:12px; }
   .monthly-table td { padding:5px 10px; border:1px solid #e8eaed; text-align:center; white-space:nowrap; background:#fff; }
-  .monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; }
+  .monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; width:70px; max-width:70px; }
   .date-range-wrap { display:flex; align-items:center; gap:5px; }
   .date-range-input { padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; background:#f9fafb; color:#1a1a2e; outline:none; }
   .date-range-input:focus { border-color:#16a34a; background:#fff; }
@@ -728,7 +728,7 @@ function MainDashboard({ navigate }) {
                                   <table className="monthly-table" style={{marginBottom:8}}>
                                     <tbody>
                                       <tr>
-                                        <td className="monthly-table-label">연도별</td>
+                                        <td className="monthly-table-label">년도</td>
                                         {yearlyData.map(y=><td key={y.year}>{y.year}</td>)}
                                       </tr>
                                       <tr>
