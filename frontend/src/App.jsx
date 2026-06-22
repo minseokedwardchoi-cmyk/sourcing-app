@@ -152,6 +152,12 @@ const styles = `
   .monthly-table { border-collapse: collapse; font-size:12px; }
   .monthly-table td { padding:5px 10px; border:1px solid #e8eaed; text-align:center; white-space:nowrap; background:#fff; }
   .monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; }
+  .date-range-wrap { display:flex; align-items:center; gap:5px; }
+  .date-range-input { padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; background:#f9fafb; color:#1a1a2e; outline:none; }
+  .date-range-input:focus { border-color:#16a34a; background:#fff; }
+  .date-range-sep { font-size:12px; color:#9ca3af; }
+  .date-range-clear { border:none; background:#f3f4f6; color:#6b7280; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:11px; line-height:1; }
+  .date-range-clear:hover { background:#e5e7eb; color:#374151; }
   .hero { background: #f0fdf4; border-bottom: 1px solid #bbf7d0; padding: 32px 0 28px; }
   .hero-inner { max-width: 1400px; margin: 0 auto; padding: 0 32px; }
   .hero-title { font-size: 32px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; margin-bottom: 8px; }
@@ -389,6 +395,8 @@ function MainDashboard({ navigate }) {
   const [error,       setError]       = useState(null);
   const [search,      setSearch]      = useState("");
   const [debSearch,   setDebSearch]   = useState("");
+  const [dateFrom,    setDateFrom]    = useState("");
+  const [dateTo,      setDateTo]      = useState("");
   const [competitor,  setCompetitor]  = useState("전체");
   const [sortBy,      setSortBy]      = useState("import_count");
   const [sortDir,     setSortDir]     = useState("desc");
@@ -424,15 +432,18 @@ function MainDashboard({ navigate }) {
   // 검색 디바운스 500ms
   useEffect(()=>{ const t=setTimeout(()=>{setDebSearch(search);setPage(1);},500); return()=>clearTimeout(t); },[search]);
 
+  // 기간 필터 변경 시 1페이지로
+  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+
   // 데이터
   useEffect(()=>{
     setLoading(true); setError(null);
     setExpandedRow(null);
-    fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50,colFilters})
+    fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50,colFilters,dateFrom,dateTo})
       .then(r=>{setData(r.data);setMeta(r.meta);})
       .catch(e=>setError(e.message))
       .finally(()=>setLoading(false));
-  },[debSearch,competitor,sortBy,sortDir,page,colFilters]);
+  },[debSearch,competitor,sortBy,sortDir,page,colFilters,dateFrom,dateTo]);
 
   useEffect(()=>{
     const h=e=>{if(colMenuRef.current&&!colMenuRef.current.contains(e.target))setShowColMenu(false);};
@@ -604,6 +615,14 @@ function MainDashboard({ navigate }) {
             <div className="search-wrap">
               <span className="search-icon">🔍</span>
               <input placeholder="제품명, 해외제조업소, MC, 수입업체, 제조국 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+            </div>
+            <div className="date-range-wrap">
+              <input type="date" className="date-range-input" value={dateFrom} max={dateTo||undefined} onChange={e=>setDateFrom(e.target.value)}/>
+              <span className="date-range-sep">~</span>
+              <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
+              {(dateFrom||dateTo) && (
+                <button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>
+              )}
             </div>
             <span className="count-label">{meta?`총 ${meta.total.toLocaleString()}건 중 표시`:""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(data,"sku_history.csv")}>⬇ CSV</button>
