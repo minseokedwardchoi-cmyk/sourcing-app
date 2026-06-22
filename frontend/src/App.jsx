@@ -150,8 +150,8 @@ const styles = `
   .monthly-panel { padding:10px 14px; overflow-x:auto; animation: monthlySlide .15s ease-out; }
   @keyframes monthlySlide { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }
   .monthly-table { border-collapse: collapse; font-size:12px; }
-  .monthly-table td { padding:5px 10px; border:1px solid #e8eaed; text-align:center; white-space:nowrap; background:#fff; }
-  .monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; width:70px; max-width:70px; }
+  .monthly-table td { padding:5px 10px; border:1px solid #e8eaed; text-align:center; white-space:nowrap; background:#fff; width:54px; max-width:54px; }
+  .monthly-table td.monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; width:70px; max-width:70px; }
   .date-range-wrap { display:flex; align-items:center; gap:5px; }
   .date-range-input { padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; background:#f9fafb; color:#1a1a2e; outline:none; }
   .date-range-input:focus { border-color:#16a34a; background:#fff; }
