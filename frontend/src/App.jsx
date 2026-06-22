@@ -661,7 +661,7 @@ function MainDashboard({ navigate }) {
           {error&&<div className="error-box">오류: {error}</div>}
 
           {/* 테이블 */}
-          <div className="table-wrap">
+          <div className="table-wrap" style={{overflowX:"visible"}}>
             <table>
               <thead style={{position:"sticky", top:stickyHeaderHeight, zIndex:30}}>
                 <tr>
