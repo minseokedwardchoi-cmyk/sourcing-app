@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import {
   fetchSkuHistory, fetchSkuFactories,
   fetchManufacturerDetail, uploadExcel,
@@ -43,6 +43,7 @@ const styles = `
   .sku-field-value { font-size: 13px; font-weight: 500; }
   .card { background: #fff; border: 1px solid #e8eaed; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
   .card-header { padding: 11px 16px; border-bottom: 1px solid #e8eaed; display: flex; align-items: center; justify-content: space-between; }
+  .sticky-panel-header { position: sticky; top: 0; z-index: 35; background: #fff; }
   .card-title { font-size: 13px; font-weight: 600; }
   .card-body { padding: 14px 16px; }
   .toolbar { padding: 9px 14px; border-bottom: 1px solid #e8eaed; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -377,9 +378,6 @@ const ALL_COLS = [
   { key:"import_type",  label:"OEM/수입",       w:85,  filterKey:"import_type"             },
   { key:"importer",     label:"수입업체",       w:160, filterKey:"importer"                },
   { key:"import_count", label:"수입횟수(전체)", w:90,  isNumeric:true                      },
-  { key:"count_year1",  label:"N-1년",          w:75,  isYearCount:1, isNumeric:true       },
-  { key:"count_year2",  label:"N-2년",          w:75,  isYearCount:2, isNumeric:true       },
-  { key:"count_year3",  label:"N-3년",          w:75,  isYearCount:3, isNumeric:true       },
   { key:"factory",      label:"해외제조업소",   w:220, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:85,  filterKey:"country"                 },
   { key:"email",        label:"이메일",         w:160, filterKey:"email"                   },
@@ -431,6 +429,19 @@ function MainDashboard({ navigate }) {
       setMonthlyLoading(false);
     }
   }, [expandedRow]);
+
+  // 헤더(타이틀+업로드+경쟁사카드+툴바) 고정 시, 그 아래 테이블 헤더가 가려지지 않도록 높이 추적
+  const stickyHeaderRef = useRef(null);
+  const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = stickyHeaderRef.current;
+    if (!el) return;
+    const update = () => setStickyHeaderHeight(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [showColMenu]);
 
   // 검색 디바운스 500ms
   useEffect(()=>{ const t=setTimeout(()=>{setDebSearch(search);setPage(1);},500); return()=>clearTimeout(t); },[search]);
@@ -548,6 +559,7 @@ function MainDashboard({ navigate }) {
         )}
 
         <div className="card">
+          <div className="sticky-panel-header" ref={stickyHeaderRef}>
           <div className="card-header">
             <span className="card-title">수입/OEM SKU 이력</span>
             <div style={{display:"flex",gap:8}}>
@@ -644,13 +656,14 @@ function MainDashboard({ navigate }) {
               )}
             </div>
           </div>
+          </div>
 
           {error&&<div className="error-box">오류: {error}</div>}
 
           {/* 테이블 */}
           <div className="table-wrap">
             <table>
-              <thead>
+              <thead style={{position:"sticky", top:stickyHeaderHeight, zIndex:30}}>
                 <tr>
                   {cols.map(c=>(
                     <th key={c.key} style={{minWidth:c.w, position:"relative"}}>
