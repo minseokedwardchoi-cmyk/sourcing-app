@@ -660,10 +660,10 @@ function MainDashboard({ navigate }) {
 
           {error&&<div className="error-box">오류: {error}</div>}
 
-          {/* 테이블 */}
-          <div className="table-wrap" style={{overflowX:"visible"}}>
+          {/* 테이블: 패널 헤더 아래 영역에서 자체적으로 상하/좌우 스크롤 */}
+          <div className="table-wrap" style={{overflow:"auto", maxHeight:`calc(100vh - ${stickyHeaderHeight}px - 16px)`}}>
             <table>
-              <thead style={{position:"sticky", top:stickyHeaderHeight, zIndex:30}}>
+              <thead style={{position:"sticky", top:0, zIndex:30}}>
                 <tr>
                   {cols.map(c=>(
                     <th key={c.key} style={{minWidth:c.w, position:"relative"}}>
