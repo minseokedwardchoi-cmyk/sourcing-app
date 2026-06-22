@@ -373,7 +373,7 @@ async def get_sku_history_monthly(
     match_sql = " AND ".join(match_conds)
 
     bounds_r = await db.execute(text(f"""
-        SELECT MIN(process_date) FROM import_history WHERE {match_sql}
+        SELECT MIN(COALESCE(import_date, process_date)) FROM import_history WHERE {match_sql}
     """), params)
     min_date = bounds_r.scalar()
     if min_date is None:
@@ -388,7 +388,7 @@ async def get_sku_history_monthly(
             ) AS m
         ),
         counts AS (
-            SELECT date_trunc('month', process_date) AS m, COUNT(*) AS cnt
+            SELECT date_trunc('month', COALESCE(import_date, process_date)) AS m, COUNT(*) AS cnt
             FROM import_history
             WHERE {match_sql}
             GROUP BY 1
