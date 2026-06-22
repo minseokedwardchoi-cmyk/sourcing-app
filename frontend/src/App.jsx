@@ -41,9 +41,9 @@ const styles = `
   .sku-card { background: #fff; border: 1px solid #e8eaed; border-radius: 8px; padding: 12px 18px; margin-bottom: 14px; display: flex; gap: 28px; flex-wrap: wrap; }
   .sku-field-label { font-size: 10px; color: #6b7280; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.4px; }
   .sku-field-value { font-size: 13px; font-weight: 500; }
-  .card { background: #fff; border: 1px solid #e8eaed; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .card { background: #fff; border: 1px solid #e8eaed; border-radius: 8px; margin-bottom: 12px; }
   .card-header { padding: 11px 16px; border-bottom: 1px solid #e8eaed; display: flex; align-items: center; justify-content: space-between; }
-  .sticky-panel-header { position: sticky; top: 0; z-index: 35; background: #fff; }
+  .sticky-panel-header { position: sticky; top: 0; z-index: 35; background: #fff; border-radius: 8px 8px 0 0; }
   .card-title { font-size: 13px; font-weight: 600; }
   .card-body { padding: 14px 16px; }
   .toolbar { padding: 9px 14px; border-bottom: 1px solid #e8eaed; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
