@@ -237,6 +237,8 @@ async def get_sku_history(
     sort_dir:        str                 = Query("desc",          description="asc | desc"),
     page:            int                 = Query(1,    ge=1),
     page_size:       int                 = Query(50,   ge=1, le=200),
+    date_from:       Optional[str]       = Query(None, description="조회 시작일 (YYYY-MM-DD)"),
+    date_to:         Optional[str]       = Query(None, description="조회 종료일 (YYYY-MM-DD)"),
     filter_category:    Optional[List[str]] = Query(None),
     filter_mc:          Optional[List[str]] = Query(None),
     filter_import_type: Optional[List[str]] = Query(None),
@@ -296,13 +298,46 @@ async def get_sku_history(
             col_filter_conds += f" AND {col} IN ({in_clause})"
             params.update(in_keys)
 
-    base_sql = f"""
-        FROM sku_history_mv
-        WHERE 1=1
-        {search_cond}
-        {competitor_cond}
-        {col_filter_conds}
-    """
+    if search and search.strip():
+        params["search"] = f"%{search.strip()}%"
+
+    if date_from or date_to:
+        # 기간 필터가 있으면 MV 대신 import_history를 즉시 기간으로 집계
+        # (수입횟수/연도별 카운트 모두 선택한 기간 기준으로 재계산됨)
+        params["date_from"] = date_from or "1900-01-01"
+        params["date_to"]   = date_to   or "9999-12-31"
+        base_sql = f"""
+            FROM (
+                SELECT
+                    category, mc, sku_name, import_type, importer,
+                    COUNT(*)                                AS import_count,
+                    manufacturer, factory, country,
+                    MIN(email)                              AS email,
+                    MAX(import_date)                        AS latest_import,
+                    EXTRACT(YEAR FROM CURRENT_DATE)::int    AS base_year,
+                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
+                          THEN 1 END)::int                  AS count_year1,
+                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
+                          THEN 1 END)::int                  AS count_year2,
+                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
+                          THEN 1 END)::int                  AS count_year3
+                FROM import_history
+                WHERE COALESCE(import_date, process_date) BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
+                GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+            ) sub
+            WHERE 1=1
+            {search_cond}
+            {competitor_cond}
+            {col_filter_conds}
+        """
+    else:
+        base_sql = f"""
+            FROM sku_history_mv
+            WHERE 1=1
+            {search_cond}
+            {competitor_cond}
+            {col_filter_conds}
+        """
 
     agg_sql = f"""
         SELECT
@@ -317,11 +352,9 @@ async def get_sku_history(
 
     count_sql = f"SELECT COUNT(*) {base_sql}"
 
-    if search and search.strip():
-        params["search"] = f"%{search.strip()}%"
-
     rows_result  = await db.execute(text(agg_sql),  params)
     count_result = await db.execute(text(count_sql), params)
+
 
     rows  = rows_result.mappings().all()
     total = count_result.scalar() or 0

@@ -31,9 +31,9 @@ export async function fetchColumnValues(col, search = "") {
 }
 
 /** 메인 대시보드: SKU 이력 집계 */
-export async function fetchSkuHistory({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {} }) {
+export async function fetchSkuHistory({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {}, dateFrom, dateTo }) {
   const url = new URL(`${BASE_URL}/api/sku-history`, window.location.origin);
-  const params = { search, competitor, sort_by: sortBy, sort_dir: sortDir, page, page_size: pageSize };
+  const params = { search, competitor, sort_by: sortBy, sort_dir: sortDir, page, page_size: pageSize, date_from: dateFrom, date_to: dateTo };
   Object.entries(params).forEach(([k, v]) => {
     if (v !== null && v !== undefined && v !== "") url.searchParams.set(k, String(v));
   });
