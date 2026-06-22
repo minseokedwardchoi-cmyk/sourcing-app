@@ -401,6 +401,7 @@ function MainDashboard({ navigate }) {
   const [expandedRow,   setExpandedRow]   = useState(null);   // 펼쳐진 행 인덱스
   const [monthlyData,   setMonthlyData]   = useState([]);
   const [monthlyLoading, setMonthlyLoading] = useState(false);
+  const [monthlyError,  setMonthlyError]  = useState(null);
   const colMenuRef = useRef(null);
   const fileRef    = useRef(null);
 
@@ -408,11 +409,13 @@ function MainDashboard({ navigate }) {
     if (expandedRow === i) { setExpandedRow(null); return; }
     setExpandedRow(i);
     setMonthlyLoading(true);
+    setMonthlyError(null);
     try {
       const res = await fetchMonthlyImportCounts(row);
       setMonthlyData(res.data || []);
-    } catch {
+    } catch (e) {
       setMonthlyData([]);
+      setMonthlyError(e.message || "조회 실패");
     } finally {
       setMonthlyLoading(false);
     }
@@ -694,6 +697,8 @@ function MainDashboard({ navigate }) {
                           <div className="monthly-panel">
                             {monthlyLoading
                               ? <div style={{padding:"10px",fontSize:12,color:"#9ca3af"}}>로딩 중...</div>
+                              : monthlyError
+                              ? <div style={{padding:"10px",fontSize:12,color:"#b91c1c"}}>오류: {monthlyError}</div>
                               : monthlyData.length===0
                               ? <div style={{padding:"10px",fontSize:12,color:"#9ca3af"}}>이력 없음</div>
                               : (
