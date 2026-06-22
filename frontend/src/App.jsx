@@ -124,7 +124,7 @@ const styles = `
   .col-item:hover { background: #f3f4f6; }
   .th-inner { display:flex; align-items:center; justify-content:space-between; gap:2px; }
   .th-label { white-space:nowrap; flex:1; }
-  .filter-icon-btn { background:none; border:none; cursor:pointer; padding:2px 4px; border-radius:2px; font-size:13px; color:#9ca3af; line-height:1; flex-shrink:0; }
+  .filter-icon-btn { background:none; border:none; cursor:pointer; padding:2px 4px; border-radius:2px; font-size:26px; color:#9ca3af; line-height:1; flex-shrink:0; }
   .filter-icon-btn:hover { background:#e5e7eb; color:#374151; }
   .filter-icon-btn.active { color:#16a34a; background:#dcfce7; }
   .filter-dropdown { position:absolute; top:calc(100% + 2px); left:0; z-index:200; background:#fff; border:1px solid #bdc3c7; border-radius:4px; box-shadow:0 4px 16px rgba(0,0,0,.18); min-width:220px; max-width:300px; }
