@@ -122,23 +122,30 @@ const styles = `
   .col-dropdown { position: absolute; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 6px; z-index: 100; min-width: 150px; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
   .col-item { display: flex; align-items: center; gap: 7px; padding: 4px 8px; cursor: pointer; border-radius: 4px; font-size: 12px; }
   .col-item:hover { background: #f3f4f6; }
-  .th-inner { display:flex; align-items:center; gap:3px; }
-  .th-label { cursor:pointer; flex:1; white-space:nowrap; }
-  .filter-icon-btn { background:none; border:none; cursor:pointer; padding:1px 3px; border-radius:3px; font-size:10px; color:#9ca3af; line-height:1; }
-  .filter-icon-btn:hover { background:#f3f4f6; color:#374151; }
-  .filter-icon-btn.active { color:#16a34a; }
-  .filter-dropdown { position:absolute; top:calc(100% + 2px); left:0; z-index:200; background:#fff; border:1px solid #d1d5db; border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.12); min-width:200px; max-width:280px; }
-  .filter-search { width:100%; padding:5px 8px; border:1px solid #d1d5db; border-radius:5px; font-size:12px; outline:none; }
+  .th-inner { display:flex; align-items:center; justify-content:space-between; gap:2px; }
+  .th-label { white-space:nowrap; flex:1; }
+  .filter-icon-btn { background:none; border:none; cursor:pointer; padding:2px 4px; border-radius:2px; font-size:9px; color:#9ca3af; line-height:1; flex-shrink:0; }
+  .filter-icon-btn:hover { background:#e5e7eb; color:#374151; }
+  .filter-icon-btn.active { color:#16a34a; background:#dcfce7; }
+  .filter-dropdown { position:absolute; top:calc(100% + 2px); left:0; z-index:200; background:#fff; border:1px solid #bdc3c7; border-radius:4px; box-shadow:0 4px 16px rgba(0,0,0,.18); min-width:220px; max-width:300px; }
+  .filter-sort-section { padding:4px 0; border-bottom:1px solid #e8eaed; }
+  .filter-sort-btn { display:flex; align-items:center; gap:8px; width:100%; background:none; border:none; cursor:pointer; padding:6px 12px; font-size:12px; color:#1a1a2e; text-align:left; }
+  .filter-sort-btn:hover { background:#f0f0f0; }
+  .filter-sort-icon { font-size:11px; color:#6b7280; }
+  .filter-divider { height:1px; background:#e8eaed; margin:2px 0; }
+  .filter-search-section { padding:6px 8px; border-bottom:1px solid #e8eaed; }
+  .filter-search { width:100%; padding:5px 8px; border:1px solid #bdc3c7; border-radius:3px; font-size:12px; outline:none; }
   .filter-search:focus { border-color:#16a34a; }
-  .filter-list { max-height:220px; overflow-y:auto; padding:4px 0; }
-  .filter-item { display:flex; align-items:center; gap:7px; padding:4px 10px; cursor:pointer; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .filter-item:hover { background:#f3f4f6; }
-  .filter-item input[type=checkbox] { flex-shrink:0; cursor:pointer; }
-  .filter-actions { display:flex; gap:6px; padding:7px 10px; border-top:1px solid #e8eaed; justify-content:flex-end; }
-  .filter-apply-btn { padding:4px 12px; background:#16a34a; color:#fff; border:none; border-radius:5px; font-size:12px; cursor:pointer; }
-  .filter-apply-btn:hover { background:#15803d; }
-  .filter-clear-btn { padding:4px 10px; background:#f3f4f6; color:#374151; border:1px solid #d1d5db; border-radius:5px; font-size:12px; cursor:pointer; }
-  .filter-clear-btn:hover { background:#e5e7eb; }
+  .filter-list { max-height:200px; overflow-y:auto; padding:2px 0; }
+  .filter-item { display:flex; align-items:center; gap:7px; padding:4px 12px; cursor:pointer; font-size:12px; }
+  .filter-item:hover { background:#f0f0f0; }
+  .filter-item input[type=checkbox] { flex-shrink:0; cursor:pointer; accent-color:#16a34a; }
+  .filter-item span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .filter-actions { display:flex; gap:6px; padding:7px 10px; border-top:1px solid #e8eaed; justify-content:flex-end; background:#f9fafb; border-radius:0 0 4px 4px; }
+  .filter-ok-btn { padding:4px 16px; background:#16a34a; color:#fff; border:none; border-radius:3px; font-size:12px; cursor:pointer; font-weight:500; }
+  .filter-ok-btn:hover { background:#15803d; }
+  .filter-cancel-btn { padding:4px 12px; background:#fff; color:#374151; border:1px solid #d1d5db; border-radius:3px; font-size:12px; cursor:pointer; }
+  .filter-cancel-btn:hover { background:#f3f4f6; }
   .hero { background: #f0fdf4; border-bottom: 1px solid #bbf7d0; padding: 32px 0 28px; }
   .hero-inner { max-width: 1400px; margin: 0 auto; padding: 0 32px; }
   .hero-title { font-size: 32px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; margin-bottom: 8px; }
@@ -159,25 +166,28 @@ const styles = `
   .comp-card-label { font-size: 10px; opacity: .7; margin-top: -2px; }
 `;
 
-// ─── 컬럼 필터 컴포넌트 ──────────────────────────────────────────────────────
-function ColumnFilter({ colKey, activeValues, onApply }) {
-  const [open, setOpen]       = useState(false);
-  const [values, setValues]   = useState([]);
-  const [search, setSearch]   = useState("");
+// ─── 컬럼 필터 컴포넌트 (엑셀 스타일) ───────────────────────────────────────
+function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSortDir, onApply, onSort }) {
+  const [open, setOpen]         = useState(false);
+  const [values, setValues]     = useState([]);
+  const [search, setSearch]     = useState("");
   const [selected, setSelected] = useState(new Set(activeValues || []));
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]   = useState(false);
   const ref = useRef(null);
 
+  // 드롭다운 열릴 때 값 로드
   useEffect(() => {
-    if (!open) return;
+    if (!open || !colKey) return;
     setLoading(true);
     fetchColumnValues(colKey).then(setValues).finally(() => setLoading(false));
   }, [open, colKey]);
 
+  // 드롭다운 닫힐 때 선택값 원래대로 복원 (취소 효과)
   useEffect(() => {
-    if (!open) setSelected(new Set(activeValues || []));
+    if (!open) { setSelected(new Set(activeValues || [])); setSearch(""); }
   }, [open, activeValues]);
 
+  // 외부 클릭 시 닫기
   useEffect(() => {
     const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", h);
@@ -197,56 +207,96 @@ function ColumnFilter({ colKey, activeValues, onApply }) {
   }
 
   function toggle(v) {
-    setSelected(prev => {
-      const s = new Set(prev); s.has(v) ? s.delete(v) : s.add(v); return s;
-    });
+    setSelected(prev => { const s = new Set(prev); s.has(v) ? s.delete(v) : s.add(v); return s; });
   }
 
-  function apply() {
+  function handleSort(dir) {
+    onSort(dir);
+    setOpen(false);
+  }
+
+  function handleOk() {
     const sel = [...selected];
     onApply(sel.length === 0 || sel.length === values.length ? null : sel);
     setOpen(false);
-    setSearch("");
   }
 
-  function clear() {
-    setSelected(new Set());
-    onApply(null);
-    setOpen(false);
-    setSearch("");
+  function handleCancel() {
+    setOpen(false); // 선택값 복원은 위 useEffect에서 처리
   }
 
-  const isActive = activeValues && activeValues.length > 0;
+  const isActive = (activeValues && activeValues.length > 0) || activeSortCol;
+  const sortAscLabel  = isNumeric ? "숫자 오름차순 정렬" : "텍스트 오름차순 정렬 (ㄱ→ㅎ)";
+  const sortDescLabel = isNumeric ? "숫자 내림차순 정렬" : "텍스트 내림차순 정렬 (ㅎ→ㄱ)";
+  const sortAscIcon   = isNumeric ? "1→9" : "ㄱ→ㅎ";
+  const sortDescIcon  = isNumeric ? "9→1" : "ㅎ→ㄱ";
 
   return (
     <div ref={ref} style={{ position:"relative", display:"inline-block" }} onClick={e => e.stopPropagation()}>
-      <button className={`filter-icon-btn${isActive?" active":""}`} onClick={() => setOpen(v => !v)} title={isActive ? `${activeValues.length}개 선택됨` : "필터"}>
-        {isActive ? "▼" : "▽"}
-      </button>
+      <button
+        className={`filter-icon-btn${isActive ? " active" : ""}`}
+        onClick={() => setOpen(v => !v)}
+        title="필터"
+      >▾</button>
+
       {open && (
         <div className="filter-dropdown">
-          <div style={{ padding:"6px 8px", borderBottom:"1px solid #e8eaed" }}>
-            <input className="filter-search" placeholder="검색..." value={search} onChange={e => setSearch(e.target.value)} autoFocus />
+          {/* 정렬 섹션 */}
+          <div className="filter-sort-section">
+            <button className="filter-sort-btn" onClick={() => handleSort("asc")}>
+              <span className="filter-sort-icon">{sortAscIcon}</span>
+              {sortAscLabel}
+              {activeSortCol && activeSortDir === "asc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
+            </button>
+            <button className="filter-sort-btn" onClick={() => handleSort("desc")}>
+              <span className="filter-sort-icon">{sortDescIcon}</span>
+              {sortDescLabel}
+              {activeSortCol && activeSortDir === "desc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
+            </button>
           </div>
-          <div className="filter-list">
-            {loading ? <div style={{ padding:"10px", fontSize:12, color:"#9ca3af", textAlign:"center" }}>로딩 중...</div> : <>
-              <label className="filter-item">
-                <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-                <span style={{ fontWeight:600 }}>(전체 선택)</span>
-              </label>
-              {filtered.map((v, i) => (
-                <label key={i} className="filter-item">
-                  <input type="checkbox" checked={selected.has(String(v))} onChange={() => toggle(String(v))} />
-                  <span title={String(v)}>{v || "(비어있음)"}</span>
-                </label>
-              ))}
-              {filtered.length === 0 && <div style={{ padding:"8px 10px", fontSize:12, color:"#9ca3af" }}>결과 없음</div>}
-            </>}
-          </div>
-          <div className="filter-actions">
-            <button className="filter-clear-btn" onClick={clear}>초기화</button>
-            <button className="filter-apply-btn" onClick={apply}>확인</button>
-          </div>
+
+          {/* 검색 + 체크박스 (텍스트 컬럼만) */}
+          {colKey && (
+            <>
+              <div className="filter-search-section">
+                <input
+                  className="filter-search"
+                  placeholder="검색..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+              </div>
+              <div className="filter-list">
+                {loading
+                  ? <div style={{ padding:"10px", fontSize:12, color:"#9ca3af", textAlign:"center" }}>로딩 중...</div>
+                  : <>
+                    <label className="filter-item">
+                      <input type="checkbox" checked={allSelected} onChange={toggleAll} />
+                      <span style={{ fontWeight:600 }}>(모두 선택)</span>
+                    </label>
+                    {filtered.map((v, i) => (
+                      <label key={i} className="filter-item">
+                        <input type="checkbox" checked={selected.has(String(v))} onChange={() => toggle(String(v))} />
+                        <span title={String(v)}>{v || "(비어있음)"}</span>
+                      </label>
+                    ))}
+                    {filtered.length === 0 && <div style={{ padding:"8px 12px", fontSize:12, color:"#9ca3af" }}>결과 없음</div>}
+                  </>
+                }
+              </div>
+              <div className="filter-actions">
+                <button className="filter-cancel-btn" onClick={handleCancel}>취소</button>
+                <button className="filter-ok-btn" onClick={handleOk}>확인</button>
+              </div>
+            </>
+          )}
+
+          {/* 숫자 컬럼은 정렬만 */}
+          {!colKey && (
+            <div style={{ padding:"6px 10px 8px", borderTop:"1px solid #e8eaed" }}>
+              <button className="filter-cancel-btn" style={{width:"100%"}} onClick={handleCancel}>닫기</button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -309,18 +359,18 @@ function yearLabel(offset, baseYear) {
 }
 
 const ALL_COLS = [
-  { key:"category",     label:"구분",          w:90,  filterKey:"category"    },
-  { key:"mc",           label:"MC",            w:120, filterKey:"mc",      isMc:true },
-  { key:"sku_name",     label:"제품명",        w:240, filterKey:"sku_name", clickable:"sku" },
-  { key:"import_type",  label:"OEM/수입",      w:85,  filterKey:"import_type" },
-  { key:"importer",     label:"수입업체",      w:160, filterKey:"importer"    },
-  { key:"import_count", label:"수입횟수(전체)", w:90  },
-  { key:"count_year1",  label:"N-1년",         w:75,  isYearCount:1 },
-  { key:"count_year2",  label:"N-2년",         w:75,  isYearCount:2 },
-  { key:"count_year3",  label:"N-3년",         w:75,  isYearCount:3 },
-  { key:"factory",      label:"해외제조업소",  w:220, filterKey:"factory",  clickable:"mfr" },
-  { key:"country",      label:"제조국",        w:85,  filterKey:"country"     },
-  { key:"email",        label:"이메일",        w:160, filterKey:"email"       },
+  { key:"category",     label:"구분",           w:90,  filterKey:"category"               },
+  { key:"mc",           label:"MC",             w:120, filterKey:"mc",      isMc:true      },
+  { key:"sku_name",     label:"제품명",         w:240, filterKey:"sku_name", clickable:"sku" },
+  { key:"import_type",  label:"OEM/수입",       w:85,  filterKey:"import_type"             },
+  { key:"importer",     label:"수입업체",       w:160, filterKey:"importer"                },
+  { key:"import_count", label:"수입횟수(전체)", w:90,  isNumeric:true                      },
+  { key:"count_year1",  label:"N-1년",          w:75,  isYearCount:1, isNumeric:true       },
+  { key:"count_year2",  label:"N-2년",          w:75,  isYearCount:2, isNumeric:true       },
+  { key:"count_year3",  label:"N-3년",          w:75,  isYearCount:3, isNumeric:true       },
+  { key:"factory",      label:"해외제조업소",   w:220, filterKey:"factory", clickable:"mfr" },
+  { key:"country",      label:"제조국",         w:85,  filterKey:"country"                 },
+  { key:"email",        label:"이메일",         w:160, filterKey:"email"                   },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -554,21 +604,23 @@ function MainDashboard({ navigate }) {
               <thead>
                 <tr>
                   {cols.map(c=>(
-                    <th key={c.key} className={sortBy===c.key?"sorted":""} style={{minWidth:c.w, position:"relative"}}>
+                    <th key={c.key} style={{minWidth:c.w, position:"relative"}}>
                       <div className="th-inner">
-                        <span className="th-label" onClick={()=>handleSort(c.key)}>
-                          {c.label}<SortIcon col={c.key} sortCol={sortBy} sortDir={sortDir}/>
-                        </span>
-                        {c.filterKey && (
-                          <ColumnFilter
-                            colKey={c.filterKey}
-                            activeValues={colFilters[c.filterKey] || null}
-                            onApply={vals => {
+                        <span className="th-label">{c.label}</span>
+                        <ColumnFilter
+                          colKey={c.filterKey || null}
+                          isNumeric={!!c.isNumeric}
+                          activeValues={c.filterKey ? (colFilters[c.filterKey] || null) : null}
+                          activeSortCol={sortBy === c.key}
+                          activeSortDir={sortDir}
+                          onSort={dir => { setSortBy(c.key); setSortDir(dir); setPage(1); }}
+                          onApply={vals => {
+                            if (c.filterKey) {
                               setColFilters(prev => ({ ...prev, [c.filterKey]: vals }));
                               setPage(1);
-                            }}
-                          />
-                        )}
+                            }
+                          }}
+                        />
                       </div>
                     </th>
                   ))}
