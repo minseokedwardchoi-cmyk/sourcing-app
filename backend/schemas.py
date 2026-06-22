@@ -39,6 +39,16 @@ class SkuHistoryResponse(BaseModel):
     meta: PaginationMeta
 
 
+# ─── SKU 이력: 월별 수입횟수 ─────────────────────────────────────────────────
+class MonthlyImportCount(BaseModel):
+    month: str = Field(..., description="년/월 (YY/MM)")
+    count: int = Field(..., description="해당 월 수입횟수")
+
+
+class MonthlyImportCountResponse(BaseModel):
+    data: list[MonthlyImportCount]
+
+
 # ─── SKU 취급 제조사 페이지 ───────────────────────────────────────────────────
 class SkuInfo(BaseModel):
     sku_name:    str

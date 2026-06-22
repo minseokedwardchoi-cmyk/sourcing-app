@@ -26,6 +26,7 @@ from schemas import (
     SkuFactoriesResponse, SkuInfo, FactoryRow,
     ManufacturerDetailResponse, ManufacturerDetail, ManufacturerSkuRow,
     UploadResponse,
+    MonthlyImportCountResponse, MonthlyImportCount,
 )
 from importer import import_excel, COMPETITOR_MAP
 from contact_importer import import_contacts
@@ -334,6 +335,73 @@ async def get_sku_history(
             total_pages=max(1, math.ceil(total / page_size)),
         ),
     )
+
+# ─── 1-1. 행(그룹)별 월별 수입횟수 ────────────────────────────────────────────
+_MONTHLY_GROUP_COLS = [
+    "category", "mc", "sku_name", "import_type",
+    "importer", "manufacturer", "factory", "country",
+]
+
+@app.get("/api/sku-history/monthly", response_model=MonthlyImportCountResponse)
+async def get_sku_history_monthly(
+    category:     Optional[str] = Query(None),
+    mc:            Optional[str] = Query(None),
+    sku_name:      Optional[str] = Query(None),
+    import_type:   Optional[str] = Query(None),
+    importer:      Optional[str] = Query(None),
+    manufacturer:  Optional[str] = Query(None),
+    factory:       Optional[str] = Query(None),
+    country:       Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """테이블의 한 행(= 모든 컬럼 값이 동일한 그룹)에 대해,
+    첫 수입 기록 시점부터 현재까지 월별 수입횟수를 반환."""
+    values = {
+        "category": category, "mc": mc, "sku_name": sku_name,
+        "import_type": import_type, "importer": importer,
+        "manufacturer": manufacturer, "factory": factory, "country": country,
+    }
+    match_conds = []
+    params: dict = {}
+    for col in _MONTHLY_GROUP_COLS:
+        v = values[col]
+        if v is None:
+            match_conds.append(f"{col} IS NULL")
+        else:
+            match_conds.append(f"{col} = :{col}")
+            params[col] = v
+    match_sql = " AND ".join(match_conds)
+
+    bounds_r = await db.execute(text(f"""
+        SELECT MIN(process_date) FROM import_history WHERE {match_sql}
+    """), params)
+    min_date = bounds_r.scalar()
+    if min_date is None:
+        return MonthlyImportCountResponse(data=[])
+
+    rows_r = await db.execute(text(f"""
+        WITH months AS (
+            SELECT generate_series(
+                date_trunc('month', :min_date::date),
+                date_trunc('month', CURRENT_DATE),
+                interval '1 month'
+            ) AS m
+        ),
+        counts AS (
+            SELECT date_trunc('month', process_date) AS m, COUNT(*) AS cnt
+            FROM import_history
+            WHERE {match_sql}
+            GROUP BY 1
+        )
+        SELECT to_char(months.m, 'YY/MM') AS ym, COALESCE(counts.cnt, 0)::int AS cnt
+        FROM months LEFT JOIN counts ON months.m = counts.m
+        ORDER BY months.m
+    """), {**params, "min_date": min_date})
+
+    return MonthlyImportCountResponse(
+        data=[MonthlyImportCount(month=r[0], count=r[1]) for r in rows_r.fetchall()]
+    )
+
 
 # ─── 2. SKU 취급 제조사 목록 ──────────────────────────────────────────────────
 @app.get("/api/sku/{sku_name:path}/factories", response_model=SkuFactoriesResponse)
