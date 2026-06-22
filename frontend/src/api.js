@@ -57,12 +57,22 @@ export async function fetchSkuHistory({ search, competitor, sortBy, sortDir, pag
 }
 
 /** 행(그룹)별 월별 수입횟수 */
-export function fetchMonthlyImportCounts(row) {
-  return request("/api/sku-history/monthly", {
-    category: row.category, mc: row.mc, sku_name: row.sku_name,
-    import_type: row.import_type, importer: row.importer,
-    manufacturer: row.manufacturer, factory: row.factory, country: row.country,
+export async function fetchMonthlyImportCounts(row) {
+  const cols = ["category", "mc", "sku_name", "import_type", "importer", "manufacturer", "factory", "country"];
+  const url = new URL(`${BASE_URL}/api/sku-history/monthly`, window.location.origin);
+  cols.forEach(col => {
+    const v = row[col];
+    // null/undefined만 "값 없음"으로 취급. 빈 문자열("")은 실제 DB 값일 수 있으므로 그대로 전달.
+    if (v !== null && v !== undefined) {
+      url.searchParams.set(col, String(v));
+    }
   });
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "API 오류");
+  }
+  return res.json();
 }
 
 /** SKU 취급 제조사 목록 */
