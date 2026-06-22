@@ -45,8 +45,14 @@ class MonthlyImportCount(BaseModel):
     count: int = Field(..., description="해당 월 수입횟수")
 
 
+class YearlyImportCount(BaseModel):
+    year: str = Field(..., description="년도 (YYYY)")
+    count: int = Field(..., description="해당 연도 수입횟수")
+
+
 class MonthlyImportCountResponse(BaseModel):
     data: list[MonthlyImportCount]
+    yearly: list[YearlyImportCount] = Field(default_factory=list)
 
 
 # ─── SKU 취급 제조사 페이지 ───────────────────────────────────────────────────
