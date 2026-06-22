@@ -27,7 +27,7 @@ from schemas import (
     SkuFactoriesResponse, SkuInfo, FactoryRow,
     ManufacturerDetailResponse, ManufacturerDetail, ManufacturerSkuRow,
     UploadResponse,
-    MonthlyImportCountResponse, MonthlyImportCount,
+    MonthlyImportCountResponse, MonthlyImportCount, YearlyImportCount,
 )
 from importer import import_excel, COMPETITOR_MAP
 from contact_importer import import_contacts
@@ -411,7 +411,7 @@ async def get_sku_history_monthly(
     """), params)
     min_date = bounds_r.scalar()
     if min_date is None:
-        return MonthlyImportCountResponse(data=[])
+        return MonthlyImportCountResponse(data=[], yearly=[])
 
     rows_r = await db.execute(text(f"""
         WITH months AS (
@@ -432,8 +432,28 @@ async def get_sku_history_monthly(
         ORDER BY months.m
     """), {**params, "min_date": min_date})
 
+    years_r = await db.execute(text(f"""
+        WITH years AS (
+            SELECT generate_series(
+                date_trunc('year', CAST(:min_date AS date)),
+                date_trunc('year', CURRENT_DATE),
+                interval '1 year'
+            ) AS y
+        ),
+        counts AS (
+            SELECT date_trunc('year', COALESCE(import_date, process_date)) AS y, COUNT(*) AS cnt
+            FROM import_history
+            WHERE {match_sql}
+            GROUP BY 1
+        )
+        SELECT to_char(years.y, 'YYYY') AS yr, COALESCE(counts.cnt, 0)::int AS cnt
+        FROM years LEFT JOIN counts ON years.y = counts.y
+        ORDER BY years.y
+    """), {**params, "min_date": min_date})
+
     return MonthlyImportCountResponse(
-        data=[MonthlyImportCount(month=r[0], count=r[1]) for r in rows_r.fetchall()]
+        data=[MonthlyImportCount(month=r[0], count=r[1]) for r in rows_r.fetchall()],
+        yearly=[YearlyImportCount(year=r[0], count=r[1]) for r in years_r.fetchall()]
     )
 
 

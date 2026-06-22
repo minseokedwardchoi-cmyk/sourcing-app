@@ -146,7 +146,7 @@ const styles = `
   .filter-ok-btn:hover { background:#15803d; }
   .filter-cancel-btn { padding:4px 12px; background:#fff; color:#374151; border:1px solid #d1d5db; border-radius:3px; font-size:12px; cursor:pointer; }
   .filter-cancel-btn:hover { background:#f3f4f6; }
-  .monthly-row td { padding:0; background:#f8fafc; }
+  .monthly-row td { padding:0; background:#dde1e6; }
   .monthly-panel { padding:10px 14px; overflow-x:auto; animation: monthlySlide .15s ease-out; }
   @keyframes monthlySlide { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }
   .monthly-table { border-collapse: collapse; font-size:12px; }
@@ -408,6 +408,7 @@ function MainDashboard({ navigate }) {
   const [colFilters,  setColFilters]  = useState({});
   const [expandedRow,   setExpandedRow]   = useState(null);   // 펼쳐진 행 인덱스
   const [monthlyData,   setMonthlyData]   = useState([]);
+  const [yearlyData,    setYearlyData]    = useState([]);
   const [monthlyLoading, setMonthlyLoading] = useState(false);
   const [monthlyError,  setMonthlyError]  = useState(null);
   const colMenuRef = useRef(null);
@@ -421,8 +422,10 @@ function MainDashboard({ navigate }) {
     try {
       const res = await fetchMonthlyImportCounts(row);
       setMonthlyData(res.data || []);
+      setYearlyData(res.yearly || []);
     } catch (e) {
       setMonthlyData([]);
+      setYearlyData([]);
       setMonthlyError(e.message || "조회 실패");
     } finally {
       setMonthlyLoading(false);
@@ -721,22 +724,40 @@ function MainDashboard({ navigate }) {
                               : monthlyData.length===0
                               ? <div style={{padding:"10px",fontSize:12,color:"#9ca3af"}}>이력 없음</div>
                               : (
-                                <table className="monthly-table">
-                                  <tbody>
-                                    <tr>
-                                      <td className="monthly-table-label">년/월</td>
-                                      {monthlyData.map(m=><td key={m.month}>{m.month}</td>)}
-                                    </tr>
-                                    <tr>
-                                      <td className="monthly-table-label">수입횟수</td>
-                                      {monthlyData.map(m=>
-                                        <td key={m.month} style={{color: m.count>0?"#15803d":"#9ca3af", fontWeight: m.count>0?600:400}}>
-                                          {m.count}
-                                        </td>
-                                      )}
-                                    </tr>
-                                  </tbody>
-                                </table>
+                                <>
+                                  <table className="monthly-table" style={{marginBottom:8}}>
+                                    <tbody>
+                                      <tr>
+                                        <td className="monthly-table-label">연도별</td>
+                                        {yearlyData.map(y=><td key={y.year}>{y.year}</td>)}
+                                      </tr>
+                                      <tr>
+                                        <td className="monthly-table-label">수입횟수</td>
+                                        {yearlyData.map(y=>
+                                          <td key={y.year} style={{color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
+                                            {y.count}
+                                          </td>
+                                        )}
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                  <table className="monthly-table">
+                                    <tbody>
+                                      <tr>
+                                        <td className="monthly-table-label">년/월</td>
+                                        {monthlyData.map(m=><td key={m.month}>{m.month}</td>)}
+                                      </tr>
+                                      <tr>
+                                        <td className="monthly-table-label">수입횟수</td>
+                                        {monthlyData.map(m=>
+                                          <td key={m.month} style={{color: m.count>0?"#15803d":"#9ca3af", fontWeight: m.count>0?600:400}}>
+                                            {m.count}
+                                          </td>
+                                        )}
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                </>
                               )}
                           </div>
                         </td>
