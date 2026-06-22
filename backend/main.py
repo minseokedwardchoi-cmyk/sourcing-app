@@ -11,6 +11,7 @@ main.py — FastAPI 앱 진입점
 from __future__ import annotations
 import os
 import math
+from datetime import date
 from typing import Optional, List
 from fastapi import FastAPI, Depends, Query, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -304,8 +305,8 @@ async def get_sku_history(
     if date_from or date_to:
         # 기간 필터가 있으면 MV 대신 import_history를 즉시 기간으로 집계
         # (수입횟수/연도별 카운트 모두 선택한 기간 기준으로 재계산됨)
-        params["date_from"] = date_from or "1900-01-01"
-        params["date_to"]   = date_to   or "9999-12-31"
+        params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
+        params["date_to"]   = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
         base_sql = f"""
             FROM (
                 SELECT
