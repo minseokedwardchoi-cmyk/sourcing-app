@@ -56,6 +56,15 @@ export async function fetchSkuHistory({ search, competitor, sortBy, sortDir, pag
   return res.json();
 }
 
+/** 행(그룹)별 월별 수입횟수 */
+export function fetchMonthlyImportCounts(row) {
+  return request("/api/sku-history/monthly", {
+    category: row.category, mc: row.mc, sku_name: row.sku_name,
+    import_type: row.import_type, importer: row.importer,
+    manufacturer: row.manufacturer, factory: row.factory, country: row.country,
+  });
+}
+
 /** SKU 취급 제조사 목록 */
 export function fetchSkuFactories(skuName, { search, countryFilter, hasContact, oemPossible, page, pageSize } = {}) {
   return request(`/api/sku/${encodeURIComponent(skuName)}/factories`, {

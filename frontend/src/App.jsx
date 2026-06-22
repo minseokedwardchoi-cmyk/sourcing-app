@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import {
   fetchSkuHistory, fetchSkuFactories,
   fetchManufacturerDetail, uploadExcel,
   updateManufacturerContact, uploadContacts,
-  fetchColumnValues,
+  fetchColumnValues, fetchMonthlyImportCounts,
 } from "./api.js";
 
 // ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
@@ -146,6 +146,12 @@ const styles = `
   .filter-ok-btn:hover { background:#15803d; }
   .filter-cancel-btn { padding:4px 12px; background:#fff; color:#374151; border:1px solid #d1d5db; border-radius:3px; font-size:12px; cursor:pointer; }
   .filter-cancel-btn:hover { background:#f3f4f6; }
+  .monthly-row td { padding:0; background:#f8fafc; }
+  .monthly-panel { padding:10px 14px; overflow-x:auto; animation: monthlySlide .15s ease-out; }
+  @keyframes monthlySlide { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }
+  .monthly-table { border-collapse: collapse; font-size:12px; }
+  .monthly-table td { padding:5px 10px; border:1px solid #e8eaed; text-align:center; white-space:nowrap; background:#fff; }
+  .monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; }
   .hero { background: #f0fdf4; border-bottom: 1px solid #bbf7d0; padding: 32px 0 28px; }
   .hero-inner { max-width: 1400px; margin: 0 auto; padding: 0 32px; }
   .hero-title { font-size: 32px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; margin-bottom: 8px; }
@@ -392,8 +398,25 @@ function MainDashboard({ navigate }) {
   const [uploading,   setUploading]   = useState(false);
   const [uploadMsg,   setUploadMsg]   = useState(null);
   const [colFilters,  setColFilters]  = useState({});
+  const [expandedRow,   setExpandedRow]   = useState(null);   // 펼쳐진 행 인덱스
+  const [monthlyData,   setMonthlyData]   = useState([]);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
   const colMenuRef = useRef(null);
   const fileRef    = useRef(null);
+
+  const toggleMonthly = useCallback(async (i, row) => {
+    if (expandedRow === i) { setExpandedRow(null); return; }
+    setExpandedRow(i);
+    setMonthlyLoading(true);
+    try {
+      const res = await fetchMonthlyImportCounts(row);
+      setMonthlyData(res.data || []);
+    } catch {
+      setMonthlyData([]);
+    } finally {
+      setMonthlyLoading(false);
+    }
+  }, [expandedRow]);
 
   // 검색 디바운스 500ms
   useEffect(()=>{ const t=setTimeout(()=>{setDebSearch(search);setPage(1);},500); return()=>clearTimeout(t); },[search]);
@@ -401,6 +424,7 @@ function MainDashboard({ navigate }) {
   // 데이터
   useEffect(()=>{
     setLoading(true); setError(null);
+    setExpandedRow(null);
     fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50,colFilters})
       .then(r=>{setData(r.data);setMeta(r.meta);})
       .catch(e=>setError(e.message))
@@ -631,7 +655,8 @@ function MainDashboard({ navigate }) {
                 : data.length===0
                   ? <tr><td colSpan={cols.length}><div className="empty-state">조건에 맞는 SKU 이력이 없습니다.</div></td></tr>
                   : data.map((row,i)=>(
-                    <tr key={i}>
+                    <React.Fragment key={i}>
+                    <tr>
                       {cols.map(c=>(
                         <td key={c.key} title={row[c.key]}>
                           {c.clickable==="sku"
@@ -639,7 +664,14 @@ function MainDashboard({ navigate }) {
                             : c.clickable==="mfr"
                             ? <span className="link-cell" onClick={()=>navigate("mfr",{row,from:"main"})}>{row[c.key]}</span>
                             : c.key==="import_count"
-                            ? <span className="badge b-count">{row[c.key]}</span>
+                            ? <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                                <span className="badge b-count">{row[c.key]}</span>
+                                <button
+                                  className={`filter-icon-btn${expandedRow===i?" active":""}`}
+                                  onClick={()=>toggleMonthly(i,row)}
+                                  title="월별 수입횟수 보기"
+                                >▾</button>
+                              </span>
                             : c.isYearCount
                             ? <span style={{color: row[c.key]>0?"#15803d":"#9ca3af", fontWeight: row[c.key]>0?600:400}}>
                                 {row[c.key]>0 ? row[c.key] : "-"}
@@ -656,6 +688,37 @@ function MainDashboard({ navigate }) {
                         </td>
                       ))}
                     </tr>
+                    {expandedRow===i && (
+                      <tr className="monthly-row">
+                        <td colSpan={cols.length}>
+                          <div className="monthly-panel">
+                            {monthlyLoading
+                              ? <div style={{padding:"10px",fontSize:12,color:"#9ca3af"}}>로딩 중...</div>
+                              : monthlyData.length===0
+                              ? <div style={{padding:"10px",fontSize:12,color:"#9ca3af"}}>이력 없음</div>
+                              : (
+                                <table className="monthly-table">
+                                  <tbody>
+                                    <tr>
+                                      <td className="monthly-table-label">년/월</td>
+                                      {monthlyData.map(m=><td key={m.month}>{m.month}</td>)}
+                                    </tr>
+                                    <tr>
+                                      <td className="monthly-table-label">수입횟수</td>
+                                      {monthlyData.map(m=>
+                                        <td key={m.month} style={{color: m.count>0?"#15803d":"#9ca3af", fontWeight: m.count>0?600:400}}>
+                                          {m.count}
+                                        </td>
+                                      )}
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   ))}
               </tbody>
             </table>
