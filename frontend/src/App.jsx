@@ -692,7 +692,9 @@ function MainDashboard({ navigate }) {
                   : data.map((row,i)=>(
                     <tr key={i}>
                       {cols.map(c=>(
-                        <td key={c.key} title={c.key==="monthly_summary"?undefined:row[c.key]}>
+                        <td key={c.key} title={c.key==="monthly_summary"?undefined:row[c.key]}
+                          style={c.key==="monthly_summary" ? {maxWidth:"none", overflow:"visible"} : undefined}>
+
                           {c.clickable==="sku"
                             ? <span className="link-cell" onClick={()=>navigate("sku",{row})}>{row[c.key]}</span>
                             : c.clickable==="mfr"
@@ -706,24 +708,22 @@ function MainDashboard({ navigate }) {
                                 if (m.error) return <span style={{fontSize:12,color:"#b91c1c"}}>오류: {m.error}</span>;
                                 if (!m.data.length) return <span style={{fontSize:12,color:"#9ca3af"}}>이력 없음</span>;
                                 return (
-                                  <div style={{overflowX:"auto"}}>
-                                    <table className="monthly-table">
-                                      <tbody>
-                                        <tr>
-                                          <td className="monthly-table-label">년/월</td>
-                                          {m.data.map(mo=><td key={mo.month}>{mo.month}</td>)}
-                                        </tr>
-                                        <tr>
-                                          <td className="monthly-table-label">수입횟수</td>
-                                          {m.data.map(mo=>
-                                            <td key={mo.month} style={{color: mo.count>0?"#15803d":"#9ca3af", fontWeight: mo.count>0?600:400}}>
-                                              {mo.count}
-                                            </td>
-                                          )}
-                                        </tr>
-                                      </tbody>
-                                    </table>
-                                  </div>
+                                  <table className="monthly-table">
+                                    <tbody>
+                                      <tr>
+                                        <td className="monthly-table-label">년/월</td>
+                                        {m.data.map(mo=><td key={mo.month}>{mo.month}</td>)}
+                                      </tr>
+                                      <tr>
+                                        <td className="monthly-table-label">수입횟수</td>
+                                        {m.data.map(mo=>
+                                          <td key={mo.month} style={{color: mo.count>0?"#15803d":"#9ca3af", fontWeight: mo.count>0?600:400}}>
+                                            {mo.count}
+                                          </td>
+                                        )}
+                                      </tr>
+                                    </tbody>
+                                  </table>
                                 );
                               })()
                             : c.isYearCount
