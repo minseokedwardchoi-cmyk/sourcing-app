@@ -31,6 +31,7 @@ from schemas import (
 )
 from importer import import_excel, COMPETITOR_MAP
 from contact_importer import import_contacts
+from ranking import compute_factory_rankings
 
 load_dotenv()
 
@@ -525,30 +526,34 @@ async def get_sku_factories(
     in_params = {f"s{i}": s for i, s in enumerate(similar_skus)}
     in_clause = ", ".join(f":s{i}" for i in range(len(similar_skus)))
 
+    # 랭킹 점수는 검색/필터와 무관하게 유사 SKU 제조사 집단 전체를 기준으로 계산한다
+    rankings = await compute_factory_rankings(db, similar_skus)
+
     agg_sql = f"""
         SELECT sku_name, factory, manufacturer, country, mc,
                import_count, email, homepage, oem_status, import_types, importers
         FROM sku_factory_mv
         WHERE sku_name IN ({in_clause})
         {extra_where}
-        ORDER BY import_count DESC
-        LIMIT :limit OFFSET :offset
     """
 
-    count_sql = f"""
-        SELECT COUNT(*)
-        FROM sku_factory_mv
-        WHERE sku_name IN ({in_clause})
-        {extra_where}
-    """
+    all_params = {**params, **in_params}
 
-    all_params = {**params, **in_params, "limit": page_size, "offset": (page - 1) * page_size}
+    rows_r = await db.execute(text(agg_sql), all_params)
+    rows   = rows_r.mappings().all()
 
-    rows_r  = await db.execute(text(agg_sql),  all_params)
-    count_r = await db.execute(text(count_sql), {**params, **in_params})
+    # 종합점수 내림차순 정렬 (동점 시 기존 import_count 내림차순 유지)
+    rows = sorted(
+        rows,
+        key=lambda r: (
+            -(rankings.get(r["factory"], {}).get("ranking_score") or 0),
+            -(r["import_count"] or 0),
+        ),
+    )
 
-    rows  = rows_r.mappings().all()
-    total = count_r.scalar() or 0
+    total = len(rows)
+    start = (page - 1) * page_size
+    rows  = rows[start:start + page_size]
 
     # SKU 기본 정보
     sku_meta = await db.execute(
@@ -585,6 +590,7 @@ async def get_sku_factories(
                 import_types = list(r["import_types"] or []),
                 importers    = list(r["importers"] or []),
                 mc           = r["mc"],
+                **(rankings.get(r["factory"]) or {}),
             )
             for r in rows
         ],
