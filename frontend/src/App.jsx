@@ -83,6 +83,11 @@ const styles = `
   .b-count  { background: none; color: #1a1a2e; font-weight: 600; }
   .b-mc     { background: none; color: #1a1a2e; }
   .b-cat    { background: none; color: #1a1a2e; }
+  .b-grade  { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; font-size: 11px; font-weight: 700; }
+  .b-grade-a { background: #dcfce7; color: #15803d; }
+  .b-grade-b { background: #dbeafe; color: #1d4ed8; }
+  .b-grade-c { background: #fee2e2; color: #b91c1c; }
+  .score-cell { font-weight: 600; color: #1a1a2e; }
   .pagination { padding: 9px 14px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #e8eaed; flex-wrap: wrap; gap: 6px; }
   .page-btns { display: flex; gap: 3px; }
   .page-btn { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 5px; font-size: 12px; cursor: pointer; background: #f9fafb; color: #374151; }
@@ -322,6 +327,13 @@ function OemBadge({ value }) {
   if (value === "OEM" || (value.includes("가능") && !value.includes("문의"))) return <span className="badge b-green">{value}</span>;
   if (value.includes("문의")) return <span className="badge b-orange">{value}</span>;
   if (value === "수입" || value.includes("불가")) return <span className="badge b-gray">{value}</span>;
+  return <span className="badge b-gray">{value}</span>;
+}
+
+function GradeBadge({ grade }) {
+  if (!grade) return <span style={{color:"#9ca3af",fontSize:12}}>-</span>;
+  const cls = grade === "A" ? "b-grade-a" : grade === "B" ? "b-grade-b" : "b-grade-c";
+  return <span className={`b-grade ${cls}`} title={`등급 ${grade}`}>{grade}</span>;
   return <span className="badge b-gray">{value}</span>;
 }
 
@@ -768,8 +780,8 @@ function SkuManufacturers({ navigate, state }) {
   const [contactF,     setContactF]    = useState("");
   const [oemF,         setOemF]        = useState("");
   const [page,         setPage]        = useState(1);
-  const [skuSort, setSkuSort] = useState("sku_name");
-  const [skuDir,  setSkuDir]  = useState("asc");
+  const [skuSort, setSkuSort] = useState("ranking_score");
+  const [skuDir,  setSkuDir]  = useState("desc");
 
   function handleSkuSort(col) {
     if (skuSort === col) setSkuDir(d => d === "asc" ? "desc" : "asc");
@@ -778,10 +790,14 @@ function SkuManufacturers({ navigate, state }) {
 
   const sortedRows = useMemo(() => {
     if (!res?.data) return [];
+    const numericCols = ["ranking_score"];
     return [...res.data].sort((a, b) => {
+      if (numericCols.includes(skuSort)) {
+        const av = a[skuSort] ?? 0, bv = b[skuSort] ?? 0;
+        return skuDir === "asc" ? av - bv : bv - av;
+      }
       let av, bv;
       if (skuSort === "sku_name")  { av = a.skus?.[0]||""; bv = b.skus?.[0]||""; }
-      else if (skuSort === "mc") { av = a.mc||""; bv = b.mc||""; }
       else if (skuSort === "factory")   { av = a.factory||""; bv = b.factory||""; }
       else if (skuSort === "country")   { av = a.country||""; bv = b.country||""; }
       else if (skuSort === "email")     { av = a.email||""; bv = b.email||""; }
@@ -857,22 +873,24 @@ function SkuManufacturers({ navigate, state }) {
             <table>
               <thead>
                 <tr>
-                  <th style={{minWidth:110}} onClick={()=>handleSkuSort("mc")}>MC <SortIcon col="mc" sortCol={skuSort} sortDir={skuDir}/></th>
                   <th style={{minWidth:200}} onClick={()=>handleSkuSort("sku_name")}>SKU <SortIcon col="sku_name" sortCol={skuSort} sortDir={skuDir}/></th>
                   <th style={{minWidth:160}} onClick={()=>handleSkuSort("importers")}>수입업체 <SortIcon col="importers" sortCol={skuSort} sortDir={skuDir}/></th>
                   <th style={{minWidth:90}}  onClick={()=>handleSkuSort("oem")}>OEM 여부 <SortIcon col="oem" sortCol={skuSort} sortDir={skuDir}/></th>
                   <th style={{minWidth:220}} onClick={()=>handleSkuSort("factory")}>제조업체 <SortIcon col="factory" sortCol={skuSort} sortDir={skuDir}/></th>
                   <th style={{minWidth:80}}  onClick={()=>handleSkuSort("country")}>제조국 <SortIcon col="country" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:90}}  onClick={()=>handleSkuSort("ranking_score")}>종합점수 <SortIcon col="ranking_score" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:120}}>탑5 유통사 거래 다양성</th>
+                  <th style={{minWidth:100}}>국내 수입횟수</th>
+                  <th style={{minWidth:120}}>최근 3개년 성장추세</th>
                   <th style={{minWidth:160}} onClick={()=>handleSkuSort("email")}>연락처 <SortIcon col="email" sortCol={skuSort} sortDir={skuDir}/></th>
                 </tr>
               </thead>
               <tbody>
-                {loading ? <SkeletonRows cols={6}/>
+                {loading ? <SkeletonRows cols={10}/>
                 : !sortedRows?.length
-                  ? <tr><td colSpan={6}><div className="empty-state">선택한 SKU와 연결된 제조사 정보가 없습니다.</div></td></tr>
+                  ? <tr><td colSpan={10}><div className="empty-state">선택한 SKU와 연결된 제조사 정보가 없습니다.</div></td></tr>
                   : sortedRows.map((g,i)=>(
                     <tr key={i}>
-                      <td><span style={{fontSize:12,color:"#1a1a2e"}}>{g.mc||"-"}</span></td>
                       <td title={g.skus?.[0]}><span style={{fontSize:12}}>{g.skus?.[0]||"-"}</span></td>
                       <td>
                         <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
@@ -894,6 +912,10 @@ function SkuManufacturers({ navigate, state }) {
                         </span>
                       </td>
                       <td>{g.country||"-"}</td>
+                      <td><span className="score-cell">{g.ranking_score!=null?`${g.ranking_score.toFixed(1)}점`:"-"}</span></td>
+                      <td><GradeBadge grade={g.top5_retailer_grade}/></td>
+                      <td><GradeBadge grade={g.import_count_grade}/></td>
+                      <td><GradeBadge grade={g.growth_trend_grade}/></td>
                       <td>
                         {g.email ? <a href={`mailto:${g.email}`} style={{color:"#1d4ed8",fontSize:12}}>{g.email}</a>
                           : g.homepage ? <a href={g.homepage} target="_blank" rel="noopener noreferrer" style={{color:"#1d4ed8",fontSize:12}}>{g.homepage}</a>

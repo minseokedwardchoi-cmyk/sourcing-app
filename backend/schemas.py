@@ -75,6 +75,10 @@ class FactoryRow(BaseModel):
     importers:    list[str]      = Field(default_factory=list)
     oem_status:   Optional[str]
     mc:           Optional[str] = None
+    ranking_score:          Optional[float] = Field(None, description="100점 환산 종합 랭킹점수")
+    top5_retailer_grade:    Optional[str]   = Field(None, description="탑5 유통사 거래 다양성 등급 (A/B/C)")
+    import_count_grade:     Optional[str]   = Field(None, description="국내 수입횟수 등급 (A/B/C)")
+    growth_trend_grade:     Optional[str]   = Field(None, description="최근 3개년 성장추세 등급 (A/B/C)")
 
 
 
