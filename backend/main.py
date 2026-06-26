@@ -386,10 +386,13 @@ async def get_sku_history_monthly(
     manufacturer:  Optional[str] = Query(None),
     factory:       Optional[str] = Query(None),
     country:       Optional[str] = Query(None),
+    date_from:     Optional[str] = Query(None, description="집계 시작일 (YYYY-MM-DD)"),
+    date_to:       Optional[str] = Query(None, description="집계 종료일 (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
 ):
-    """테이블의 한 행(= 모든 컬럼 값이 동일한 그룹)에 대해,
-    첫 수입 기록 시점부터 현재까지 월별 수입횟수를 반환."""
+    """테이블의 한 행(= 모든 컬럼 값이 동일한 그룹)에 대해 월별 수입횟수를 반환.
+    date_from/date_to가 주어지면 해당 기간으로 집계 범위를 제한하고,
+    없으면 첫 수입 기록 시점부터 현재까지 집계한다."""
     values = {
         "category": category, "mc": mc, "sku_name": sku_name,
         "import_type": import_type, "importer": importer,
@@ -406,50 +409,68 @@ async def get_sku_history_monthly(
             params[col] = v
     match_sql = " AND ".join(match_conds)
 
-    bounds_r = await db.execute(text(f"""
-        SELECT MIN(COALESCE(import_date, process_date)) FROM import_history WHERE {match_sql}
-    """), params)
-    min_date = bounds_r.scalar()
-    if min_date is None:
-        return MonthlyImportCountResponse(data=[], yearly=[])
+    if date_from or date_to:
+        range_from = date.fromisoformat(date_from) if date_from else None
+        range_to   = date.fromisoformat(date_to)   if date_to   else None
+        if range_from is None:
+            bounds_r = await db.execute(text(f"""
+                SELECT MIN(COALESCE(import_date, process_date)) FROM import_history WHERE {match_sql}
+            """), params)
+            range_from = bounds_r.scalar()
+        if range_to is None:
+            range_to = date.today()
+        if range_from is None:
+            return MonthlyImportCountResponse(data=[], yearly=[])
+        match_sql_dated = match_sql + " AND COALESCE(import_date, process_date) BETWEEN :range_from AND :range_to"
+        params = {**params, "range_from": range_from, "range_to": range_to}
+        min_date, max_date = range_from, range_to
+    else:
+        bounds_r = await db.execute(text(f"""
+            SELECT MIN(COALESCE(import_date, process_date)) FROM import_history WHERE {match_sql}
+        """), params)
+        min_date = bounds_r.scalar()
+        if min_date is None:
+            return MonthlyImportCountResponse(data=[], yearly=[])
+        max_date = date.today()
+        match_sql_dated = match_sql
 
     rows_r = await db.execute(text(f"""
         WITH months AS (
             SELECT generate_series(
                 date_trunc('month', CAST(:min_date AS date)),
-                date_trunc('month', CURRENT_DATE),
+                date_trunc('month', CAST(:max_date AS date)),
                 interval '1 month'
             ) AS m
         ),
         counts AS (
             SELECT date_trunc('month', COALESCE(import_date, process_date)) AS m, COUNT(*) AS cnt
             FROM import_history
-            WHERE {match_sql}
+            WHERE {match_sql_dated}
             GROUP BY 1
         )
         SELECT to_char(months.m, 'YY/MM') AS ym, COALESCE(counts.cnt, 0)::int AS cnt
         FROM months LEFT JOIN counts ON months.m = counts.m
         ORDER BY months.m
-    """), {**params, "min_date": min_date})
+    """), {**params, "min_date": min_date, "max_date": max_date})
 
     years_r = await db.execute(text(f"""
         WITH years AS (
             SELECT generate_series(
                 date_trunc('year', CAST(:min_date AS date)),
-                date_trunc('year', CURRENT_DATE),
+                date_trunc('year', CAST(:max_date AS date)),
                 interval '1 year'
             ) AS y
         ),
         counts AS (
             SELECT date_trunc('year', COALESCE(import_date, process_date)) AS y, COUNT(*) AS cnt
             FROM import_history
-            WHERE {match_sql}
+            WHERE {match_sql_dated}
             GROUP BY 1
         )
         SELECT to_char(years.y, 'YYYY') AS yr, COALESCE(counts.cnt, 0)::int AS cnt
         FROM years LEFT JOIN counts ON years.y = counts.y
         ORDER BY years.y
-    """), {**params, "min_date": min_date})
+    """), {**params, "min_date": min_date, "max_date": max_date})
 
     return MonthlyImportCountResponse(
         data=[MonthlyImportCount(month=r[0], count=r[1]) for r in rows_r.fetchall()],

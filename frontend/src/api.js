@@ -57,7 +57,7 @@ export async function fetchSkuHistory({ search, competitor, sortBy, sortDir, pag
 }
 
 /** 행(그룹)별 월별 수입횟수 */
-export async function fetchMonthlyImportCounts(row) {
+export async function fetchMonthlyImportCounts(row, dateFrom, dateTo) {
   const cols = ["category", "mc", "sku_name", "import_type", "importer", "manufacturer", "factory", "country"];
   const url = new URL(`${BASE_URL}/api/sku-history/monthly`, window.location.origin);
   cols.forEach(col => {
@@ -67,6 +67,8 @@ export async function fetchMonthlyImportCounts(row) {
       url.searchParams.set(col, String(v));
     }
   });
+  if (dateFrom) url.searchParams.set("date_from", dateFrom);
+  if (dateTo)   url.searchParams.set("date_to", dateTo);
   const res = await fetch(url.toString());
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
