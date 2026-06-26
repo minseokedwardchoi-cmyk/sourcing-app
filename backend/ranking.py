@@ -116,8 +116,11 @@ async def compute_factory_rankings(
 
     rankings: dict[str, dict] = {}
     for factory in counts_by_factory:
-        top5_count = len(importers_by_factory.get(factory, set()) & set(TOP5_RETAILERS))
-        top5_grade = _top5_grade(top5_count)
+        matched_top5 = sorted(
+            importers_by_factory.get(factory, set()) & set(TOP5_RETAILERS),
+            key=TOP5_RETAILERS.index,
+        )
+        top5_grade = _top5_grade(len(matched_top5))
 
         import_grade = import_count_grades.get(factory, "C")
 
@@ -134,8 +137,15 @@ async def compute_factory_rankings(
         rankings[factory] = {
             "ranking_score": ranking_score,
             "top5_retailer_grade": top5_grade,
+            "top5_retailers_matched": matched_top5,
             "import_count_grade": import_grade,
+            "total_import_count": counts_by_factory.get(factory, 0),
             "growth_trend_grade": growth_grade,
+            "growth_yearly": [
+                {"year": str(y1), "count": gy1},
+                {"year": str(y2), "count": gy2},
+                {"year": str(y3), "count": gy3},
+            ],
         }
 
     return rankings
