@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
 import {
   fetchSkuHistory, fetchSkuFactories,
   fetchManufacturerDetail, uploadExcel,
@@ -377,9 +377,10 @@ const ALL_COLS = [
   { key:"sku_name",     label:"제품명",         w:240, filterKey:"sku_name", clickable:"sku" },
   { key:"import_type",  label:"OEM/수입",       w:85,  filterKey:"import_type"             },
   { key:"importer",     label:"수입업체",       w:160, filterKey:"importer"                },
-  { key:"import_count", label:"수입횟수(전체)", w:90,  isNumeric:true                      },
   { key:"factory",      label:"해외제조업소",   w:220, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:85,  filterKey:"country"                 },
+  { key:"import_count", label:"수입횟수(전체)", w:90,  isNumeric:true                      },
+  { key:"monthly_summary", label:"월별 수입횟수", w:340                                    },
   { key:"email",        label:"이메일",         w:160, filterKey:"email"                   },
 ];
 
@@ -404,31 +405,28 @@ function MainDashboard({ navigate }) {
   const [uploading,   setUploading]   = useState(false);
   const [uploadMsg,   setUploadMsg]   = useState(null);
   const [colFilters,  setColFilters]  = useState({});
-  const [expandedRow,   setExpandedRow]   = useState(null);   // 펼쳐진 행 인덱스
-  const [monthlyData,   setMonthlyData]   = useState([]);
-  const [yearlyData,    setYearlyData]    = useState([]);
-  const [monthlyLoading, setMonthlyLoading] = useState(false);
-  const [monthlyError,  setMonthlyError]  = useState(null);
+  const [monthlyMap,  setMonthlyMap]  = useState({});   // 행 인덱스 -> { loading, error, data }
   const colMenuRef = useRef(null);
   const fileRef    = useRef(null);
 
-  const toggleMonthly = useCallback(async (i, row) => {
-    if (expandedRow === i) { setExpandedRow(null); return; }
-    setExpandedRow(i);
-    setMonthlyLoading(true);
-    setMonthlyError(null);
-    try {
-      const res = await fetchMonthlyImportCounts(row);
-      setMonthlyData(res.data || []);
-      setYearlyData(res.yearly || []);
-    } catch (e) {
-      setMonthlyData([]);
-      setYearlyData([]);
-      setMonthlyError(e.message || "조회 실패");
-    } finally {
-      setMonthlyLoading(false);
-    }
-  }, [expandedRow]);
+  // 표시 중인 행들에 대해 월별 수입횟수를 자동으로 불러옴 (검색 기간 필터를 그대로 적용)
+  useEffect(() => {
+    if (!data.length) { setMonthlyMap({}); return; }
+    let cancelled = false;
+    setMonthlyMap(Object.fromEntries(data.map((_, i) => [i, { loading: true, error: null, data: [] }])));
+    data.forEach((row, i) => {
+      fetchMonthlyImportCounts(row, dateFrom, dateTo)
+        .then(res => {
+          if (cancelled) return;
+          setMonthlyMap(prev => ({ ...prev, [i]: { loading: false, error: null, data: res.data || [] } }));
+        })
+        .catch(e => {
+          if (cancelled) return;
+          setMonthlyMap(prev => ({ ...prev, [i]: { loading: false, error: e.message || "조회 실패", data: [] } }));
+        });
+    });
+    return () => { cancelled = true; };
+  }, [data, dateFrom, dateTo]);
 
   // 헤더(타이틀+업로드+경쟁사카드+툴바) 고정 시, 그 아래 테이블 헤더가 가려지지 않도록 높이 추적
   const stickyHeaderRef = useRef(null);
@@ -452,7 +450,6 @@ function MainDashboard({ navigate }) {
   // 데이터
   useEffect(()=>{
     setLoading(true); setError(null);
-    setExpandedRow(null);
     fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50,colFilters,dateFrom,dateTo})
       .then(r=>{setData(r.data);setMeta(r.meta);})
       .catch(e=>setError(e.message))
@@ -693,23 +690,42 @@ function MainDashboard({ navigate }) {
                 : data.length===0
                   ? <tr><td colSpan={cols.length}><div className="empty-state">조건에 맞는 SKU 이력이 없습니다.</div></td></tr>
                   : data.map((row,i)=>(
-                    <React.Fragment key={i}>
-                    <tr>
+                    <tr key={i}>
                       {cols.map(c=>(
-                        <td key={c.key} title={row[c.key]}>
+                        <td key={c.key} title={c.key==="monthly_summary"?undefined:row[c.key]}>
                           {c.clickable==="sku"
                             ? <span className="link-cell" onClick={()=>navigate("sku",{row})}>{row[c.key]}</span>
                             : c.clickable==="mfr"
                             ? <span className="link-cell" onClick={()=>navigate("mfr",{row,from:"main"})}>{row[c.key]}</span>
                             : c.key==="import_count"
-                            ? <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
-                                <span className="badge b-count">{row[c.key]}</span>
-                                <button
-                                  className={`filter-icon-btn${expandedRow===i?" active":""}`}
-                                  onClick={()=>toggleMonthly(i,row)}
-                                  title="월별 수입횟수 보기"
-                                >▾</button>
-                              </span>
+                            ? <span className="badge b-count">{row[c.key]}</span>
+                            : c.key==="monthly_summary"
+                            ? (()=>{
+                                const m = monthlyMap[i];
+                                if (!m || m.loading) return <span style={{fontSize:12,color:"#9ca3af"}}>로딩 중...</span>;
+                                if (m.error) return <span style={{fontSize:12,color:"#b91c1c"}}>오류: {m.error}</span>;
+                                if (!m.data.length) return <span style={{fontSize:12,color:"#9ca3af"}}>이력 없음</span>;
+                                return (
+                                  <div style={{overflowX:"auto"}}>
+                                    <table className="monthly-table">
+                                      <tbody>
+                                        <tr>
+                                          <td className="monthly-table-label">년/월</td>
+                                          {m.data.map(mo=><td key={mo.month}>{mo.month}</td>)}
+                                        </tr>
+                                        <tr>
+                                          <td className="monthly-table-label">수입횟수</td>
+                                          {m.data.map(mo=>
+                                            <td key={mo.month} style={{color: mo.count>0?"#15803d":"#9ca3af", fontWeight: mo.count>0?600:400}}>
+                                              {mo.count}
+                                            </td>
+                                          )}
+                                        </tr>
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                );
+                              })()
                             : c.isYearCount
                             ? <span style={{color: row[c.key]>0?"#15803d":"#9ca3af", fontWeight: row[c.key]>0?600:400}}>
                                 {row[c.key]>0 ? row[c.key] : "-"}
@@ -726,57 +742,6 @@ function MainDashboard({ navigate }) {
                         </td>
                       ))}
                     </tr>
-                    {expandedRow===i && (
-                      <tr className="monthly-row">
-                        <td colSpan={cols.length}>
-                          <div className="monthly-panel">
-                            {monthlyLoading
-                              ? <div style={{padding:"10px",fontSize:12,color:"#9ca3af"}}>로딩 중...</div>
-                              : monthlyError
-                              ? <div style={{padding:"10px",fontSize:12,color:"#b91c1c"}}>오류: {monthlyError}</div>
-                              : monthlyData.length===0
-                              ? <div style={{padding:"10px",fontSize:12,color:"#9ca3af"}}>이력 없음</div>
-                              : (
-                                <>
-                                  <table className="monthly-table" style={{marginBottom:8}}>
-                                    <tbody>
-                                      <tr>
-                                        <td className="monthly-table-label">년도</td>
-                                        {yearlyData.map(y=><td key={y.year}>{y.year}</td>)}
-                                      </tr>
-                                      <tr>
-                                        <td className="monthly-table-label">수입횟수</td>
-                                        {yearlyData.map(y=>
-                                          <td key={y.year} style={{color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
-                                            {y.count}
-                                          </td>
-                                        )}
-                                      </tr>
-                                    </tbody>
-                                  </table>
-                                  <table className="monthly-table">
-                                    <tbody>
-                                      <tr>
-                                        <td className="monthly-table-label">년/월</td>
-                                        {monthlyData.map(m=><td key={m.month}>{m.month}</td>)}
-                                      </tr>
-                                      <tr>
-                                        <td className="monthly-table-label">수입횟수</td>
-                                        {monthlyData.map(m=>
-                                          <td key={m.month} style={{color: m.count>0?"#15803d":"#9ca3af", fontWeight: m.count>0?600:400}}>
-                                            {m.count}
-                                          </td>
-                                        )}
-                                      </tr>
-                                    </tbody>
-                                  </table>
-                                </>
-                              )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                    </React.Fragment>
                   ))}
               </tbody>
             </table>
