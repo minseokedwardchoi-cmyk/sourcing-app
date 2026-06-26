@@ -933,7 +933,7 @@ function SkuManufacturers({ navigate, state }) {
                           <GradeBadge grade={g.growth_trend_grade}/>
                           <span className="grade-evidence">
                             {g.growth_yearly?.length
-                              ? g.growth_yearly.map(y=>`${y.year}: ${y.count}`).join(" → ")
+                              ? g.growth_yearly.map(y=>y.count).join(" → ")
                               : "-"}
                           </span>
                         </div>
