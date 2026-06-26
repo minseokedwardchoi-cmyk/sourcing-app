@@ -412,12 +412,12 @@ function yearLabel(offset, baseYear) {
 
 const ALL_COLS = [
   { key:"category",     label:"구분",           w:90,  filterKey:"category"               },
-  { key:"mc",           label:"MC",             w:120, filterKey:"mc",      isMc:true      },
-  { key:"sku_name",     label:"제품명",         w:120, filterKey:"sku_name", clickable:"sku" },
-  { key:"import_type",  label:"OEM/수입",       w:70,  filterKey:"import_type"             },
-  { key:"importer",     label:"수입업체",       w:160, filterKey:"importer"                },
-  { key:"factory",      label:"해외제조업소",   w:220, filterKey:"factory", clickable:"mfr" },
-  { key:"country",      label:"제조국",         w:85,  filterKey:"country", clickable:"country" },
+  { key:"mc",           label:"MC",             w:80,  filterKey:"mc",      isMc:true      },
+  { key:"sku_name",     label:"제품명",         w:240, filterKey:"sku_name", clickable:"sku" },
+  { key:"import_type",  label:"OEM/수입",       w:55,  filterKey:"import_type"             },
+  { key:"importer",     label:"수입업체",       w:120, filterKey:"importer"                },
+  { key:"factory",      label:"해외제조업소",   w:110, filterKey:"factory", clickable:"mfr" },
+  { key:"country",      label:"제조국",         w:65,  filterKey:"country", clickable:"country" },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
   { key:"count_year3",  label:"",               w:70,  isYearCount:3                      },
   { key:"count_year2",  label:"",               w:70,  isYearCount:2                      },
@@ -446,15 +446,28 @@ function MainDashboard({ navigate }) {
   const [uploading,   setUploading]   = useState(false);
   const [uploadMsg,   setUploadMsg]   = useState(null);
   const [colFilters,  setColFilters]  = useState({});
-  const [expandedSku, setExpandedSku] = useState(()=>new Set());  // 제품명 펼침 상태 (행 인덱스)
+  const [expandedFactory, setExpandedFactory] = useState(()=>new Set());  // 해외제조업소 펼침 상태 (행 인덱스)
+  const [overflowFactory, setOverflowFactory] = useState(()=>new Set());  // 잘려서 펼치기 화살표가 필요한 행 인덱스
   const [monthlyModal, setMonthlyModal] = useState(null);   // { row, loading, error, yearly, monthly }
   const colMenuRef = useRef(null);
   const fileRef    = useRef(null);
 
-  function toggleSkuExpand(i) {
-    setExpandedSku(prev => {
+  function toggleFactoryExpand(i) {
+    setExpandedFactory(prev => {
       const next = new Set(prev);
       next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  }
+
+  function factoryTextRef(el, i) {
+    if (!el) return;
+    const isOverflowing = el.scrollWidth > el.clientWidth + 1;
+    setOverflowFactory(prev => {
+      const has = prev.has(i);
+      if (isOverflowing === has) return prev;
+      const next = new Set(prev);
+      isOverflowing ? next.add(i) : next.delete(i);
       return next;
     });
   }
@@ -751,31 +764,34 @@ function MainDashboard({ navigate }) {
                   : data.map((row,i)=>(
                     <tr key={i}>
                       {cols.map(c=>(
-                        <td key={c.key} title={c.key==="sku_name"?undefined:row[c.key]}
-                          style={c.key==="sku_name" ? {maxWidth:"none", overflow:"visible"} : undefined}>
+                        <td key={c.key} title={c.key==="factory"?undefined:row[c.key]}
+                          style={c.key==="factory" ? {maxWidth:"none", overflow:"visible"} : undefined}>
 
                           {c.clickable==="sku"
+                            ? <span className="link-cell" onClick={()=>navigate("sku",{row})}>{row[c.key]}</span>
+                            : c.clickable==="mfr"
                             ? (
                               <div className="sku-cell">
                                 <span
+                                  ref={el=>factoryTextRef(el,i)}
                                   className="link-cell sku-cell-text"
-                                  style={expandedSku.has(i) ? {whiteSpace:"normal",wordBreak:"break-all"} : undefined}
-                                  onClick={()=>navigate("sku",{row})}
+                                  style={expandedFactory.has(i) ? {whiteSpace:"normal",wordBreak:"break-all"} : undefined}
+                                  onClick={()=>navigate("mfr",{row,from:"main"})}
                                   title={row[c.key]}
                                 >
                                   {row[c.key]}
                                 </span>
-                                <button
-                                  className="sku-expand-btn"
-                                  onClick={(e)=>{e.stopPropagation();toggleSkuExpand(i);}}
-                                  title={expandedSku.has(i)?"접기":"펼치기"}
-                                >
-                                  {expandedSku.has(i)?"▲":"▼"}
-                                </button>
+                                {overflowFactory.has(i) && (
+                                  <button
+                                    className="sku-expand-btn"
+                                    onClick={(e)=>{e.stopPropagation();toggleFactoryExpand(i);}}
+                                    title={expandedFactory.has(i)?"접기":"펼치기"}
+                                  >
+                                    {expandedFactory.has(i)?"▲":"▼"}
+                                  </button>
+                                )}
                               </div>
                             )
-                            : c.clickable==="mfr"
-                            ? <span className="link-cell" onClick={()=>navigate("mfr",{row,from:"main"})}>{row[c.key]}</span>
                             : c.clickable==="country"
                             ? (row[c.key]
                                 ? <span className="link-cell" onClick={()=>navigate("country",{country:row[c.key]})}>{row[c.key]}</span>
