@@ -88,6 +88,7 @@ const styles = `
   .b-grade-b { background: #dbeafe; color: #1d4ed8; }
   .b-grade-c { background: #fee2e2; color: #b91c1c; }
   .score-cell { font-weight: 600; color: #1a1a2e; }
+  .grade-evidence { font-size: 11px; color: #6b7280; white-space: nowrap; }
   .pagination { padding: 9px 14px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #e8eaed; flex-wrap: wrap; gap: 6px; }
   .page-btns { display: flex; gap: 3px; }
   .page-btn { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 5px; font-size: 12px; cursor: pointer; background: #f9fafb; color: #374151; }
@@ -879,9 +880,9 @@ function SkuManufacturers({ navigate, state }) {
                   <th style={{minWidth:220}} onClick={()=>handleSkuSort("factory")}>제조업체 <SortIcon col="factory" sortCol={skuSort} sortDir={skuDir}/></th>
                   <th style={{minWidth:80}}  onClick={()=>handleSkuSort("country")}>제조국 <SortIcon col="country" sortCol={skuSort} sortDir={skuDir}/></th>
                   <th style={{minWidth:90}}  onClick={()=>handleSkuSort("ranking_score")}>종합점수 <SortIcon col="ranking_score" sortCol={skuSort} sortDir={skuDir}/></th>
-                  <th style={{minWidth:120}}>탑5 유통사 거래 다양성</th>
-                  <th style={{minWidth:100}}>국내 수입횟수</th>
-                  <th style={{minWidth:120}}>최근 3개년 성장추세</th>
+                  <th style={{minWidth:220}}>탑5 유통사 거래 다양성</th>
+                  <th style={{minWidth:120}}>국내 수입횟수</th>
+                  <th style={{minWidth:220}}>최근 3개년 성장추세</th>
                   <th style={{minWidth:160}} onClick={()=>handleSkuSort("email")}>연락처 <SortIcon col="email" sortCol={skuSort} sortDir={skuDir}/></th>
                 </tr>
               </thead>
@@ -913,9 +914,30 @@ function SkuManufacturers({ navigate, state }) {
                       </td>
                       <td>{g.country||"-"}</td>
                       <td><span className="score-cell">{g.ranking_score!=null?`${g.ranking_score.toFixed(1)}점`:"-"}</span></td>
-                      <td><GradeBadge grade={g.top5_retailer_grade}/></td>
-                      <td><GradeBadge grade={g.import_count_grade}/></td>
-                      <td><GradeBadge grade={g.growth_trend_grade}/></td>
+                      <td style={{maxWidth:"none",overflow:"visible"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <GradeBadge grade={g.top5_retailer_grade}/>
+                          <span className="grade-evidence">
+                            {g.top5_retailers_matched?.length ? g.top5_retailers_matched.join(", ") : "거래 없음"}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{maxWidth:"none",overflow:"visible"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <GradeBadge grade={g.import_count_grade}/>
+                          <span className="grade-evidence">{g.total_import_count ?? 0}건</span>
+                        </div>
+                      </td>
+                      <td style={{maxWidth:"none",overflow:"visible"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <GradeBadge grade={g.growth_trend_grade}/>
+                          <span className="grade-evidence">
+                            {g.growth_yearly?.length
+                              ? g.growth_yearly.map(y=>`${y.year}: ${y.count}`).join(" → ")
+                              : "-"}
+                          </span>
+                        </div>
+                      </td>
                       <td>
                         {g.email ? <a href={`mailto:${g.email}`} style={{color:"#1d4ed8",fontSize:12}}>{g.email}</a>
                           : g.homepage ? <a href={g.homepage} target="_blank" rel="noopener noreferrer" style={{color:"#1d4ed8",fontSize:12}}>{g.homepage}</a>
