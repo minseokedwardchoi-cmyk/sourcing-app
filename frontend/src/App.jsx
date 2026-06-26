@@ -62,7 +62,7 @@ const styles = `
   .pill.active { background: #16a34a; border-color: #16a34a; color: #fff; }
   .select-f { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background: #f9fafb; color: #1a1a2e; outline: none; cursor: pointer; }
   .table-wrap { overflow-x: auto; }
-  table { border-collapse: collapse; font-size: 13px; table-layout: fixed; width: 100%; min-width: 1586px; }
+  table { border-collapse: collapse; font-size: 13px; table-layout: fixed; width: 100%; min-width: 1306px; }
   thead tr { background: #f8fafc; }
   th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; overflow: hidden; }
   th:hover { color: #1a1a2e; }
@@ -197,7 +197,7 @@ const styles = `
   .country-top-items { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
   .country-top-legend { flex: 1; min-width: 220px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; }
   .sku-cell { display: flex; align-items: center; gap: 4px; }
-  .sku-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 95px; display: inline-block; }
+  .sku-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; display: inline-block; }
   .sku-expand-btn { flex: 0 0 auto; border: none; background: none; cursor: pointer; font-size: 9px; color: #9ca3af; padding: 2px; line-height: 1; }
   .sku-expand-btn:hover { color: #374151; }
   .count-cell-wrap { display: inline-flex; align-items: center; gap: 3px; }
@@ -413,7 +413,7 @@ function yearLabel(offset, baseYear) {
 const ALL_COLS = [
   { key:"category",     label:"구분",           w:118, filterKey:"category"               },
   { key:"mc",           label:"MC",             w:105, filterKey:"mc",      isMc:true      },
-  { key:"sku_name",     label:"제품명",         w:480, filterKey:"sku_name", clickable:"sku" },
+  { key:"sku_name",     label:"제품명",         w:200, filterKey:"sku_name", clickable:"sku" },
   { key:"import_type",  label:"OEM/수입",       w:92,  filterKey:"import_type"             },
   { key:"importer",     label:"수입업체",       w:118, filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:110, filterKey:"factory", clickable:"mfr" },
@@ -446,34 +446,36 @@ function MainDashboard({ navigate }) {
   const [uploading,   setUploading]   = useState(false);
   const [uploadMsg,   setUploadMsg]   = useState(null);
   const [colFilters,  setColFilters]  = useState({});
-  const [expandedFactory, setExpandedFactory] = useState(()=>new Set());  // 해외제조업소 펼침 상태 (행 인덱스)
-  const [overflowFactory, setOverflowFactory] = useState(()=>new Set());  // 잘려서 펼치기 화살표가 필요한 행 인덱스
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());  // 픽셀 오버플로우 기반 펼침 상태 (`${colKey}:${i}`)
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());  // 잘려서 펼치기 화살표가 필요한 셀 (`${colKey}:${i}`)
   const [expandedCells,   setExpandedCells]   = useState(()=>new Set());  // 구분/MC/수입업체/제조국 글자수 제한 펼침 상태 (`${colKey}:${i}`)
   const [monthlyModal, setMonthlyModal] = useState(null);   // { row, loading, error, yearly, monthly }
   const colMenuRef = useRef(null);
   const fileRef    = useRef(null);
 
-  function toggleFactoryExpand(i) {
-    setExpandedFactory(prev => {
+  function cellKey(colKey, i) { return `${colKey}:${i}`; }
+
+  function toggleOverflowExpand(colKey, i) {
+    const key = cellKey(colKey, i);
+    setExpandedOverflow(prev => {
       const next = new Set(prev);
-      next.has(i) ? next.delete(i) : next.add(i);
+      next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
   }
 
-  function factoryTextRef(el, i) {
+  function overflowTextRef(el, colKey, i) {
     if (!el) return;
+    const key = cellKey(colKey, i);
     const isOverflowing = el.scrollWidth > el.clientWidth + 1;
-    setOverflowFactory(prev => {
-      const has = prev.has(i);
+    setOverflowCells(prev => {
+      const has = prev.has(key);
       if (isOverflowing === has) return prev;
       const next = new Set(prev);
-      isOverflowing ? next.add(i) : next.delete(i);
+      isOverflowing ? next.add(key) : next.delete(key);
       return next;
     });
   }
-
-  function cellKey(colKey, i) { return `${colKey}:${i}`; }
 
   function toggleCell(colKey, i) {
     setExpandedCells(prev => {
@@ -808,32 +810,55 @@ function MainDashboard({ navigate }) {
                             c.key==="factory" ? {maxWidth:"none", overflow:"visible"}
                             : c.key==="import_type" ? {padding:"8px 4px", textAlign:"center"}
                             : c.key==="email" ? {maxWidth:"none"}
+                            : c.key==="sku_name"
+                            ? {maxWidth:"none", overflow:"visible", whiteSpace: expandedOverflow.has(cellKey("sku_name",i)) ? "normal" : "nowrap"}
                             : ["category","mc","importer","country"].includes(c.key)
                             ? {maxWidth:"none", overflow:"visible", whiteSpace: expandedCells.has(cellKey(c.key,i)) ? "normal" : "nowrap"}
                             : undefined
                           }>
 
                           {c.clickable==="sku"
-                            ? <span className="link-cell" onClick={()=>navigate("sku",{row})}>{row[c.key]}</span>
+                            ? (
+                              <div className="sku-cell">
+                                <span
+                                  ref={el=>overflowTextRef(el,"sku_name",i)}
+                                  className="link-cell sku-cell-text"
+                                  style={expandedOverflow.has(cellKey("sku_name",i)) ? {whiteSpace:"normal",wordBreak:"break-all"} : undefined}
+                                  onClick={()=>navigate("sku",{row})}
+                                  title={row[c.key]}
+                                >
+                                  {row[c.key]}
+                                </span>
+                                {(overflowCells.has(cellKey("sku_name",i)) || expandedOverflow.has(cellKey("sku_name",i))) && (
+                                  <button
+                                    className="sku-expand-btn"
+                                    onClick={(e)=>{e.stopPropagation();toggleOverflowExpand("sku_name",i);}}
+                                    title={expandedOverflow.has(cellKey("sku_name",i))?"접기":"펼치기"}
+                                  >
+                                    {expandedOverflow.has(cellKey("sku_name",i))?"▲":"▼"}
+                                  </button>
+                                )}
+                              </div>
+                            )
                             : c.clickable==="mfr"
                             ? (
                               <div className="sku-cell">
                                 <span
-                                  ref={el=>factoryTextRef(el,i)}
+                                  ref={el=>overflowTextRef(el,"factory",i)}
                                   className="link-cell sku-cell-text"
-                                  style={expandedFactory.has(i) ? {whiteSpace:"normal",wordBreak:"break-all"} : undefined}
+                                  style={expandedOverflow.has(cellKey("factory",i)) ? {whiteSpace:"normal",wordBreak:"break-all"} : undefined}
                                   onClick={()=>navigate("mfr",{row,from:"main"})}
                                   title={row[c.key]}
                                 >
                                   {row[c.key]}
                                 </span>
-                                {overflowFactory.has(i) && (
+                                {(overflowCells.has(cellKey("factory",i)) || expandedOverflow.has(cellKey("factory",i))) && (
                                   <button
                                     className="sku-expand-btn"
-                                    onClick={(e)=>{e.stopPropagation();toggleFactoryExpand(i);}}
-                                    title={expandedFactory.has(i)?"접기":"펼치기"}
+                                    onClick={(e)=>{e.stopPropagation();toggleOverflowExpand("factory",i);}}
+                                    title={expandedOverflow.has(cellKey("factory",i))?"접기":"펼치기"}
                                   >
-                                    {expandedFactory.has(i)?"▲":"▼"}
+                                    {expandedOverflow.has(cellKey("factory",i))?"▲":"▼"}
                                   </button>
                                 )}
                               </div>
