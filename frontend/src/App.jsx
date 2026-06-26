@@ -66,6 +66,7 @@ const styles = `
   thead tr { background: #f8fafc; }
   th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; overflow: hidden; }
   th:hover { color: #1a1a2e; }
+  th.col-highlight, td.col-highlight { background: #e0f2fe; }
   .sort-icon { margin-left: 3px; opacity: 0.4; }
   th.sorted .sort-icon { opacity: 1; color: #16a34a; }
   td { padding: 8px 12px; border-bottom: 1px solid #f1f3f5; color: #1a1a2e; vertical-align: middle; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -517,17 +518,25 @@ function MainDashboard({ navigate }) {
       .catch(e => setMonthlyModal(m => (m && m.row===row) ? { ...m, loading:false, error: e.message || "조회 실패" } : m));
   }
 
-  // 헤더(타이틀+업로드+경쟁사카드+툴바) 고정 시, 그 아래 테이블 헤더가 가려지지 않도록 높이 추적
+  // 테이블이 페이지 전체 스크롤을 만들지 않고 자체적으로만 스크롤되도록,
+  // 테이블 위쪽(히어로+패널헤더 등) 전체 높이를 측정해 남는 공간만 테이블에 할당
   const stickyHeaderRef = useRef(null);
-  const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  const tableWrapRef    = useRef(null);
+  const tableFooterRef  = useRef(null);
+  const [tableMaxHeight, setTableMaxHeight] = useState(null);
   useLayoutEffect(() => {
-    const el = stickyHeaderRef.current;
+    const el = tableWrapRef.current;
     if (!el) return;
-    const update = () => setStickyHeaderHeight(el.offsetHeight);
+    const update = () => {
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      const footerHeight = tableFooterRef.current ? tableFooterRef.current.offsetHeight : 0;
+      setTableMaxHeight(Math.max(200, window.innerHeight - top - footerHeight - 32));
+    };
     update();
+    window.addEventListener("resize", update);
     const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
+    ro.observe(document.body);
+    return () => { window.removeEventListener("resize", update); ro.disconnect(); };
   }, [showColMenu]);
 
   // 검색 디바운스 500ms
@@ -768,7 +777,7 @@ function MainDashboard({ navigate }) {
           {error&&<div className="error-box">오류: {error}</div>}
 
           {/* 테이블: 패널 헤더 아래 영역에서 자체적으로 상하/좌우 스크롤 */}
-          <div className="table-wrap" style={{overflow:"auto", maxHeight:`calc(100vh - ${stickyHeaderHeight}px - 16px)`}}>
+          <div className="table-wrap" ref={tableWrapRef} style={{overflow:"auto", maxHeight: tableMaxHeight ? `${tableMaxHeight}px` : undefined}}>
             <table>
               <colgroup>
                 {cols.map(c=><col key={c.key} style={c.key==="email" ? undefined : {width:c.w}}/>)}
@@ -776,7 +785,7 @@ function MainDashboard({ navigate }) {
               <thead style={{position:"sticky", top:0, zIndex:30}}>
                 <tr>
                   {cols.map(c=>(
-                    <th key={c.key} style={{position:"relative"}}>
+                    <th key={c.key} className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"relative"}}>
                       <div className="th-inner">
                         <span className="th-label">{c.label}</span>
                         <ColumnFilter
@@ -806,6 +815,7 @@ function MainDashboard({ navigate }) {
                     <tr key={i}>
                       {cols.map(c=>(
                         <td key={c.key} title={c.key==="factory"?undefined:row[c.key]}
+                          className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined}
                           style={
                             c.key==="factory" ? {maxWidth:"none", overflow:"visible"}
                             : c.key==="import_type" ? {padding:"8px 4px", textAlign:"center"}
@@ -894,7 +904,9 @@ function MainDashboard({ navigate }) {
               </tbody>
             </table>
           </div>
-          <Pagination meta={meta} page={page} setPage={setPage}/>
+          <div ref={tableFooterRef}>
+            <Pagination meta={meta} page={page} setPage={setPage}/>
+          </div>
         </div>
       </div>
 
