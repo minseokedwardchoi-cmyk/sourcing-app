@@ -520,8 +520,7 @@ function MainDashboard({ navigate }) {
 
   // 히어로(KPI) 영역은 페이지와 함께 스크롤되어 사라지고, 패널 헤더(경쟁사카드+툴바)가
   // 화면 상단에 고정되면, 그 아래 테이블 영역이 남은 뷰포트 높이를 모두 차지하며
-  // 자체적으로(가로/세로) 스크롤되어 테이블 헤더가 항상 보이도록 높이를 계산.
-  // 페이지네이션은 테이블 영역 바깥(더 아래)에 위치하므로 높이 계산에서 제외.
+  // 자체적으로(가로/세로) 스크롤되어 테이블 헤더가 항상 보이도록 높이를 계산
   const stickyHeaderRef = useRef(null);
   const paginationRef   = useRef(null);
   const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
@@ -531,13 +530,15 @@ function MainDashboard({ navigate }) {
     if (!headerEl) return;
     const update = () => {
       const headerHeight = headerEl.offsetHeight;
+      const paginationHeight = paginationRef.current ? paginationRef.current.offsetHeight : 0;
       setStickyHeaderHeight(headerHeight);
-      setTableMaxHeight(Math.max(200, window.innerHeight - headerHeight - 16));
+      setTableMaxHeight(Math.max(200, window.innerHeight - headerHeight - paginationHeight - 16));
     };
     update();
     window.addEventListener("resize", update);
     const ro = new ResizeObserver(update);
     ro.observe(headerEl);
+    if (paginationRef.current) ro.observe(paginationRef.current);
     return () => { window.removeEventListener("resize", update); ro.disconnect(); };
   }, [showColMenu]);
 
