@@ -64,7 +64,7 @@ const styles = `
   .table-wrap { overflow-x: auto; }
   table { border-collapse: collapse; font-size: 13px; table-layout: fixed; width: 100%; min-width: 1306px; }
   thead tr { background: #f8fafc; }
-  th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; overflow: hidden; }
+  th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; overflow: hidden; background: #f8fafc; }
   th:hover { color: #1a1a2e; }
   th.col-highlight, td.col-highlight { background: #e0f2fe; }
   .sort-icon { margin-left: 3px; opacity: 0.4; }
@@ -518,24 +518,27 @@ function MainDashboard({ navigate }) {
       .catch(e => setMonthlyModal(m => (m && m.row===row) ? { ...m, loading:false, error: e.message || "조회 실패" } : m));
   }
 
-  // 테이블이 페이지 전체 스크롤을 만들지 않고 자체적으로만 스크롤되도록,
-  // 테이블 위쪽(히어로+패널헤더 등) 전체 높이를 측정해 남는 공간만 테이블에 할당
+  // 히어로(KPI) 영역은 페이지와 함께 스크롤되어 사라지고, 패널 헤더(경쟁사카드+툴바)가
+  // 화면 상단에 고정되면, 그 아래 테이블 영역이 남은 뷰포트 높이를 모두 차지하며
+  // 자체적으로(가로/세로) 스크롤되어 테이블 헤더가 항상 보이도록 높이를 계산
   const stickyHeaderRef = useRef(null);
-  const tableWrapRef    = useRef(null);
-  const tableFooterRef  = useRef(null);
-  const [tableMaxHeight, setTableMaxHeight] = useState(null);
+  const paginationRef   = useRef(null);
+  const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  const [tableMaxHeight,     setTableMaxHeight]     = useState(null);
   useLayoutEffect(() => {
-    const el = tableWrapRef.current;
-    if (!el) return;
+    const headerEl = stickyHeaderRef.current;
+    if (!headerEl) return;
     const update = () => {
-      const top = el.getBoundingClientRect().top + window.scrollY;
-      const footerHeight = tableFooterRef.current ? tableFooterRef.current.offsetHeight : 0;
-      setTableMaxHeight(Math.max(200, window.innerHeight - top - footerHeight - 32));
+      const headerHeight = headerEl.offsetHeight;
+      const paginationHeight = paginationRef.current ? paginationRef.current.offsetHeight : 0;
+      setStickyHeaderHeight(headerHeight);
+      setTableMaxHeight(Math.max(200, window.innerHeight - headerHeight - paginationHeight - 16));
     };
     update();
     window.addEventListener("resize", update);
     const ro = new ResizeObserver(update);
-    ro.observe(document.body);
+    ro.observe(headerEl);
+    if (paginationRef.current) ro.observe(paginationRef.current);
     return () => { window.removeEventListener("resize", update); ro.disconnect(); };
   }, [showColMenu]);
 
@@ -776,16 +779,16 @@ function MainDashboard({ navigate }) {
 
           {error&&<div className="error-box">오류: {error}</div>}
 
-          {/* 테이블: 패널 헤더 아래 영역에서 자체적으로 상하/좌우 스크롤 */}
-          <div className="table-wrap" ref={tableWrapRef} style={{overflow:"auto", maxHeight: tableMaxHeight ? `${tableMaxHeight}px` : undefined}}>
+          {/* 테이블: 패널 헤더 아래 남은 뷰포트 영역에서 자체적으로 상하/좌우 스크롤 */}
+          <div className="table-wrap" style={{overflow:"auto", maxHeight: tableMaxHeight ? `${tableMaxHeight}px` : undefined}}>
             <table>
               <colgroup>
                 {cols.map(c=><col key={c.key} style={c.key==="email" ? undefined : {width:c.w}}/>)}
               </colgroup>
-              <thead style={{position:"sticky", top:0, zIndex:30}}>
+              <thead>
                 <tr>
                   {cols.map(c=>(
-                    <th key={c.key} className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"relative"}}>
+                    <th key={c.key} className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">{c.label}</span>
                         <ColumnFilter
@@ -904,7 +907,7 @@ function MainDashboard({ navigate }) {
               </tbody>
             </table>
           </div>
-          <div ref={tableFooterRef}>
+          <div ref={paginationRef}>
             <Pagination meta={meta} page={page} setPage={setPage}/>
           </div>
         </div>
