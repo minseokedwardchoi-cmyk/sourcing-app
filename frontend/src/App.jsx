@@ -62,9 +62,9 @@ const styles = `
   .pill.active { background: #16a34a; border-color: #16a34a; color: #fff; }
   .select-f { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background: #f9fafb; color: #1a1a2e; outline: none; cursor: pointer; }
   .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table { border-collapse: collapse; font-size: 13px; table-layout: fixed; }
   thead tr { background: #f8fafc; }
-  th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; }
+  th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; overflow: hidden; }
   th:hover { color: #1a1a2e; }
   .sort-icon { margin-left: 3px; opacity: 0.4; }
   th.sorted .sort-icon { opacity: 1; color: #16a34a; }
@@ -131,7 +131,7 @@ const styles = `
   .col-item { display: flex; align-items: center; gap: 7px; padding: 4px 8px; cursor: pointer; border-radius: 4px; font-size: 12px; }
   .col-item:hover { background: #f3f4f6; }
   .th-inner { display:flex; align-items:center; justify-content:space-between; gap:2px; }
-  .th-label { white-space:nowrap; flex:1; }
+  .th-label { white-space:nowrap; flex:1; overflow:hidden; text-overflow:ellipsis; min-width:0; }
   .filter-icon-btn { background:none; border:none; cursor:pointer; padding:2px 4px; border-radius:2px; font-size:26px; color:#9ca3af; line-height:1; flex-shrink:0; }
   .filter-icon-btn:hover { background:#e5e7eb; color:#374151; }
   .filter-icon-btn.active { color:#16a34a; background:#dcfce7; }
@@ -412,9 +412,9 @@ function yearLabel(offset, baseYear) {
 
 const ALL_COLS = [
   { key:"category",     label:"구분",           w:90,  filterKey:"category"               },
-  { key:"mc",           label:"MC",             w:60,  filterKey:"mc",      isMc:true      },
+  { key:"mc",           label:"MC",             w:58,  filterKey:"mc",      isMc:true      },
   { key:"sku_name",     label:"제품명",         w:240, filterKey:"sku_name", clickable:"sku" },
-  { key:"import_type",  label:"OEM/수입",       w:42,  filterKey:"import_type"             },
+  { key:"import_type",  label:"OEM/수입",       w:38,  filterKey:"import_type"             },
   { key:"importer",     label:"수입업체",       w:90,  filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:110, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:50,  filterKey:"country", clickable:"country" },
@@ -732,10 +732,13 @@ function MainDashboard({ navigate }) {
           {/* 테이블: 패널 헤더 아래 영역에서 자체적으로 상하/좌우 스크롤 */}
           <div className="table-wrap" style={{overflow:"auto", maxHeight:`calc(100vh - ${stickyHeaderHeight}px - 16px)`}}>
             <table>
+              <colgroup>
+                {cols.map(c=><col key={c.key} style={{width:c.w}}/>)}
+              </colgroup>
               <thead style={{position:"sticky", top:0, zIndex:30}}>
                 <tr>
                   {cols.map(c=>(
-                    <th key={c.key} style={{minWidth:c.w, position:"relative"}}>
+                    <th key={c.key} style={{position:"relative"}}>
                       <div className="th-inner">
                         <span className="th-label">{c.label}</span>
                         <ColumnFilter
@@ -765,7 +768,11 @@ function MainDashboard({ navigate }) {
                     <tr key={i}>
                       {cols.map(c=>(
                         <td key={c.key} title={c.key==="factory"?undefined:row[c.key]}
-                          style={c.key==="factory" ? {maxWidth:"none", overflow:"visible"} : undefined}>
+                          style={
+                            c.key==="factory" ? {maxWidth:"none", overflow:"visible"}
+                            : c.key==="import_type" ? {padding:"8px 4px", textAlign:"center"}
+                            : undefined
+                          }>
 
                           {c.clickable==="sku"
                             ? <span className="link-cell" onClick={()=>navigate("sku",{row})}>{row[c.key]}</span>
@@ -808,7 +815,7 @@ function MainDashboard({ navigate }) {
                                 {row[c.key]>0 ? row[c.key] : "-"}
                               </span>
                             : c.isMc
-                            ? <span className="badge b-mc">{row[c.key]}</span>
+                            ? <span className="badge b-mc">{row[c.key] && row[c.key].length>5 ? row[c.key].slice(0,5)+"…" : row[c.key]}</span>
                             : c.key==="email"
                             ? <span className="email-cell">{row[c.key]||"-"}</span>
                             : c.key==="import_type"
