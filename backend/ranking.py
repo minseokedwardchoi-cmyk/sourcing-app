@@ -62,6 +62,84 @@ def _import_count_grades(counts_by_factory: dict[str, int]) -> dict[str, str]:
     return grades
 
 
+async def _compute_rankings_for_scope(
+    db: AsyncSession, scope_sql: str, scope_params: dict, key_col: str = "factory"
+) -> dict[str, dict]:
+    """
+    scope_sql(예: "sku_name IN (...)" 또는 "country = :country")로 한정된 집단 안에서
+    key_col(factory 또는 manufacturer) 단위 랭킹 점수/등급을 계산하는 공용 로직.
+    """
+    count_r = await db.execute(text(f"""
+        SELECT {key_col}, SUM(import_count) AS total_import_count
+        FROM sku_factory_mv
+        WHERE {scope_sql} AND {key_col} IS NOT NULL
+        GROUP BY {key_col}
+    """), scope_params)
+    counts_by_key = {r[0]: int(r[1] or 0) for r in count_r.fetchall()}
+
+    importers_r = await db.execute(text(f"""
+        SELECT {key_col}, array_agg(DISTINCT imp) AS all_importers
+        FROM sku_factory_mv
+        LEFT JOIN LATERAL unnest(importers) AS imp ON true
+        WHERE {scope_sql} AND {key_col} IS NOT NULL
+        GROUP BY {key_col}
+    """), scope_params)
+    importers_by_key: dict[str, set[str]] = {
+        r[0]: {imp for imp in (r[1] or []) if imp} for r in importers_r.fetchall()
+    }
+
+    cur_year = date.today().year
+    y1, y2, y3 = cur_year - 3, cur_year - 2, cur_year - 1  # 시간순: 오래된 → 최근
+    growth_r = await db.execute(text(f"""
+        SELECT {key_col},
+               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y1 THEN 1 END)::int AS c1,
+               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y2 THEN 1 END)::int AS c2,
+               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y3 THEN 1 END)::int AS c3
+        FROM import_history
+        WHERE {scope_sql} AND {key_col} IS NOT NULL
+        GROUP BY {key_col}
+    """), {**scope_params, "y1": y1, "y2": y2, "y3": y3})
+    growth_by_key = {r[0]: (r[1], r[2], r[3]) for r in growth_r.fetchall()}
+
+    import_count_grades = _import_count_grades(counts_by_key)
+
+    rankings: dict[str, dict] = {}
+    for key in counts_by_key:
+        matched_top5 = sorted(
+            importers_by_key.get(key, set()) & set(TOP5_RETAILERS),
+            key=TOP5_RETAILERS.index,
+        )
+        top5_grade = _top5_grade(len(matched_top5))
+
+        import_grade = import_count_grades.get(key, "C")
+
+        gy1, gy2, gy3 = growth_by_key.get(key, (0, 0, 0))
+        growth_grade = _growth_grade(gy1, gy2, gy3)
+
+        weighted = (
+            _GRADE_SCORE[top5_grade] * 0.5
+            + _GRADE_SCORE[import_grade] * 0.3
+            + _GRADE_SCORE[growth_grade] * 0.2
+        )
+        ranking_score = round(weighted / 3 * 100, 1)
+
+        rankings[key] = {
+            "ranking_score": ranking_score,
+            "top5_retailer_grade": top5_grade,
+            "top5_retailers_matched": matched_top5,
+            "import_count_grade": import_grade,
+            "total_import_count": counts_by_key.get(key, 0),
+            "growth_trend_grade": growth_grade,
+            "growth_yearly": [
+                {"year": str(y1), "count": gy1},
+                {"year": str(y2), "count": gy2},
+                {"year": str(y3), "count": gy3},
+            ],
+        }
+
+    return rankings
+
+
 async def compute_factory_rankings(
     db: AsyncSession, similar_skus: list[str]
 ) -> dict[str, dict]:
@@ -77,75 +155,20 @@ async def compute_factory_rankings(
     in_params = {f"s{i}": s for i, s in enumerate(similar_skus)}
     in_clause = ", ".join(f":s{i}" for i in range(len(similar_skus)))
 
-    # ① 국내 수입횟수: factory별 총 수입횟수 (유사 SKU 집단 내)
-    count_r = await db.execute(text(f"""
-        SELECT factory, SUM(import_count) AS total_import_count
-        FROM sku_factory_mv
-        WHERE sku_name IN ({in_clause}) AND factory IS NOT NULL
-        GROUP BY factory
-    """), in_params)
-    counts_by_factory = {r[0]: int(r[1] or 0) for r in count_r.fetchall()}
+    return await _compute_rankings_for_scope(
+        db, f"sku_name IN ({in_clause})", in_params, key_col="factory"
+    )
 
-    # ② 탑5 유통사 거래 다양성: factory별 거래한 유통사(정규화된 importer) 집합
-    importers_r = await db.execute(text(f"""
-        SELECT factory, array_agg(DISTINCT imp) AS all_importers
-        FROM sku_factory_mv
-        LEFT JOIN LATERAL unnest(importers) AS imp ON true
-        WHERE sku_name IN ({in_clause}) AND factory IS NOT NULL
-        GROUP BY factory
-    """), in_params)
-    importers_by_factory: dict[str, set[str]] = {
-        r[0]: {imp for imp in (r[1] or []) if imp} for r in importers_r.fetchall()
-    }
 
-    # ③ 최근 완료된 3개년 수입횟수 (현재 연도 제외)
-    cur_year = date.today().year
-    y1, y2, y3 = cur_year - 3, cur_year - 2, cur_year - 1  # 시간순: 오래된 → 최근
-    growth_r = await db.execute(text(f"""
-        SELECT factory,
-               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y1 THEN 1 END)::int AS c1,
-               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y2 THEN 1 END)::int AS c2,
-               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y3 THEN 1 END)::int AS c3
-        FROM import_history
-        WHERE sku_name IN ({in_clause}) AND factory IS NOT NULL
-        GROUP BY factory
-    """), {**in_params, "y1": y1, "y2": y2, "y3": y3})
-    growth_by_factory = {r[0]: (r[1], r[2], r[3]) for r in growth_r.fetchall()}
+async def compute_manufacturer_rankings_by_country(
+    db: AsyncSession, country: str
+) -> dict[str, dict]:
+    """
+    국가 페이지: 해당 country에 속한 제조사(manufacturer) 집단 안에서 동일한
+    랭킹 로직(가중치/등급 산출)을 재사용해 점수를 계산한다. (새 점수 로직 아님)
 
-    import_count_grades = _import_count_grades(counts_by_factory)
-
-    rankings: dict[str, dict] = {}
-    for factory in counts_by_factory:
-        matched_top5 = sorted(
-            importers_by_factory.get(factory, set()) & set(TOP5_RETAILERS),
-            key=TOP5_RETAILERS.index,
-        )
-        top5_grade = _top5_grade(len(matched_top5))
-
-        import_grade = import_count_grades.get(factory, "C")
-
-        gy1, gy2, gy3 = growth_by_factory.get(factory, (0, 0, 0))
-        growth_grade = _growth_grade(gy1, gy2, gy3)
-
-        weighted = (
-            _GRADE_SCORE[top5_grade] * 0.5
-            + _GRADE_SCORE[import_grade] * 0.3
-            + _GRADE_SCORE[growth_grade] * 0.2
-        )
-        ranking_score = round(weighted / 3 * 100, 1)
-
-        rankings[factory] = {
-            "ranking_score": ranking_score,
-            "top5_retailer_grade": top5_grade,
-            "top5_retailers_matched": matched_top5,
-            "import_count_grade": import_grade,
-            "total_import_count": counts_by_factory.get(factory, 0),
-            "growth_trend_grade": growth_grade,
-            "growth_yearly": [
-                {"year": str(y1), "count": gy1},
-                {"year": str(y2), "count": gy2},
-                {"year": str(y3), "count": gy3},
-            ],
-        }
-
-    return rankings
+    반환: {manufacturer: {...}} (compute_factory_rankings와 동일한 필드 구조)
+    """
+    return await _compute_rankings_for_scope(
+        db, "country = :country", {"country": country}, key_col="manufacturer"
+    )

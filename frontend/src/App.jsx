@@ -4,6 +4,7 @@ import {
   fetchManufacturerDetail, uploadExcel,
   updateManufacturerContact, uploadContacts,
   fetchColumnValues, fetchMonthlyImportCounts,
+  fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers,
 } from "./api.js";
 
 // ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
@@ -183,6 +184,18 @@ const styles = `
   .comp-card-name { font-size: 11px; font-weight: 600; }
   .comp-card-num  { font-size: 20px; font-weight: 700; line-height: 1; }
   .comp-card-label { font-size: 10px; opacity: .7; margin-top: -2px; }
+  .country-header-card { padding: 16px 18px; }
+  .country-header-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  .country-title-block { flex: 1; min-width: 220px; }
+  .country-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+  .country-rank-line { font-size: 13px; color: #374151; }
+  .country-rank-line.muted { color: #9ca3af; }
+  .country-stat-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .country-pie-block { display: flex; align-items: center; gap: 12px; }
+  .country-pie-legend { font-size: 12px; color: #374151; display: flex; flex-direction: column; gap: 4px; }
+  .legend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .country-top-items { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+  .country-top-legend { flex: 1; min-width: 220px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; }
 `;
 
 // ─── 컬럼 필터 컴포넌트 (엑셀 스타일) ───────────────────────────────────────
@@ -391,7 +404,7 @@ const ALL_COLS = [
   { key:"import_type",  label:"OEM/수입",       w:85,  filterKey:"import_type"             },
   { key:"importer",     label:"수입업체",       w:160, filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:220, filterKey:"factory", clickable:"mfr" },
-  { key:"country",      label:"제조국",         w:85,  filterKey:"country"                 },
+  { key:"country",      label:"제조국",         w:85,  filterKey:"country", clickable:"country" },
   { key:"import_count", label:"수입횟수(전체)", w:90,  isNumeric:true                      },
   { key:"monthly_summary", label:"월별 수입횟수", w:340                                    },
   { key:"email",        label:"이메일",         w:160, filterKey:"email"                   },
@@ -712,6 +725,10 @@ function MainDashboard({ navigate }) {
                             ? <span className="link-cell" onClick={()=>navigate("sku",{row})}>{row[c.key]}</span>
                             : c.clickable==="mfr"
                             ? <span className="link-cell" onClick={()=>navigate("mfr",{row,from:"main"})}>{row[c.key]}</span>
+                            : c.clickable==="country"
+                            ? (row[c.key]
+                                ? <span className="link-cell" onClick={()=>navigate("country",{country:row[c.key]})}>{row[c.key]}</span>
+                                : "-")
                             : c.key==="import_count"
                             ? <span className="badge b-count">{row[c.key]}</span>
                             : c.key==="monthly_summary"
@@ -959,7 +976,7 @@ function SkuManufacturers({ navigate, state }) {
 // PAGE 3: 제조사 상세
 // ═══════════════════════════════════════════════════════════════════════════════
 function ManufacturerDetail({ navigate, state }) {
-  const { row, from, skuState } = state;
+  const { row, from, skuState, countryState } = state;
   const manufacturer = row.manufacturer||row.factory||"";
   const factory      = row.factory||"";
   const [res,     setRes]     = useState(null);
@@ -1047,8 +1064,8 @@ function ManufacturerDetail({ navigate, state }) {
         </div>
       </div>
       <div className="page">
-        <button className="back-btn" onClick={()=>from==="sku"?navigate("sku",skuState):navigate("main")}>
-          ← {from==="sku"?"선택 SKU 취급 제조사로 돌아가기":"수입/OEM SKU 이력으로 돌아가기"}
+        <button className="back-btn" onClick={()=>from==="sku"?navigate("sku",skuState):from==="country"?navigate("country",countryState):navigate("main")}>
+          ← {from==="sku"?"선택 SKU 취급 제조사로 돌아가기":from==="country"?"국가별 상세로 돌아가기":"수입/OEM SKU 이력으로 돌아가기"}
         </button>
 
         {error&&<div className="error-box">오류: {error}</div>}
@@ -1284,6 +1301,243 @@ function ManufacturerDetail({ navigate, state }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// PAGE 4: 국가별 상세
+// ═══════════════════════════════════════════════════════════════════════════════
+const PIE_COLORS = ["#2563eb","#16a34a","#f59e0b","#dc2626","#7c3aed","#0891b2","#db2777","#65a30d","#ea580c","#4338ca"];
+
+function polarToCartesian(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function pieSlicePath(cx, cy, r, startAngle, endAngle) {
+  const start = polarToCartesian(cx, cy, r, endAngle);
+  const end   = polarToCartesian(cx, cy, r, startAngle);
+  const largeArc = endAngle - startAngle <= 180 ? 0 : 1;
+  return `M ${cx} ${cy} L ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y} Z`;
+}
+
+function PieChart({ slices, size = 120 }) {
+  const r = size / 2;
+  const total = slices.reduce((s, x) => s + (x.value || 0), 0);
+  if (!total) {
+    return (
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={r} cy={r} r={r - 1} fill="#f3f4f6" stroke="#e5e7eb" />
+      </svg>
+    );
+  }
+  let angle = 0;
+  const paths = slices.map((s, i) => {
+    const portion = (s.value || 0) / total;
+    const startAngle = angle;
+    const endAngle = angle + portion * 360;
+    angle = endAngle;
+    return <path key={i} d={pieSlicePath(r, r, r - 1, startAngle, endAngle)} fill={s.color} />;
+  });
+  return <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>{paths}</svg>;
+}
+
+function CountryDetail({ navigate, state }) {
+  const country = state?.country;
+  const [summary,   setSummary]   = useState(null);
+  const [topItems,  setTopItems]  = useState(null);
+  const [sumLoading, setSumLoading] = useState(true);
+  const [topLoading, setTopLoading] = useState(true);
+  const [error,     setError]     = useState(null);
+
+  const [search,    setSearch]    = useState("");
+  const [debSearch, setDebSearch] = useState("");
+  const [mcFilter,  setMcFilter]  = useState("");
+  const [page,      setPage]      = useState(1);
+  const [sortBy,    setSortBy]    = useState(null);
+  const [sortDir,   setSortDir]   = useState("desc");
+
+  const [mfrRes,     setMfrRes]     = useState(null);
+  const [mfrLoading, setMfrLoading] = useState(true);
+
+  useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
+
+  useEffect(()=>{
+    if (!country) return;
+    setSumLoading(true); setError(null);
+    fetchCountrySummary(country).then(setSummary).catch(e=>setError(e.message)).finally(()=>setSumLoading(false));
+    setTopLoading(true);
+    fetchCountryTopItems(country).then(setTopItems).catch(e=>setError(e.message)).finally(()=>setTopLoading(false));
+  },[country]);
+
+  useEffect(()=>{
+    if (!country) return;
+    setMfrLoading(true);
+    fetchCountryManufacturers(country, {
+      mc: mcFilter || undefined,
+      query: debSearch || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortDir,
+      page, pageSize: 20,
+    }).then(setMfrRes).catch(e=>setError(e.message)).finally(()=>setMfrLoading(false));
+  },[country,mcFilter,debSearch,sortBy,sortDir,page]);
+
+  function handleSort(col) {
+    if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortBy(col); setSortDir("desc"); }
+    setPage(1);
+  }
+
+  function resetFilters() {
+    setSearch(""); setDebSearch(""); setMcFilter(""); setPage(1);
+  }
+
+  const activeFilters = [];
+  if (debSearch) activeFilters.push(`검색: "${debSearch}"`);
+  if (mcFilter)  activeFilters.push(`MC: ${mcFilter}`);
+
+  if (!country) {
+    return (
+      <div className="app">
+        <style>{styles}</style>
+        <div className="page">
+          <div className="empty-state">국가 정보가 없습니다.</div>
+          <button className="back-btn" onClick={()=>navigate("main")}>← 돌아가기</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      <style>{styles}</style>
+      <div className="banner">
+        <div className="banner-inner">
+          <div className="banner-left">
+            <h1>🌐 Global Factory Sourcing Database</h1>
+            <p>수입식품정보 기반으로 구축한 해외 제조업체 · SKU · 수입/OEM 이력 통합 DB</p>
+          </div>
+        </div>
+      </div>
+      <div className="page">
+        <button className="back-btn" onClick={()=>navigate("main")}>← 수입/OEM SKU 이력으로 돌아가기</button>
+
+        {error && <div className="error-box">오류: {error}</div>}
+
+        <div className="card country-header-card">
+          {sumLoading ? (
+            <>
+              <div className="skeleton" style={{width:"30%",height:22,marginBottom:8}}/>
+              <div className="skeleton" style={{width:"55%",height:13}}/>
+            </>
+          ) : summary ? (
+            <div className="country-header-row">
+              <div className="country-title-block">
+                <div className="country-title">{summary.flag} {summary.country}</div>
+                {summary.has_amount_stats ? (
+                  <div className="country-rank-line">
+                    대한민국 수입금액 기준 국가 순위 <strong>{summary.amount_rank}위</strong>
+                    {" "}(비중 {summary.amount_share_pct}%)
+                  </div>
+                ) : (
+                  <div className="country-rank-line muted">수입금액 통계 없음</div>
+                )}
+                <div className="country-stat-row">
+                  <span className="badge b-gray">제조사 {summary.manufacturer_count}개</span>
+                  <span className="badge b-gray">수입이력 {summary.total_import_count}건</span>
+                </div>
+              </div>
+              {summary.has_amount_stats && (
+                <div className="country-pie-block">
+                  <PieChart slices={[
+                    { value: summary.total_amount_usd_k, color: "#2563eb" },
+                    { value: Math.max((summary.national_total_amount_usd_k||0) - (summary.total_amount_usd_k||0), 0), color: "#e5e7eb" },
+                  ]} size={100}/>
+                  <div className="country-pie-legend">
+                    <div><span className="legend-dot" style={{background:"#2563eb"}}/>{summary.country} ({summary.amount_share_pct}%)</div>
+                    <div><span className="legend-dot" style={{background:"#e5e7eb"}}/>기타 국가</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {!topLoading && topItems?.items?.length > 0 && (
+          <div className="card" style={{marginTop:12}}>
+            <div className="card-header"><span className="card-title">📊 국가별 주요 수입품목 TOP10</span></div>
+            <div className="card-body country-top-items">
+              <PieChart slices={topItems.items.map((it,i)=>({value:it.pct, color: PIE_COLORS[i % PIE_COLORS.length]}))} size={140}/>
+              <div className="country-pie-legend country-top-legend">
+                {topItems.items.map((it,i)=>(
+                  <div key={i}>
+                    <span className="legend-dot" style={{background:PIE_COLORS[i % PIE_COLORS.length]}}/>
+                    {it.rank}. {it.name} ({it.pct}%)
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="card" style={{marginTop:12}}>
+          <div className="card-header"><span className="card-title">해당 국가 제조사 목록</span></div>
+          <div className="toolbar">
+            <div className="search-wrap">
+              <span className="search-icon">🔍</span>
+              <input placeholder="SKU명 또는 MC명을 검색하세요" value={search} onChange={e=>setSearch(e.target.value)}/>
+            </div>
+            <span className="count-label">{mfrRes?`${mfrRes.meta.total}개 제조사`:""}</span>
+          </div>
+          {activeFilters.length > 0 && (
+            <div className="filter-bar">
+              <span className="filter-label">적용된 필터: {activeFilters.join(" / ")}</span>
+              <button className="icon-btn" onClick={resetFilters}>필터 초기화</button>
+            </div>
+          )}
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{minWidth:40}}>순위</th>
+                  <th style={{minWidth:200}}>제조사명</th>
+                  <th style={{minWidth:80}}>제조국</th>
+                  <th style={{minWidth:160}}>주요 MC</th>
+                  <th style={{minWidth:80}} onClick={()=>handleSort("sku_count")}>취급 SKU 수 <SortIcon col="sku_count" sortCol={sortBy} sortDir={sortDir}/></th>
+                  <th style={{minWidth:90}} onClick={()=>handleSort("total_import_count")}>총수입횟수 <SortIcon col="total_import_count" sortCol={sortBy} sortDir={sortDir}/></th>
+                  <th style={{minWidth:100}} onClick={()=>handleSort("top5_count")}>탑5 거래 유통사 수 <SortIcon col="top5_count" sortCol={sortBy} sortDir={sortDir}/></th>
+                  <th style={{minWidth:90}} onClick={()=>handleSort("latest_import")}>최근 수입일 <SortIcon col="latest_import" sortCol={sortBy} sortDir={sortDir}/></th>
+                  <th style={{minWidth:90}} onClick={()=>handleSort("ranking_score")}>제조사 점수 <SortIcon col="ranking_score" sortCol={sortBy} sortDir={sortDir}/></th>
+                </tr>
+              </thead>
+              <tbody>
+                {mfrLoading ? <SkeletonRows cols={9}/>
+                : !mfrRes?.data?.length
+                  ? <tr><td colSpan={9}><div className="empty-state">조건에 맞는 제조사가 없습니다.</div></td></tr>
+                  : mfrRes.data.map((m,i)=>(
+                    <tr key={i}>
+                      <td>{m.rank}</td>
+                      <td title={m.manufacturer}>
+                        <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:m.manufacturer,factory:m.factory||m.manufacturer},from:"country",countryState:state})}>
+                          {m.manufacturer}
+                        </span>
+                      </td>
+                      <td>{m.country||"-"}</td>
+                      <td>{m.primary_mc ? <span className="badge b-mc">{m.primary_mc}</span> : "-"}</td>
+                      <td>{m.sku_count}</td>
+                      <td>{m.total_import_count}</td>
+                      <td>{m.top5_count}</td>
+                      <td>{m.latest_import||"-"}</td>
+                      <td><span className="score-cell">{m.ranking_score!=null?`${m.ranking_score.toFixed(1)}점`:"-"}</span></td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination meta={mfrRes?.meta} page={page} setPage={setPage}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ROOT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
@@ -1291,5 +1545,6 @@ export default function App() {
   function navigate(name, state) { setPage({name,state}); window.scrollTo({top:0,behavior:"smooth"}); }
   if (page.name==="sku") return <SkuManufacturers navigate={navigate} state={page.state}/>;
   if (page.name==="mfr") return <ManufacturerDetail navigate={navigate} state={page.state}/>;
+  if (page.name==="country") return <CountryDetail navigate={navigate} state={page.state}/>;
   return <MainDashboard navigate={navigate}/>;
 }

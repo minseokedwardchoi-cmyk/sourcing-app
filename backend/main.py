@@ -31,7 +31,14 @@ from schemas import (
 )
 from importer import import_excel, COMPETITOR_MAP
 from contact_importer import import_contacts
-from ranking import compute_factory_rankings
+from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, TOP5_RETAILERS
+from country_data import (
+    COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
+)
+from schemas import (
+    CountrySummaryResponse, CountryTopItemRow, CountryTopItemsResponse,
+    CountryManufacturerRow, CountryManufacturersResponse,
+)
 
 load_dotenv()
 
@@ -161,7 +168,25 @@ async def startup():
             FROM import_history
             GROUP BY sku_name, factory, manufacturer, country, mc
         """))
+        await _seed_country_stats(conn)
     asyncio.create_task(_build_indexes_bg())
+
+
+async def _seed_country_stats(conn):
+    """국가별 수입금액/주요품목 정적 참고자료를 upsert (country_data.py 기준)."""
+    for country, amount in COUNTRY_TOTALS_USD_K.items():
+        await conn.execute(text("""
+            INSERT INTO country_import_stat (country, total_amount_usd_k)
+            VALUES (:country, :amount)
+            ON CONFLICT (country) DO UPDATE SET total_amount_usd_k = EXCLUDED.total_amount_usd_k
+        """), {"country": country, "amount": amount})
+    for country, items in COUNTRY_TOP_ITEMS.items():
+        for idx, (name, pct) in enumerate(items, start=1):
+            await conn.execute(text("""
+                INSERT INTO country_top_item (country, rank, item_name, pct)
+                VALUES (:country, :rank, :name, :pct)
+                ON CONFLICT (country, rank) DO UPDATE SET item_name = EXCLUDED.item_name, pct = EXCLUDED.pct
+            """), {"country": country, "rank": idx, "name": name, "pct": pct})
 
 
 class ContactUpdateRequest(BaseModel):
@@ -599,6 +624,198 @@ async def get_sku_factories(
             page        = page,
             page_size   = page_size,
             total_pages = max(1, math.ceil(total / page_size)),
+        ),
+    )
+
+
+# ─── 2-1. 국가별 상세 페이지 ──────────────────────────────────────────────────
+@app.get("/api/countries/{country}/summary", response_model=CountrySummaryResponse)
+async def get_country_summary(country: str, db: AsyncSession = Depends(get_db)):
+    stat_r = await db.execute(
+        text("SELECT total_amount_usd_k FROM country_import_stat WHERE country = :c"),
+        {"c": country},
+    )
+    stat_row = stat_r.first()
+    has_stats = stat_row is not None
+    total_amount = float(stat_row[0]) if stat_row else None
+
+    amount_rank = None
+    amount_share_pct = None
+    national_total = float(NATIONAL_TOTAL_AMOUNT_USD_K)
+    if has_stats:
+        all_r = await db.execute(
+            text("SELECT country, total_amount_usd_k FROM country_import_stat ORDER BY total_amount_usd_k DESC")
+        )
+        for idx, r in enumerate(all_r.fetchall(), start=1):
+            if r[0] == country:
+                amount_rank = idx
+                break
+        amount_share_pct = round(total_amount / national_total * 100, 2) if national_total else None
+
+    mfr_r = await db.execute(text("""
+        SELECT COUNT(DISTINCT COALESCE(manufacturer, factory)) FROM import_history
+        WHERE country = :c AND COALESCE(manufacturer, factory) IS NOT NULL
+    """), {"c": country})
+    manufacturer_count = mfr_r.scalar() or 0
+
+    cnt_r = await db.execute(text("SELECT COUNT(*) FROM import_history WHERE country = :c"), {"c": country})
+    total_import_count = cnt_r.scalar() or 0
+
+    return CountrySummaryResponse(
+        country=country,
+        flag=get_flag(country),
+        has_amount_stats=has_stats,
+        amount_rank=amount_rank,
+        total_amount_usd_k=total_amount,
+        national_total_amount_usd_k=national_total,
+        amount_share_pct=amount_share_pct,
+        manufacturer_count=manufacturer_count,
+        total_import_count=total_import_count,
+    )
+
+
+@app.get("/api/countries/{country}/top-items", response_model=CountryTopItemsResponse)
+async def get_country_top_items(country: str, db: AsyncSession = Depends(get_db)):
+    rows_r = await db.execute(text("""
+        SELECT rank, item_name, pct FROM country_top_item
+        WHERE country = :c ORDER BY rank
+    """), {"c": country})
+    items = [CountryTopItemRow(rank=r[0], name=r[1], pct=float(r[2])) for r in rows_r.fetchall()]
+    return CountryTopItemsResponse(country=country, items=items)
+
+
+_COUNTRY_SORT_FIELDS = {"ranking_score", "total_import_count", "sku_count", "top5_count", "latest_import"}
+
+
+@app.get("/api/countries/{country}/manufacturers", response_model=CountryManufacturersResponse)
+async def get_country_manufacturers(
+    country:    str,
+    mc:         Optional[str] = Query(None),
+    query:      Optional[str] = Query(None),
+    sort_by:    Optional[str] = Query(None),
+    sort_order: str           = Query("desc"),
+    page:       int           = Query(1,  ge=1),
+    page_size:  int           = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    base_r = await db.execute(text("""
+        SELECT
+            COALESCE(manufacturer, factory)                                       AS mfr_key,
+            MAX(factory)                                                          AS sample_factory,
+            MAX(country)                                                          AS country,
+            COUNT(DISTINCT sku_name)                                              AS sku_count,
+            COUNT(*)                                                              AS total_import_count,
+            COUNT(DISTINCT mc)                                                    AS mc_count,
+            MAX(process_date)                                                     AS latest_import,
+            array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)      AS importers
+        FROM import_history
+        WHERE country = :country AND COALESCE(manufacturer, factory) IS NOT NULL
+        GROUP BY COALESCE(manufacturer, factory)
+    """), {"country": country})
+    base_rows = base_r.mappings().all()
+
+    if not base_rows:
+        return CountryManufacturersResponse(
+            country=country, data=[],
+            meta=PaginationMeta(total=0, page=page, page_size=page_size, total_pages=1),
+        )
+
+    primary_mc_r = await db.execute(text("""
+        SELECT mfr_key, mc FROM (
+            SELECT COALESCE(manufacturer, factory) AS mfr_key, mc, COUNT(*) AS cnt,
+                   ROW_NUMBER() OVER (PARTITION BY COALESCE(manufacturer, factory) ORDER BY COUNT(*) DESC) AS rn
+            FROM import_history
+            WHERE country = :country AND mc IS NOT NULL AND COALESCE(manufacturer, factory) IS NOT NULL
+            GROUP BY COALESCE(manufacturer, factory), mc
+        ) t WHERE rn = 1
+    """), {"country": country})
+    primary_mc_by_key = {r[0]: r[1] for r in primary_mc_r.fetchall()}
+
+    # 제조사 점수: 기존 ranking.py 로직을 그대로 재사용 (country 단위로 스코프만 변경)
+    rankings = await compute_manufacturer_rankings_by_country(db, country)
+
+    mc_included: Optional[set] = None
+    if mc and mc.strip():
+        mc_r = await db.execute(text("""
+            SELECT DISTINCT COALESCE(manufacturer, factory) FROM import_history
+            WHERE country = :country AND mc = :mc
+        """), {"country": country, "mc": mc.strip()})
+        mc_included = {r[0] for r in mc_r.fetchall()}
+
+    query_included: Optional[set] = None
+    matched_sku_by_key: dict[str, str] = {}
+    if query and query.strip():
+        q = query.strip()
+        # SKU 검색은 기존 유사-SKU 매칭 로직(% 트라이그램)을 재사용
+        q_r = await db.execute(text("""
+            SELECT DISTINCT COALESCE(manufacturer, factory), sku_name FROM import_history
+            WHERE country = :country
+              AND COALESCE(manufacturer, factory) IS NOT NULL
+              AND (mc ILIKE :like_q OR sku_name ILIKE :like_q OR sku_name % :q)
+        """), {"country": country, "like_q": f"%{q}%", "q": q})
+        query_included = set()
+        for mfr_key, sku_name in q_r.fetchall():
+            query_included.add(mfr_key)
+            matched_sku_by_key.setdefault(mfr_key, sku_name)
+
+    rows: list[dict] = []
+    for r in base_rows:
+        mfr_key = r["mfr_key"]
+        if mc_included is not None and mfr_key not in mc_included:
+            continue
+        if query_included is not None and mfr_key not in query_included:
+            continue
+
+        rk = rankings.get(mfr_key, {})
+        importers = set(r["importers"] or [])
+        top5_matched = sorted(importers & set(TOP5_RETAILERS), key=TOP5_RETAILERS.index)
+        mc_count = r["mc_count"] or 0
+        primary_mc = primary_mc_by_key.get(mfr_key)
+        primary_mc_label = None
+        if primary_mc:
+            primary_mc_label = primary_mc if mc_count <= 1 else f"{primary_mc} 외 {mc_count - 1}개"
+
+        rows.append({
+            "manufacturer":           mfr_key,
+            "factory":                r["sample_factory"],
+            "country":                r["country"],
+            "primary_mc":             primary_mc_label,
+            "sku_count":              r["sku_count"] or 0,
+            "total_import_count":     r["total_import_count"] or 0,
+            "top5_count":             len(top5_matched),
+            "top5_retailers_matched": top5_matched,
+            "latest_import":          r["latest_import"],
+            "ranking_score":          rk.get("ranking_score"),
+            "matched_sku":            matched_sku_by_key.get(mfr_key),
+        })
+
+    default_sort = "ranking_score" if (mc or query) else "total_import_count"
+    sb = sort_by if sort_by in _COUNTRY_SORT_FIELDS else default_sort
+    reverse = sort_order != "asc"
+
+    def _sort_value(row):
+        val = row.get(sb)
+        if sb == "latest_import":
+            return val or date.min
+        return val if val is not None else -1
+
+    rows.sort(key=_sort_value, reverse=reverse)
+
+    total = len(rows)
+    start = (page - 1) * page_size
+    page_rows = rows[start:start + page_size]
+
+    data = [
+        CountryManufacturerRow(rank=start + i + 1, **row)
+        for i, row in enumerate(page_rows)
+    ]
+
+    return CountryManufacturersResponse(
+        country=country,
+        data=data,
+        meta=PaginationMeta(
+            total=total, page=page, page_size=page_size,
+            total_pages=max(1, math.ceil(total / page_size)),
         ),
     )
 
