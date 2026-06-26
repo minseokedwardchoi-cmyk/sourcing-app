@@ -412,12 +412,12 @@ function yearLabel(offset, baseYear) {
 
 const ALL_COLS = [
   { key:"category",     label:"구분",           w:90,  filterKey:"category"               },
-  { key:"mc",           label:"MC",             w:80,  filterKey:"mc",      isMc:true      },
+  { key:"mc",           label:"MC",             w:60,  filterKey:"mc",      isMc:true      },
   { key:"sku_name",     label:"제품명",         w:240, filterKey:"sku_name", clickable:"sku" },
-  { key:"import_type",  label:"OEM/수입",       w:55,  filterKey:"import_type"             },
-  { key:"importer",     label:"수입업체",       w:120, filterKey:"importer"                },
+  { key:"import_type",  label:"OEM/수입",       w:42,  filterKey:"import_type"             },
+  { key:"importer",     label:"수입업체",       w:90,  filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:110, filterKey:"factory", clickable:"mfr" },
-  { key:"country",      label:"제조국",         w:65,  filterKey:"country", clickable:"country" },
+  { key:"country",      label:"제조국",         w:50,  filterKey:"country", clickable:"country" },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
   { key:"count_year3",  label:"",               w:70,  isYearCount:3                      },
   { key:"count_year2",  label:"",               w:70,  isYearCount:2                      },
