@@ -1071,6 +1071,41 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
 
     return {"inserted": inserted, "skipped": skipped}
 
+# ─── 4-3. 전체 데이터 삭제 ────────────────────────────────────────────────────
+class ClearDataRequest(BaseModel):
+    confirm: str
+
+
+class ClearDataResponse(BaseModel):
+    deleted_rows: int
+    message: str
+
+
+@app.delete("/api/data", response_model=ClearDataResponse)
+async def clear_all_data(
+    payload: ClearDataRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    if payload.confirm != "DELETE":
+        raise HTTPException(
+            status_code=400,
+            detail="confirm 필드에 'DELETE'를 정확히 입력해야 삭제가 진행됩니다.",
+        )
+
+    count_r = await db.execute(text("SELECT COUNT(*) FROM import_history"))
+    deleted_rows = count_r.scalar() or 0
+
+    await db.execute(text("TRUNCATE TABLE import_history"))
+    await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
+    await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+    await db.commit()
+
+    return ClearDataResponse(
+        deleted_rows=deleted_rows,
+        message=f"전체 데이터 삭제 완료: {deleted_rows}건 삭제됨",
+    )
+
+
 # ─── 5. DB 통계 ───────────────────────────────────────────────────────────────
 @app.get("/api/stats")
 async def get_stats(db: AsyncSession = Depends(get_db)):
