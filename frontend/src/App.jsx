@@ -62,7 +62,7 @@ const styles = `
   .pill.active { background: #16a34a; border-color: #16a34a; color: #fff; }
   .select-f { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background: #f9fafb; color: #1a1a2e; outline: none; cursor: pointer; }
   .table-wrap { overflow-x: auto; }
-  table { border-collapse: collapse; font-size: 13px; table-layout: fixed; width: 100%; min-width: 1100px; }
+  table { border-collapse: collapse; font-size: 13px; table-layout: fixed; width: 100%; min-width: 1586px; }
   thead tr { background: #f8fafc; }
   th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; overflow: hidden; }
   th:hover { color: #1a1a2e; }
@@ -413,8 +413,8 @@ function yearLabel(offset, baseYear) {
 const ALL_COLS = [
   { key:"category",     label:"구분",           w:118, filterKey:"category"               },
   { key:"mc",           label:"MC",             w:105, filterKey:"mc",      isMc:true      },
-  { key:"sku_name",     label:"제품명",         w:240, filterKey:"sku_name", clickable:"sku" },
-  { key:"import_type",  label:"OEM/수입",       w:38,  filterKey:"import_type"             },
+  { key:"sku_name",     label:"제품명",         w:480, filterKey:"sku_name", clickable:"sku" },
+  { key:"import_type",  label:"OEM/수입",       w:92,  filterKey:"import_type"             },
   { key:"importer",     label:"수입업체",       w:118, filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:110, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:105, filterKey:"country", clickable:"country" },
@@ -769,7 +769,7 @@ function MainDashboard({ navigate }) {
           <div className="table-wrap" style={{overflow:"auto", maxHeight:`calc(100vh - ${stickyHeaderHeight}px - 16px)`}}>
             <table>
               <colgroup>
-                {cols.map(c=><col key={c.key} style={(c.key==="sku_name"||c.key==="email") ? undefined : {width:c.w}}/>)}
+                {cols.map(c=><col key={c.key} style={c.key==="email" ? undefined : {width:c.w}}/>)}
               </colgroup>
               <thead style={{position:"sticky", top:0, zIndex:30}}>
                 <tr>
@@ -807,7 +807,7 @@ function MainDashboard({ navigate }) {
                           style={
                             c.key==="factory" ? {maxWidth:"none", overflow:"visible"}
                             : c.key==="import_type" ? {padding:"8px 4px", textAlign:"center"}
-                            : (c.key==="sku_name"||c.key==="email") ? {maxWidth:"none"}
+                            : c.key==="email" ? {maxWidth:"none"}
                             : ["category","mc","importer","country"].includes(c.key)
                             ? {maxWidth:"none", overflow:"visible", whiteSpace: expandedCells.has(cellKey(c.key,i)) ? "normal" : "nowrap"}
                             : undefined
