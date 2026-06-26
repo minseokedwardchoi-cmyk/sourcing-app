@@ -62,7 +62,7 @@ const styles = `
   .pill.active { background: #16a34a; border-color: #16a34a; color: #fff; }
   .select-f { padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; background: #f9fafb; color: #1a1a2e; outline: none; cursor: pointer; }
   .table-wrap { overflow-x: auto; }
-  table { border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+  table { border-collapse: collapse; font-size: 13px; table-layout: fixed; width: 100%; min-width: 1100px; }
   thead tr { background: #f8fafc; }
   th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; overflow: hidden; }
   th:hover { color: #1a1a2e; }
@@ -132,7 +132,7 @@ const styles = `
   .col-item:hover { background: #f3f4f6; }
   .th-inner { display:flex; align-items:center; justify-content:space-between; gap:2px; }
   .th-label { white-space:nowrap; flex:1; overflow:hidden; text-overflow:ellipsis; min-width:0; }
-  .filter-icon-btn { background:none; border:none; cursor:pointer; padding:2px 4px; border-radius:2px; font-size:26px; color:#9ca3af; line-height:1; flex-shrink:0; }
+  .filter-icon-btn { background:none; border:none; cursor:pointer; padding:2px 2px; border-radius:2px; font-size:13px; color:#9ca3af; line-height:1; flex-shrink:0; }
   .filter-icon-btn:hover { background:#e5e7eb; color:#374151; }
   .filter-icon-btn.active { color:#16a34a; background:#dcfce7; }
   .filter-dropdown { position:absolute; top:calc(100% + 2px); left:0; z-index:200; background:#fff; border:1px solid #bdc3c7; border-radius:4px; box-shadow:0 4px 16px rgba(0,0,0,.18); min-width:220px; max-width:300px; }
@@ -411,17 +411,17 @@ function yearLabel(offset, baseYear) {
 }
 
 const ALL_COLS = [
-  { key:"category",     label:"구분",           w:90,  filterKey:"category"               },
-  { key:"mc",           label:"MC",             w:58,  filterKey:"mc",      isMc:true      },
+  { key:"category",     label:"구분",           w:118, filterKey:"category"               },
+  { key:"mc",           label:"MC",             w:105, filterKey:"mc",      isMc:true      },
   { key:"sku_name",     label:"제품명",         w:240, filterKey:"sku_name", clickable:"sku" },
   { key:"import_type",  label:"OEM/수입",       w:38,  filterKey:"import_type"             },
-  { key:"importer",     label:"수입업체",       w:90,  filterKey:"importer"                },
+  { key:"importer",     label:"수입업체",       w:118, filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:110, filterKey:"factory", clickable:"mfr" },
-  { key:"country",      label:"제조국",         w:50,  filterKey:"country", clickable:"country" },
+  { key:"country",      label:"제조국",         w:105, filterKey:"country", clickable:"country" },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
-  { key:"count_year3",  label:"",               w:70,  isYearCount:3                      },
-  { key:"count_year2",  label:"",               w:70,  isYearCount:2                      },
-  { key:"count_year1",  label:"",               w:70,  isYearCount:1                      },
+  { key:"count_year3",  label:"",               w:78,  isYearCount:3                      },
+  { key:"count_year2",  label:"",               w:78,  isYearCount:2                      },
+  { key:"count_year1",  label:"",               w:78,  isYearCount:1                      },
   { key:"email",        label:"이메일",         w:160, filterKey:"email"                   },
 ];
 
@@ -448,6 +448,7 @@ function MainDashboard({ navigate }) {
   const [colFilters,  setColFilters]  = useState({});
   const [expandedFactory, setExpandedFactory] = useState(()=>new Set());  // 해외제조업소 펼침 상태 (행 인덱스)
   const [overflowFactory, setOverflowFactory] = useState(()=>new Set());  // 잘려서 펼치기 화살표가 필요한 행 인덱스
+  const [expandedCells,   setExpandedCells]   = useState(()=>new Set());  // 구분/MC/수입업체/제조국 글자수 제한 펼침 상태 (`${colKey}:${i}`)
   const [monthlyModal, setMonthlyModal] = useState(null);   // { row, loading, error, yearly, monthly }
   const colMenuRef = useRef(null);
   const fileRef    = useRef(null);
@@ -470,6 +471,41 @@ function MainDashboard({ navigate }) {
       isOverflowing ? next.add(i) : next.delete(i);
       return next;
     });
+  }
+
+  function cellKey(colKey, i) { return `${colKey}:${i}`; }
+
+  function toggleCell(colKey, i) {
+    setExpandedCells(prev => {
+      const k = cellKey(colKey, i);
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+  }
+
+  function renderTrunc(colKey, value, limit, i, { badgeClass, navTo } = {}) {
+    if (!value) return badgeClass ? <span className={`badge ${badgeClass}`}>-</span> : "-";
+    const key = cellKey(colKey, i);
+    const expanded = expandedCells.has(key);
+    const over = value.length > limit;
+    const text = expanded || !over ? value : value.slice(0, limit) + "…";
+    const textStyle = expanded ? { whiteSpace:"normal", wordBreak:"break-all" } : undefined;
+    const inner = badgeClass
+      ? <span className={`badge ${badgeClass}`} style={textStyle}>{text}</span>
+      : navTo
+      ? <span className="link-cell" style={textStyle} onClick={navTo}>{text}</span>
+      : <span style={textStyle}>{text}</span>;
+    return (
+      <div className="sku-cell">
+        {inner}
+        {over && (
+          <button className="sku-expand-btn" onClick={(e)=>{e.stopPropagation();toggleCell(colKey,i);}} title={expanded?"접기":"펼치기"}>
+            {expanded?"▲":"▼"}
+          </button>
+        )}
+      </div>
+    );
   }
 
   function openMonthlyModal(row) {
@@ -733,7 +769,7 @@ function MainDashboard({ navigate }) {
           <div className="table-wrap" style={{overflow:"auto", maxHeight:`calc(100vh - ${stickyHeaderHeight}px - 16px)`}}>
             <table>
               <colgroup>
-                {cols.map(c=><col key={c.key} style={{width:c.w}}/>)}
+                {cols.map(c=><col key={c.key} style={(c.key==="sku_name"||c.key==="email") ? undefined : {width:c.w}}/>)}
               </colgroup>
               <thead style={{position:"sticky", top:0, zIndex:30}}>
                 <tr>
@@ -771,6 +807,9 @@ function MainDashboard({ navigate }) {
                           style={
                             c.key==="factory" ? {maxWidth:"none", overflow:"visible"}
                             : c.key==="import_type" ? {padding:"8px 4px", textAlign:"center"}
+                            : (c.key==="sku_name"||c.key==="email") ? {maxWidth:"none"}
+                            : ["category","mc","importer","country"].includes(c.key)
+                            ? {maxWidth:"none", overflow:"visible", whiteSpace: expandedCells.has(cellKey(c.key,i)) ? "normal" : "nowrap"}
                             : undefined
                           }>
 
@@ -800,9 +839,7 @@ function MainDashboard({ navigate }) {
                               </div>
                             )
                             : c.clickable==="country"
-                            ? (row[c.key]
-                                ? <span className="link-cell" onClick={()=>navigate("country",{country:row[c.key]})}>{row[c.key]}</span>
-                                : "-")
+                            ? renderTrunc("country", row[c.key], 5, i, { navTo: ()=>navigate("country",{country:row[c.key]}) })
                             : c.key==="import_count"
                             ? (
                               <span className="count-cell-wrap">
@@ -815,13 +852,15 @@ function MainDashboard({ navigate }) {
                                 {row[c.key]>0 ? row[c.key] : "-"}
                               </span>
                             : c.isMc
-                            ? <span className="badge b-mc">{row[c.key] && row[c.key].length>5 ? row[c.key].slice(0,5)+"…" : row[c.key]}</span>
+                            ? renderTrunc("mc", row[c.key], 5, i, { badgeClass:"b-mc" })
                             : c.key==="email"
                             ? <span className="email-cell">{row[c.key]||"-"}</span>
                             : c.key==="import_type"
                             ? <OemBadge value={row[c.key]}/>
                             : c.key==="category"
-                            ? <span className="badge b-cat">{row[c.key]}</span>
+                            ? renderTrunc("category", row[c.key], 6, i, { badgeClass:"b-cat" })
+                            : c.key==="importer"
+                            ? renderTrunc("importer", row[c.key], 6, i)
                             : row[c.key]||"-"}
                         </td>
                       ))}
