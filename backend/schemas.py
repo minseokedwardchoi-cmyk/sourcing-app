@@ -125,6 +125,51 @@ class ManufacturerDetailResponse(BaseModel):
     skus:   list[ManufacturerSkuRow]
 
 
+# ─── 국가별 상세 페이지 ───────────────────────────────────────────────────────
+class CountrySummaryResponse(BaseModel):
+    country:                     str
+    flag:                        str
+    has_amount_stats:            bool             = Field(False, description="수입금액 통계 보유 여부")
+    amount_rank:                 Optional[int]     = Field(None, description="대한민국 수입금액 기준 국가 순위")
+    total_amount_usd_k:          Optional[float]   = Field(None, description="해당 국가 수입금액 (천달러)")
+    national_total_amount_usd_k: Optional[float]   = Field(None, description="전체 국가 수입금액 합계 (천달러)")
+    amount_share_pct:            Optional[float]   = Field(None, description="전체 대비 비중 (%)")
+    manufacturer_count:          int               = Field(0, description="해당 국가 제조사 수")
+    total_import_count:          int               = Field(0, description="해당 국가 전체 수입이력 건수")
+
+
+class CountryTopItemRow(BaseModel):
+    rank: int
+    name: str
+    pct:  float
+
+
+class CountryTopItemsResponse(BaseModel):
+    country: str
+    items:   list[CountryTopItemRow] = Field(default_factory=list)
+
+
+class CountryManufacturerRow(BaseModel):
+    rank:                   int
+    manufacturer:           str
+    factory:                Optional[str]   = Field(None, description="제조사 상세 링크용 원본 factory 값")
+    country:                Optional[str]
+    primary_mc:             Optional[str]   = Field(None, description="주요 MC (\"X 외 N개\" 형식)")
+    sku_count:              int             = Field(0, description="취급 SKU 수")
+    total_import_count:     int             = Field(0, description="총수입횟수")
+    top5_count:             int             = Field(0, description="탑5 거래 유통사 수")
+    top5_retailers_matched: list[str]       = Field(default_factory=list)
+    latest_import:          Optional[date]  = Field(None, description="최근 수입일")
+    ranking_score:          Optional[float] = Field(None, description="제조사 점수 (기존 랭킹 로직 재사용)")
+    matched_sku:            Optional[str]   = Field(None, description="SKU 검색 시 매칭된 대표 SKU명")
+
+
+class CountryManufacturersResponse(BaseModel):
+    country: str
+    data:    list[CountryManufacturerRow]
+    meta:    PaginationMeta
+
+
 # ─── Excel 업로드 응답 ────────────────────────────────────────────────────────
 class UploadResponse(BaseModel):
     inserted:  int = Field(..., description="신규 삽입 건수")

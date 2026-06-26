@@ -170,3 +170,20 @@ export function fetchCompetitorStats() {
   return request("/api/competitor-stats");
 }
 
+/** 국가 상세: 요약 (수입금액 순위/비중) */
+export function fetchCountrySummary(country) {
+  return request(`/api/countries/${encodeURIComponent(country)}/summary`);
+}
+
+/** 국가 상세: 주요 수입품목 TOP10 */
+export function fetchCountryTopItems(country) {
+  return request(`/api/countries/${encodeURIComponent(country)}/top-items`);
+}
+
+/** 국가 상세: 제조사 목록 */
+export function fetchCountryManufacturers(country, { mc, query, sortBy, sortOrder, page, pageSize } = {}) {
+  return request(`/api/countries/${encodeURIComponent(country)}/manufacturers`, {
+    mc, query, sort_by: sortBy, sort_order: sortOrder, page, page_size: pageSize,
+  });
+}
+
