@@ -165,6 +165,20 @@ export async function uploadContacts(file, overwrite = false) {
   return res.json();
 }
 
+/** 전체 데이터 삭제 (복구 불가) */
+export async function clearAllData() {
+  const res = await fetch(`${BASE_URL}/api/data`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm: "DELETE" }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "삭제 실패");
+  }
+  return res.json();
+}
+
 /** 경쟁사별 해외제조업체 수 통계 */
 export function fetchCompetitorStats() {
   return request("/api/competitor-stats");
