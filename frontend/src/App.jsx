@@ -196,6 +196,19 @@ const styles = `
   .legend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
   .country-top-items { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
   .country-top-legend { flex: 1; min-width: 220px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; }
+  .sku-cell { display: flex; align-items: center; gap: 4px; }
+  .sku-cell-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 95px; display: inline-block; }
+  .sku-expand-btn { flex: 0 0 auto; border: none; background: none; cursor: pointer; font-size: 9px; color: #9ca3af; padding: 2px; line-height: 1; }
+  .sku-expand-btn:hover { color: #374151; }
+  .count-cell-wrap { display: inline-flex; align-items: center; gap: 3px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal-box { background: #fff; border-radius: 10px; max-width: 90vw; max-height: 80vh; overflow: auto; min-width: 360px; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e8eaed; position: sticky; top: 0; background: #fff; }
+  .modal-title { font-size: 13px; font-weight: 600; }
+  .modal-close { border: none; background: none; cursor: pointer; font-size: 14px; color: #6b7280; }
+  .modal-close:hover { color: #1a1a2e; }
+  .modal-body { padding: 14px 16px; }
+  .modal-section-title { font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 6px; }
 `;
 
 // ─── 컬럼 필터 컴포넌트 (엑셀 스타일) ───────────────────────────────────────
@@ -400,13 +413,15 @@ function yearLabel(offset, baseYear) {
 const ALL_COLS = [
   { key:"category",     label:"구분",           w:90,  filterKey:"category"               },
   { key:"mc",           label:"MC",             w:120, filterKey:"mc",      isMc:true      },
-  { key:"sku_name",     label:"제품명",         w:240, filterKey:"sku_name", clickable:"sku" },
-  { key:"import_type",  label:"OEM/수입",       w:85,  filterKey:"import_type"             },
+  { key:"sku_name",     label:"제품명",         w:120, filterKey:"sku_name", clickable:"sku" },
+  { key:"import_type",  label:"OEM/수입",       w:70,  filterKey:"import_type"             },
   { key:"importer",     label:"수입업체",       w:160, filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:220, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:85,  filterKey:"country", clickable:"country" },
-  { key:"import_count", label:"수입횟수(전체)", w:90,  isNumeric:true                      },
-  { key:"monthly_summary", label:"월별 수입횟수", w:340                                    },
+  { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
+  { key:"count_year3",  label:"",               w:70,  isYearCount:3                      },
+  { key:"count_year2",  label:"",               w:70,  isYearCount:2                      },
+  { key:"count_year1",  label:"",               w:70,  isYearCount:1                      },
   { key:"email",        label:"이메일",         w:160, filterKey:"email"                   },
 ];
 
@@ -431,28 +446,25 @@ function MainDashboard({ navigate }) {
   const [uploading,   setUploading]   = useState(false);
   const [uploadMsg,   setUploadMsg]   = useState(null);
   const [colFilters,  setColFilters]  = useState({});
-  const [monthlyMap,  setMonthlyMap]  = useState({});   // 행 인덱스 -> { loading, error, data }
+  const [expandedSku, setExpandedSku] = useState(()=>new Set());  // 제품명 펼침 상태 (행 인덱스)
+  const [monthlyModal, setMonthlyModal] = useState(null);   // { row, loading, error, yearly, monthly }
   const colMenuRef = useRef(null);
   const fileRef    = useRef(null);
 
-  // 표시 중인 행들에 대해 월별 수입횟수를 자동으로 불러옴 (검색 기간 필터를 그대로 적용)
-  useEffect(() => {
-    if (!data.length) { setMonthlyMap({}); return; }
-    let cancelled = false;
-    setMonthlyMap(Object.fromEntries(data.map((_, i) => [i, { loading: true, error: null, data: [] }])));
-    data.forEach((row, i) => {
-      fetchMonthlyImportCounts(row, dateFrom, dateTo)
-        .then(res => {
-          if (cancelled) return;
-          setMonthlyMap(prev => ({ ...prev, [i]: { loading: false, error: null, data: res.data || [] } }));
-        })
-        .catch(e => {
-          if (cancelled) return;
-          setMonthlyMap(prev => ({ ...prev, [i]: { loading: false, error: e.message || "조회 실패", data: [] } }));
-        });
+  function toggleSkuExpand(i) {
+    setExpandedSku(prev => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
     });
-    return () => { cancelled = true; };
-  }, [data, dateFrom, dateTo]);
+  }
+
+  function openMonthlyModal(row) {
+    setMonthlyModal({ row, loading: true, error: null, yearly: [], monthly: [] });
+    fetchMonthlyImportCounts(row, dateFrom, dateTo)
+      .then(res => setMonthlyModal(m => (m && m.row===row) ? { ...m, loading:false, yearly: res.yearly||[], monthly: res.data||[] } : m))
+      .catch(e => setMonthlyModal(m => (m && m.row===row) ? { ...m, loading:false, error: e.message || "조회 실패" } : m));
+  }
 
   // 헤더(타이틀+업로드+경쟁사카드+툴바) 고정 시, 그 아래 테이블 헤더가 가려지지 않도록 높이 추적
   const stickyHeaderRef = useRef(null);
@@ -718,11 +730,29 @@ function MainDashboard({ navigate }) {
                   : data.map((row,i)=>(
                     <tr key={i}>
                       {cols.map(c=>(
-                        <td key={c.key} title={c.key==="monthly_summary"?undefined:row[c.key]}
-                          style={c.key==="monthly_summary" ? {maxWidth:"none", overflow:"visible"} : undefined}>
+                        <td key={c.key} title={c.key==="sku_name"?undefined:row[c.key]}
+                          style={c.key==="sku_name" ? {maxWidth:"none", overflow:"visible"} : undefined}>
 
                           {c.clickable==="sku"
-                            ? <span className="link-cell" onClick={()=>navigate("sku",{row})}>{row[c.key]}</span>
+                            ? (
+                              <div className="sku-cell">
+                                <span
+                                  className="link-cell sku-cell-text"
+                                  style={expandedSku.has(i) ? {whiteSpace:"normal",wordBreak:"break-all"} : undefined}
+                                  onClick={()=>navigate("sku",{row})}
+                                  title={row[c.key]}
+                                >
+                                  {row[c.key]}
+                                </span>
+                                <button
+                                  className="sku-expand-btn"
+                                  onClick={(e)=>{e.stopPropagation();toggleSkuExpand(i);}}
+                                  title={expandedSku.has(i)?"접기":"펼치기"}
+                                >
+                                  {expandedSku.has(i)?"▲":"▼"}
+                                </button>
+                              </div>
+                            )
                             : c.clickable==="mfr"
                             ? <span className="link-cell" onClick={()=>navigate("mfr",{row,from:"main"})}>{row[c.key]}</span>
                             : c.clickable==="country"
@@ -730,32 +760,12 @@ function MainDashboard({ navigate }) {
                                 ? <span className="link-cell" onClick={()=>navigate("country",{country:row[c.key]})}>{row[c.key]}</span>
                                 : "-")
                             : c.key==="import_count"
-                            ? <span className="badge b-count">{row[c.key]}</span>
-                            : c.key==="monthly_summary"
-                            ? (()=>{
-                                const m = monthlyMap[i];
-                                if (!m || m.loading) return <span style={{fontSize:12,color:"#9ca3af"}}>로딩 중...</span>;
-                                if (m.error) return <span style={{fontSize:12,color:"#b91c1c"}}>오류: {m.error}</span>;
-                                if (!m.data.length) return <span style={{fontSize:12,color:"#9ca3af"}}>이력 없음</span>;
-                                return (
-                                  <table className="monthly-table">
-                                    <tbody>
-                                      <tr>
-                                        <td className="monthly-table-label">년/월</td>
-                                        {m.data.map(mo=><td key={mo.month}>{mo.month}</td>)}
-                                      </tr>
-                                      <tr>
-                                        <td className="monthly-table-label">수입횟수</td>
-                                        {m.data.map(mo=>
-                                          <td key={mo.month} style={{color: mo.count>0?"#15803d":"#9ca3af", fontWeight: mo.count>0?600:400}}>
-                                            {mo.count}
-                                          </td>
-                                        )}
-                                      </tr>
-                                    </tbody>
-                                  </table>
-                                );
-                              })()
+                            ? (
+                              <span className="count-cell-wrap">
+                                <span className="badge b-count">{row[c.key]}</span>
+                                <button className="sku-expand-btn" onClick={(e)=>{e.stopPropagation();openMonthlyModal(row);}} title="연도별/월별 보기">▼</button>
+                              </span>
+                            )
                             : c.isYearCount
                             ? <span style={{color: row[c.key]>0?"#15803d":"#9ca3af", fontWeight: row[c.key]>0?600:400}}>
                                 {row[c.key]>0 ? row[c.key] : "-"}
@@ -779,6 +789,61 @@ function MainDashboard({ navigate }) {
           <Pagination meta={meta} page={page} setPage={setPage}/>
         </div>
       </div>
+
+      {monthlyModal && (
+        <div className="modal-overlay" onClick={()=>setMonthlyModal(null)}>
+          <div className="modal-box" onClick={e=>e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">{monthlyModal.row.sku_name} — 연도별 / 월별 수입횟수</span>
+              <button className="modal-close" onClick={()=>setMonthlyModal(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {monthlyModal.loading ? <div className="empty-state">불러오는 중...</div>
+              : monthlyModal.error ? <div className="error-box">오류: {monthlyModal.error}</div>
+              : (
+                <>
+                  <div className="modal-section-title">연도별 수입횟수</div>
+                  {!monthlyModal.yearly.length ? <div className="empty-state">이력 없음</div> : (
+                    <table className="monthly-table">
+                      <tbody>
+                        <tr>
+                          <td className="monthly-table-label">연도</td>
+                          {monthlyModal.yearly.map(y=><td key={y.year}>{y.year}</td>)}
+                        </tr>
+                        <tr>
+                          <td className="monthly-table-label">수입횟수</td>
+                          {monthlyModal.yearly.map(y=>
+                            <td key={y.year} style={{color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>{y.count}</td>
+                          )}
+                        </tr>
+                      </tbody>
+                    </table>
+                  )}
+                  <div className="modal-section-title" style={{marginTop:14}}>월별 수입횟수</div>
+                  {!monthlyModal.monthly.length ? <div className="empty-state">이력 없음</div> : (
+                    <div style={{overflowX:"auto"}}>
+                      <table className="monthly-table">
+                        <tbody>
+                          <tr>
+                            <td className="monthly-table-label">년/월</td>
+                            {monthlyModal.monthly.map(mo=><td key={mo.month}>{mo.month}</td>)}
+                          </tr>
+                          <tr>
+                            <td className="monthly-table-label">수입횟수</td>
+                            {monthlyModal.monthly.map(mo=>
+                              <td key={mo.month} style={{color: mo.count>0?"#15803d":"#9ca3af", fontWeight: mo.count>0?600:400}}>{mo.count}</td>
+                            )}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

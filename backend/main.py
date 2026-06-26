@@ -333,6 +333,8 @@ async def get_sku_history(
         # (수입횟수/연도별 카운트 모두 선택한 기간 기준으로 재계산됨)
         params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
         params["date_to"]   = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
+        # 최근 3개년 집계 기준연도: 날짜 필터의 종료일이 있으면 그 해, 없으면 현재연도
+        params["base_year"] = date.fromisoformat(date_to).year if date_to else date.today().year
         base_sql = f"""
             FROM (
                 SELECT
@@ -341,12 +343,12 @@ async def get_sku_history(
                     manufacturer, factory, country,
                     MIN(email)                              AS email,
                     MAX(import_date)                        AS latest_import,
-                    EXTRACT(YEAR FROM CURRENT_DATE)::int    AS base_year,
-                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
+                    (:base_year)::int                       AS base_year,
+                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :base_year - 1
                           THEN 1 END)::int                  AS count_year1,
-                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
+                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :base_year - 2
                           THEN 1 END)::int                  AS count_year2,
-                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
+                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :base_year - 3
                           THEN 1 END)::int                  AS count_year3
                 FROM import_history
                 WHERE COALESCE(import_date, process_date) BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
