@@ -64,7 +64,7 @@ const styles = `
   .table-wrap { overflow-x: auto; }
   table { border-collapse: collapse; font-size: 13px; table-layout: fixed; width: 100%; min-width: 1306px; }
   thead tr { background: #f8fafc; }
-  th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; overflow: hidden; background: #f8fafc; }
+  th { padding: 8px 12px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e8eaed; white-space: nowrap; cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 0.3px; background: #f8fafc; }
   th:hover { color: #1a1a2e; }
   th.col-highlight, td.col-highlight { background: #e0f2fe; }
   .sort-icon { margin-left: 3px; opacity: 0.4; }
