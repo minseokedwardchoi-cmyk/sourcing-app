@@ -673,15 +673,16 @@ function MainDashboard({ navigate }) {
         <div className="card">
           <div className="sticky-panel-header" ref={stickyHeaderRef}>
           <div className="card-header">
-            <span className="card-title">수입/OEM SKU 이력</span>
-            <div style={{display:"flex",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span className="card-title">수입/OEM SKU 이력</span>
               <button
                 className="icon-btn"
                 onClick={()=>navigate("country-map")}
               >
                 🌍 국가별로 보기
               </button>
-
+            </div>
+            <div style={{display:"flex",gap:8}}>
               <input
                 type="file"
                 accept=".xlsx,.xls"
