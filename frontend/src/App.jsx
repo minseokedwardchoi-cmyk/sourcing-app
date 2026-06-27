@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
+import { ComposableMap, Geographies, Geography } from "react-simple-maps";
 import {
   fetchSkuHistory, fetchSkuFactories,
   fetchManufacturerDetail, uploadExcel,
@@ -6,6 +7,8 @@ import {
   fetchColumnValues, fetchMonthlyImportCounts,
   fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers,
 } from "./api.js";
+import { getKoreanName } from "./countryGeo.js";
+import worldGeoData from "world-atlas/countries-110m.json";
 
 // ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
 const COMPETITORS = ["전체", "홈플러스", "이마트", "롯데마트", "쿠팡", "코스트코"];
@@ -750,6 +753,7 @@ function MainDashboard({ navigate }) {
               <span className="search-icon">🔍</span>
               <input placeholder="제품명, 해외제조업소, MC, 수입업체, 제조국 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
             </div>
+            <button className="icon-btn" onClick={()=>navigate("country-map")}>🌍 국가별로 보기</button>
             <div className="date-range-wrap">
               <input type="date" className="date-range-input" value={dateFrom} max={dateTo||undefined} onChange={e=>setDateFrom(e.target.value)}/>
               <span className="date-range-sep">~</span>
@@ -1726,6 +1730,137 @@ function CountryDetail({ navigate, state }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// 국가별 지도 보기
+// ═══════════════════════════════════════════════════════════════════════════════
+function CountryMapPage({ navigate }) {
+  const [dbCountries, setDbCountries] = useState(null);
+  const [hovered, setHovered] = useState(null); // { name, x, y, inDb }
+  const [search,  setSearch]  = useState("");
+  const [showSuggest, setShowSuggest] = useState(false);
+
+  useEffect(() => {
+    fetchColumnValues("country").then(vals => setDbCountries(new Set(vals)));
+  }, []);
+
+  const dbCountryList = useMemo(() => dbCountries ? [...dbCountries].sort() : [], [dbCountries]);
+  const suggestions = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.trim().toLowerCase();
+    return dbCountryList.filter(c => c.toLowerCase().includes(q)).slice(0, 8);
+  }, [search, dbCountryList]);
+
+  function goToCountry(koreanName) {
+    if (!koreanName || !dbCountries || !dbCountries.has(koreanName)) return;
+    navigate("country", { country: koreanName });
+  }
+
+  return (
+    <div className="app">
+      <style>{styles}</style>
+      <div className="banner">
+        <div className="banner-inner">
+          <div className="banner-left">
+            <h1>🌐 Global Factory Sourcing Database</h1>
+            <p>수입식품정보 기반으로 구축한 해외 제조업체 · SKU · 수입/OEM 이력 통합 DB</p>
+          </div>
+        </div>
+      </div>
+      <div className="page">
+        <button className="back-btn" onClick={()=>navigate("main")}>← 수입/OEM SKU 이력으로 돌아가기</button>
+
+        <div className="card" style={{padding:16}}>
+          <div className="page-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+            <h2>국가별로 보기</h2>
+            <div style={{position:"relative", width:260}}>
+              <input
+                className="date-range-input"
+                style={{width:"100%"}}
+                placeholder="국가명 검색 (예: 미국, 베트남...)"
+                value={search}
+                onChange={e=>{ setSearch(e.target.value); setShowSuggest(true); }}
+                onFocus={()=>setShowSuggest(true)}
+                onKeyDown={e=>{ if (e.key==="Enter" && suggestions.length>0) goToCountry(suggestions[0]); }}
+              />
+              {showSuggest && suggestions.length > 0 && (
+                <div className="filter-dropdown" style={{minWidth:"100%", maxWidth:"100%"}}>
+                  <div className="filter-list" style={{maxHeight:220}}>
+                    {suggestions.map(c => (
+                      <div key={c} className="filter-item" style={{justifyContent:"flex-start"}}
+                        onClick={()=>{ setShowSuggest(false); setSearch(""); goToCountry(c); }}>
+                        <span>{c}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <p style={{fontSize:12, color:"#6b7280", marginBottom:10}}>
+            지도 위에서 마우스를 올리면 국가명이 표시됩니다. 데이터베이스에 보유한 국가(초록색)를 클릭하면 해당 국가의 상세 페이지로 이동합니다.
+          </p>
+
+          <div style={{position:"relative", border:"1px solid #e8eaed", borderRadius:8, overflow:"hidden", background:"#eff6ff"}}
+            onMouseLeave={()=>setHovered(null)}>
+            <ComposableMap projectionConfig={{ scale: 148 }} width={980} height={460} style={{width:"100%",height:"auto",display:"block"}}>
+              <Geographies geography={worldGeoData}>
+                {({ geographies }) =>
+                  geographies.map(geo => {
+                    const koreanName = getKoreanName(geo.properties.name);
+                    const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
+                    return (
+                      <Geography
+                        key={geo.rsmKey}
+                        geography={geo}
+                        onMouseMove={e => setHovered({
+                          name: koreanName || geo.properties.name,
+                          inDb,
+                          x: e.clientX, y: e.clientY,
+                        })}
+                        onMouseEnter={e => setHovered({
+                          name: koreanName || geo.properties.name,
+                          inDb,
+                          x: e.clientX, y: e.clientY,
+                        })}
+                        onClick={() => goToCountry(koreanName)}
+                        style={{
+                          default: {
+                            fill: inDb ? "#16a34a" : "#cbd5e1",
+                            stroke: "#fff", strokeWidth: 0.5,
+                            outline: "none", cursor: inDb ? "pointer" : "default",
+                            transition: "fill .1s",
+                          },
+                          hover: {
+                            fill: inDb ? "#15803d" : "#94a3b8",
+                            stroke: "#fff", strokeWidth: 0.5, outline: "none",
+                            cursor: inDb ? "pointer" : "default",
+                          },
+                          pressed: { fill: "#166534", stroke: "#fff", strokeWidth: 0.5, outline: "none" },
+                        }}
+                      />
+                    );
+                  })
+                }
+              </Geographies>
+            </ComposableMap>
+
+            {hovered && (
+              <div style={{
+                position:"fixed", left: hovered.x + 12, top: hovered.y + 12, zIndex: 300,
+                background:"#1a1a2e", color:"#fff", padding:"5px 10px", borderRadius:5,
+                fontSize:12, pointerEvents:"none", whiteSpace:"nowrap",
+              }}>
+                {hovered.name}{hovered.inDb ? "" : " (데이터 없음)"}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ROOT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
@@ -1734,5 +1869,6 @@ export default function App() {
   if (page.name==="sku") return <SkuManufacturers navigate={navigate} state={page.state}/>;
   if (page.name==="mfr") return <ManufacturerDetail navigate={navigate} state={page.state}/>;
   if (page.name==="country") return <CountryDetail navigate={navigate} state={page.state}/>;
+  if (page.name==="country-map") return <CountryMapPage navigate={navigate}/>;
   return <MainDashboard navigate={navigate}/>;
 }
