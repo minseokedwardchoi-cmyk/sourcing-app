@@ -675,6 +675,13 @@ function MainDashboard({ navigate }) {
           <div className="card-header">
             <span className="card-title">수입/OEM SKU 이력</span>
             <div style={{display:"flex",gap:8}}>
+              <button
+                className="icon-btn"
+                onClick={()=>navigate("country-map")}
+              >
+                🌍 국가별로 보기
+              </button>
+
               <input
                 type="file"
                 accept=".xlsx,.xls"
@@ -752,7 +759,6 @@ function MainDashboard({ navigate }) {
               <span className="search-icon">🔍</span>
               <input placeholder="제품명, 해외제조업소, MC, 수입업체, 제조국 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
             </div>
-            <button className="icon-btn" onClick={()=>navigate("country-map")}>🌍 국가별로 보기</button>
             <div className="date-range-wrap">
               <input type="date" className="date-range-input" value={dateFrom} max={dateTo||undefined} onChange={e=>setDateFrom(e.target.value)}/>
               <span className="date-range-sep">~</span>
