@@ -1504,7 +1504,7 @@ function ManufacturerDetail({ navigate, state }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // PAGE 4: 국가별 상세
 // ═══════════════════════════════════════════════════════════════════════════════
-const PIE_COLORS = ["#2563eb","#16a34a","#f59e0b","#dc2626","#7c3aed","#0891b2","#db2777","#65a30d","#ea580c","#4338ca"];
+const PIE_COLORS = ["#2563eb","#16a34a","#f59e0b","#dc2626","#7c3aed","#0891b2","#db2777","#84cc16","#ea580c","#0d9488","#9333ea","#facc15"];
 
 function polarToCartesian(cx, cy, r, angleDeg) {
   const rad = (angleDeg - 90) * Math.PI / 180;
@@ -1521,6 +1521,7 @@ function pieSlicePath(cx, cy, r, startAngle, endAngle) {
 function PieChart({ slices, size = 120 }) {
   const r = size / 2;
   const total = slices.reduce((s, x) => s + (x.value || 0), 0);
+  const [hovered, setHovered] = useState(null); // { label, value, x, y }
   if (!total) {
     return (
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
@@ -1540,11 +1541,26 @@ function PieChart({ slices, size = 120 }) {
         d={pieSlicePath(r, r, r - 1, startAngle, endAngle)}
         fill={s.color}
         onClick={s.onClick}
+        onMouseMove={e => setHovered({ label: s.label, value: s.value, x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setHovered(null)}
         style={{ cursor: s.onClick ? "pointer" : "default" }}
       />
     );
   });
-  return <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>{paths}</svg>;
+  return (
+    <>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>{paths}</svg>
+      {hovered && (
+        <div style={{
+          position: "fixed", left: hovered.x + 12, top: hovered.y + 12, zIndex: 300,
+          background: "#1a1a2e", color: "#fff", padding: "5px 10px", borderRadius: 5,
+          fontSize: 12, pointerEvents: "none", whiteSpace: "nowrap",
+        }}>
+          {hovered.label} ({hovered.value}%)
+        </div>
+      )}
+    </>
+  );
 }
 
 function CountryDetail({ navigate, state }) {
@@ -1683,7 +1699,7 @@ function CountryDetail({ navigate, state }) {
             <div className="card" style={{marginTop:12}}>
               <div className="card-header"><span className="card-title">📊 국가별 주요 수입품목 TOP10</span></div>
               <div className="card-body country-top-items">
-                <PieChart slices={legendItems.map((it,i)=>({value:it.pct, color: it.isOther ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}))} size={140}/>
+                <PieChart slices={legendItems.map((it,i)=>({value:it.pct, label: it.isOther ? "기타" : `${it.rank}. ${it.name}`, color: it.isOther ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}))} size={140}/>
                 <div className="country-pie-legend country-top-legend">
                   {legendItems.map((it,i)=>(
                     <div key={i}>
