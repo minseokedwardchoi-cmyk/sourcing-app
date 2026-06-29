@@ -1896,8 +1896,8 @@ function CountryMapPage({ navigate }) {
                 <div style={{
                   position:"fixed", left: hovered.x + 12, top: hovered.y + 12, zIndex: 300,
                   background:"#1a1a2e", color:"#fff", padding:"8px 12px", borderRadius:6,
-                  fontSize:12, pointerEvents:"none", whiteSpace:"nowrap",
-                  maxWidth:320, lineHeight:1.5,
+                  fontSize:12, pointerEvents:"none", whiteSpace:"normal",
+                  width:380, lineHeight:1.5,
                 }}>
                   <div style={{fontWeight:600, marginBottom: hovered.inDb ? 4 : 0}}>
                     {hovered.name}{hovered.inDb ? "" : " (데이터 없음)"}
