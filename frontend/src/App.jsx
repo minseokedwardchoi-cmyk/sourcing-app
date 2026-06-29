@@ -197,6 +197,8 @@ const styles = `
   .country-stat-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .country-pie-block { display: flex; align-items: center; gap: 12px; }
   .country-pie-legend { font-size: 12px; color: #374151; display: flex; flex-direction: column; gap: 4px; }
+  .country-amount-share-grid { display: grid; grid-template-columns: repeat(2, auto); gap: 4px 24px; font-size: 12px; color: #374151; }
+  .country-amount-share-item { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
   .legend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
   .country-top-items { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
   .country-top-legend { flex: 1; min-width: 220px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; }
@@ -1509,8 +1511,8 @@ function polarToCartesian(cx, cy, r, angleDeg) {
 }
 
 function pieSlicePath(cx, cy, r, startAngle, endAngle) {
-  const start = polarToCartesian(cx, cy, r, endAngle);
-  const end   = polarToCartesian(cx, cy, r, startAngle);
+  const start = polarToCartesian(cx, cy, r, startAngle);
+  const end   = polarToCartesian(cx, cy, r, endAngle);
   const largeArc = endAngle - startAngle <= 180 ? 0 : 1;
   return `M ${cx} ${cy} L ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y} Z`;
 }
@@ -1652,24 +1654,18 @@ function CountryDetail({ navigate, state }) {
                 </div>
               </div>
               {amountShare?.items?.length > 0 && (
-                <div className="country-pie-block">
-                  <PieChart slices={amountShare.items.map((it,i)=>({
-                    value: it.pct,
-                    color: it.is_other ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length],
-                    onClick: it.is_other ? undefined : () => navigate("country", { country: it.country }),
-                  }))} size={100}/>
-                  <div className="country-pie-legend">
-                    {amountShare.items.map((it,i)=>(
-                      <div
-                        key={it.country}
-                        style={{cursor: it.is_other ? "default" : "pointer", fontWeight: it.country===summary.country?700:400}}
-                        onClick={it.is_other ? undefined : () => navigate("country", { country: it.country })}
-                      >
-                        <span className="legend-dot" style={{background: it.is_other ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}}/>
-                        {it.flag} {it.country} ({it.pct}%)
-                      </div>
-                    ))}
-                  </div>
+                <div className="country-amount-share-grid">
+                  {amountShare.items.map((it,i)=>(
+                    <div
+                      key={it.country}
+                      className="country-amount-share-item"
+                      style={{cursor: it.is_other ? "default" : "pointer", fontWeight: it.country===summary.country?700:400}}
+                      onClick={it.is_other ? undefined : () => navigate("country", { country: it.country })}
+                    >
+                      <span className="legend-dot" style={{background: it.is_other ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}}/>
+                      {it.flag} {it.country} ({it.pct}%)
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
