@@ -208,6 +208,8 @@ const styles = `
   .sku-expand-btn { flex: 0 0 auto; border: none; background: none; cursor: pointer; font-size: 9px; color: #9ca3af; padding: 2px; line-height: 1; }
   .sku-expand-btn:hover { color: #374151; }
   .count-cell-wrap { display: inline-flex; align-items: center; gap: 3px; }
+  .trend-btn { font-size: 11px; padding: 2px 7px; border: 1px solid #d1d5db; border-radius: 4px; background: #f9fafb; color: #374151; cursor: pointer; white-space: nowrap; }
+  .trend-btn:hover { background: #e0f2fe; border-color: #60a5fa; color: #1d4ed8; }
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
   .modal-box { background: #fff; border-radius: 10px; max-width: 90vw; max-height: 80vh; overflow: auto; min-width: 360px; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
   .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e8eaed; position: sticky; top: 0; background: #fff; }
@@ -429,6 +431,7 @@ const ALL_COLS = [
   { key:"count_year3",  label:"",               w:78,  isYearCount:3                      },
   { key:"count_year2",  label:"",               w:78,  isYearCount:2                      },
   { key:"count_year1",  label:"",               w:78,  isYearCount:1                      },
+  { key:"_trend",       label:"수입횟수 추이",  w:90,  isTrend:true                        },
   { key:"email",        label:"이메일",         w:160, filterKey:"email"                   },
 ];
 
@@ -893,11 +896,13 @@ function MainDashboard({ navigate }) {
                             : c.clickable==="country"
                             ? renderTrunc("country", row[c.key], 5, i, { navTo: ()=>navigate("country",{country:row[c.key]}) })
                             : c.key==="import_count"
+                            ? <span className="badge b-count">{row[c.key]}</span>
+                            : c.isTrend
                             ? (
-                              <span className="count-cell-wrap">
-                                <span className="badge b-count">{row[c.key]}</span>
-                                <button className="sku-expand-btn" onClick={(e)=>{e.stopPropagation();openMonthlyModal(row);}} title="연도별/월별 보기">▼</button>
-                              </span>
+                              <button
+                                className="trend-btn"
+                                onClick={(e)=>{e.stopPropagation();openMonthlyModal(row);}}
+                              >📈 추이 보기</button>
                             )
                             : c.isYearCount
                             ? <span style={{color: row[c.key]>0?"#15803d":"#9ca3af", fontWeight: row[c.key]>0?600:400}}>
