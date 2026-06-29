@@ -1959,8 +1959,8 @@ function CountryMapPage({ navigate }) {
                             <circle r={2 / zoomState.zoom} fill="#1a1a2e" stroke="#fff" strokeWidth={0.5 / zoomState.zoom}/>
                             {showLabel && (
                               <text
-                                y={-9 / zoomState.zoom} textAnchor="middle"
-                                style={{ fontSize: 21 / zoomState.zoom, fontWeight: 600, fill: "#1a1a2e", fontFamily: "inherit" }}
+                                y={-6 / zoomState.zoom} textAnchor="middle"
+                                style={{ fontSize: 10 / zoomState.zoom, fontWeight: 600, fill: "#1a1a2e", fontFamily: "inherit" }}
                               >
                                 {koreanName}
                               </text>
