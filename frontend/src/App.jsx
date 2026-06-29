@@ -1936,7 +1936,7 @@ function CountryMapPage({ navigate }) {
 
             {amountShare?.items?.length > 0 && (
               <div style={{
-                position:"absolute", left:10, top:10, zIndex:200,
+                position:"absolute", left:10, bottom:10, zIndex:200,
                 background:"rgba(255,255,255,0.92)", border:"1px solid #e5e7eb", borderRadius:8,
                 padding:"10px 12px", fontSize:12, color:"#374151", boxShadow:"0 1px 4px rgba(0,0,0,.08)",
               }}>
