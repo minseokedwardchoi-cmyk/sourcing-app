@@ -170,6 +170,19 @@ class CountryManufacturersResponse(BaseModel):
     meta:    PaginationMeta
 
 
+class CountryAmountShareRow(BaseModel):
+    country: str
+    flag:    str
+    amount_usd_k: float
+    pct:     float
+    is_other: bool = Field(False, description="TOP N 이외 국가를 합산한 '기타' 항목 여부")
+
+
+class CountryAmountShareResponse(BaseModel):
+    national_total_amount_usd_k: float
+    items: list[CountryAmountShareRow]
+
+
 # ─── Excel 업로드 응답 ────────────────────────────────────────────────────────
 class UploadResponse(BaseModel):
     inserted:  int = Field(..., description="신규 삽입 건수")

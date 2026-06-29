@@ -189,6 +189,11 @@ export function fetchCountrySummary(country) {
   return request(`/api/countries/${encodeURIComponent(country)}/summary`);
 }
 
+/** 전체 수입금액 기준 국가별 비중 (파이차트용) */
+export function fetchCountryAmountShare(topN = 8) {
+  return request("/api/countries/amount-share", { top_n: topN });
+}
+
 /** 국가 상세: 주요 수입품목 TOP10 */
 export function fetchCountryTopItems(country) {
   return request(`/api/countries/${encodeURIComponent(country)}/top-items`);
