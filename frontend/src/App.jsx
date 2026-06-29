@@ -1887,8 +1887,7 @@ function CountryMapPage({ navigate }) {
           </p>
 
           <div style={{position:"relative", border:"1px solid #e8eaed", borderRadius:8, overflow:"hidden", background:"#eff6ff"}}
-            onMouseLeave={()=>setHovered(null)}
-            onWheel={e => { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.25 : 0.8); }}>
+            onMouseLeave={()=>setHovered(null)}>
             <div style={{position:"absolute", top:8, right:8, zIndex:200, display:"flex", flexDirection:"column", gap:4}}>
               <button type="button" className="icon-btn" style={{width:28,height:28,padding:0}} onClick={()=>zoomBy(1.25)}>+</button>
               <button type="button" className="icon-btn" style={{width:28,height:28,padding:0}} onClick={()=>zoomBy(0.8)}>−</button>
@@ -1904,6 +1903,7 @@ function CountryMapPage({ navigate }) {
                 zoom={zoomState.zoom}
                 minZoom={1}
                 maxZoom={8}
+                onMoveStart={()=>setHovered(null)}
                 onMoveEnd={setZoomState}
               >
                 <Geographies geography={worldGeoData}>
