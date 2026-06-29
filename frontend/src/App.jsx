@@ -1507,6 +1507,22 @@ function ManufacturerDetail({ navigate, state }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 const PIE_COLORS = ["#2563eb","#16a34a","#f59e0b","#dc2626","#7c3aed","#0891b2","#db2777","#84cc16","#ea580c","#0d9488","#9333ea","#facc15"];
 
+// 지도에 항상 국가명을 표시할 주요 수입국 (대한민국 수입금액 기준 상위 국가)
+const MAP_ALWAYS_LABEL = new Set(["미국","중국","호주","베트남","브라질","태국","러시아","스페인"]);
+
+// 일부 국가는 영토(알래스카, 신장 등)가 넓게 퍼져 있어 geoCentroid 결과가 시각적 중심에서 벗어남.
+// 위 MAP_ALWAYS_LABEL 국가에 한해 점·라벨 위치를 보정한다.
+const MAP_LABEL_OVERRIDES = {
+  "미국": [-97, 39],
+  "중국": [104, 35],
+  "호주": [134, -25],
+  "베트남": [106, 16],
+  "브라질": [-52, -10],
+  "태국": [101, 15],
+  "러시아": [60, 61],
+  "스페인": [-3.7, 40],
+};
+
 function polarToCartesian(cx, cy, r, angleDeg) {
   const rad = (angleDeg - 90) * Math.PI / 180;
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
@@ -1935,17 +1951,20 @@ function CountryMapPage({ navigate }) {
                         const koreanName = getKoreanName(geo.properties.name);
                         const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
                         if (!inDb) return null;
-                        const centroid = geoCentroid(geo);
-                        if (!centroid || centroid.some(v => Number.isNaN(v))) return null;
+                        const showLabel = MAP_ALWAYS_LABEL.has(koreanName);
+                        const coordinates = MAP_LABEL_OVERRIDES[koreanName] || geoCentroid(geo);
+                        if (!coordinates || coordinates.some(v => Number.isNaN(v))) return null;
                         return (
-                          <Marker key={geo.rsmKey + "-label"} coordinates={centroid} style={{pointerEvents:"none"}}>
+                          <Marker key={geo.rsmKey + "-label"} coordinates={coordinates} style={{pointerEvents:"none"}}>
                             <circle r={2 / zoomState.zoom} fill="#1a1a2e" stroke="#fff" strokeWidth={0.5 / zoomState.zoom}/>
-                            <text
-                              y={-5 / zoomState.zoom} textAnchor="middle"
-                              style={{ fontSize: 7 / zoomState.zoom, fontWeight: 600, fill: "#1a1a2e", fontFamily: "inherit" }}
-                            >
-                              {koreanName}
-                            </text>
+                            {showLabel && (
+                              <text
+                                y={-9 / zoomState.zoom} textAnchor="middle"
+                                style={{ fontSize: 21 / zoomState.zoom, fontWeight: 600, fill: "#1a1a2e", fontFamily: "inherit" }}
+                              >
+                                {koreanName}
+                              </text>
+                            )}
                           </Marker>
                         );
                       })}
