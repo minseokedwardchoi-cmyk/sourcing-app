@@ -1744,6 +1744,18 @@ function CountryMapPage({ navigate }) {
   const [hovered, setHovered] = useState(null); // { name, x, y, inDb }
   const [search,  setSearch]  = useState("");
   const [showSuggest, setShowSuggest] = useState(false);
+  const [countryInfoCache, setCountryInfoCache] = useState({}); // { [koreanName]: { summary, topItems } }
+
+  function loadCountryInfo(koreanName) {
+    if (!koreanName || countryInfoCache[koreanName]) return;
+    setCountryInfoCache(prev => ({ ...prev, [koreanName]: {} }));
+    Promise.all([
+      fetchCountrySummary(koreanName).catch(() => null),
+      fetchCountryTopItems(koreanName).catch(() => null),
+    ]).then(([summary, topItems]) => {
+      setCountryInfoCache(prev => ({ ...prev, [koreanName]: { summary, topItems } }));
+    });
+  }
 
   useEffect(() => {
     fetchColumnValues("country").then(vals => setDbCountries(new Set(vals)));
@@ -1824,11 +1836,14 @@ function CountryMapPage({ navigate }) {
                           inDb,
                           x: e.clientX, y: e.clientY,
                         })}
-                        onMouseEnter={e => setHovered({
-                          name: koreanName || geo.properties.name,
-                          inDb,
-                          x: e.clientX, y: e.clientY,
-                        })}
+                        onMouseEnter={e => {
+                          setHovered({
+                            name: koreanName || geo.properties.name,
+                            inDb,
+                            x: e.clientX, y: e.clientY,
+                          });
+                          if (inDb) loadCountryInfo(koreanName);
+                        }}
                         onClick={() => goToCountry(koreanName)}
                         style={{
                           default: {
@@ -1851,15 +1866,35 @@ function CountryMapPage({ navigate }) {
               </Geographies>
             </ComposableMap>
 
-            {hovered && (
-              <div style={{
-                position:"fixed", left: hovered.x + 12, top: hovered.y + 12, zIndex: 300,
-                background:"#1a1a2e", color:"#fff", padding:"5px 10px", borderRadius:5,
-                fontSize:12, pointerEvents:"none", whiteSpace:"nowrap",
-              }}>
-                {hovered.name}{hovered.inDb ? "" : " (데이터 없음)"}
-              </div>
-            )}
+            {hovered && (() => {
+              const info = hovered.inDb ? countryInfoCache[hovered.name] : null;
+              const summary = info?.summary;
+              const topItems = info?.topItems?.items;
+              return (
+                <div style={{
+                  position:"fixed", left: hovered.x + 12, top: hovered.y + 12, zIndex: 300,
+                  background:"#1a1a2e", color:"#fff", padding:"8px 12px", borderRadius:6,
+                  fontSize:12, pointerEvents:"none", whiteSpace:"nowrap",
+                  maxWidth:320, lineHeight:1.5,
+                }}>
+                  <div style={{fontWeight:600, marginBottom: hovered.inDb ? 4 : 0}}>
+                    {hovered.name}{hovered.inDb ? "" : " (데이터 없음)"}
+                  </div>
+                  {hovered.inDb && summary?.has_amount_stats && (
+                    <div style={{color:"#cbd5e1", marginBottom: topItems?.length ? 4 : 0}}>
+                      대한민국 수입금액 기준 국가 순위 {summary.amount_rank}위 (비중 {summary.amount_share_pct}%)
+                    </div>
+                  )}
+                  {hovered.inDb && topItems?.length > 0 && (
+                    <div>
+                      {topItems.map((it, i) => (
+                        <div key={i}>{it.rank}. {it.name} ({it.pct}%)</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
