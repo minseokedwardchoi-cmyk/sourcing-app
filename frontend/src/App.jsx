@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
-import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
+import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { geoCentroid } from "d3-geo";
 import {
   fetchSkuHistory, fetchSkuFactories,
@@ -1785,10 +1785,17 @@ function CountryMapPage({ navigate }) {
   const [showSuggest, setShowSuggest] = useState(false);
   const [countryInfoCache, setCountryInfoCache] = useState({}); // { [koreanName]: { summary, topItems } }
   const [amountShare, setAmountShare] = useState(null);
+  const [zoomState, setZoomState] = useState({ center: [0, 0], zoom: 1 });
 
   useEffect(() => {
     fetchCountryAmountShare().then(setAmountShare).catch(() => {});
   }, []);
+
+  function clampZoom(z) { return Math.min(8, Math.max(1, z)); }
+  function zoomBy(factor) {
+    setZoomState(s => ({ ...s, zoom: clampZoom(s.zoom * factor) }));
+  }
+  function resetZoom() { setZoomState({ center: [0, 0], zoom: 1 }); }
 
   function loadCountryInfo(koreanName) {
     if (!koreanName || countryInfoCache[koreanName]) return;
@@ -1864,74 +1871,88 @@ function CountryMapPage({ navigate }) {
           </p>
 
           <div style={{position:"relative", border:"1px solid #e8eaed", borderRadius:8, overflow:"hidden", background:"#eff6ff"}}
-            onMouseLeave={()=>setHovered(null)}>
+            onMouseLeave={()=>setHovered(null)}
+            onWheel={e => { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.25 : 0.8); }}>
+            <div style={{position:"absolute", top:8, right:8, zIndex:200, display:"flex", flexDirection:"column", gap:4}}>
+              <button type="button" className="icon-btn" style={{width:28,height:28,padding:0}} onClick={()=>zoomBy(1.25)}>+</button>
+              <button type="button" className="icon-btn" style={{width:28,height:28,padding:0}} onClick={()=>zoomBy(0.8)}>−</button>
+              <button type="button" className="icon-btn" style={{width:28,height:28,padding:0,fontSize:11}} onClick={resetZoom}>⟲</button>
+            </div>
             <ComposableMap
               projection="geoEquirectangular"
               projectionConfig={{ scale: 148 }}
               width={980} height={460} style={{width:"100%",height:"auto",display:"block"}}
             >
-              <Geographies geography={worldGeoData}>
-                {({ geographies }) => (
-                  <>
-                    {geographies.map(geo => {
-                      const koreanName = getKoreanName(geo.properties.name);
-                      const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
-                      return (
-                        <Geography
-                          key={geo.rsmKey}
-                          geography={geo}
-                          onMouseMove={e => setHovered({
-                            name: koreanName || geo.properties.name,
-                            inDb,
-                            x: e.clientX, y: e.clientY,
-                          })}
-                          onMouseEnter={e => {
-                            setHovered({
+              <ZoomableGroup
+                center={zoomState.center}
+                zoom={zoomState.zoom}
+                minZoom={1}
+                maxZoom={8}
+                onMoveEnd={setZoomState}
+              >
+                <Geographies geography={worldGeoData}>
+                  {({ geographies }) => (
+                    <>
+                      {geographies.map(geo => {
+                        const koreanName = getKoreanName(geo.properties.name);
+                        const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
+                        return (
+                          <Geography
+                            key={geo.rsmKey}
+                            geography={geo}
+                            onMouseMove={e => setHovered({
                               name: koreanName || geo.properties.name,
                               inDb,
                               x: e.clientX, y: e.clientY,
-                            });
-                            if (inDb) loadCountryInfo(koreanName);
-                          }}
-                          onClick={() => goToCountry(koreanName)}
-                          style={{
-                            default: {
-                              fill: inDb ? "#16a34a" : "#cbd5e1",
-                              stroke: "#fff", strokeWidth: 0.5,
-                              outline: "none", cursor: inDb ? "pointer" : "default",
-                              transition: "fill .1s",
-                            },
-                            hover: {
-                              fill: inDb ? "#15803d" : "#94a3b8",
-                              stroke: "#fff", strokeWidth: 0.5, outline: "none",
-                              cursor: inDb ? "pointer" : "default",
-                            },
-                            pressed: { fill: "#166534", stroke: "#fff", strokeWidth: 0.5, outline: "none" },
-                          }}
-                        />
-                      );
-                    })}
-                    {geographies.map(geo => {
-                      const koreanName = getKoreanName(geo.properties.name);
-                      const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
-                      if (!inDb) return null;
-                      const centroid = geoCentroid(geo);
-                      if (!centroid || centroid.some(v => Number.isNaN(v))) return null;
-                      return (
-                        <Marker key={geo.rsmKey + "-label"} coordinates={centroid} style={{pointerEvents:"none"}}>
-                          <circle r={2} fill="#1a1a2e" stroke="#fff" strokeWidth={0.5}/>
-                          <text
-                            y={-5} textAnchor="middle"
-                            style={{ fontSize: 7, fontWeight: 600, fill: "#1a1a2e", fontFamily: "inherit" }}
-                          >
-                            {koreanName}
-                          </text>
-                        </Marker>
-                      );
-                    })}
-                  </>
-                )}
-              </Geographies>
+                            })}
+                            onMouseEnter={e => {
+                              setHovered({
+                                name: koreanName || geo.properties.name,
+                                inDb,
+                                x: e.clientX, y: e.clientY,
+                              });
+                              if (inDb) loadCountryInfo(koreanName);
+                            }}
+                            onClick={() => goToCountry(koreanName)}
+                            style={{
+                              default: {
+                                fill: inDb ? "#16a34a" : "#cbd5e1",
+                                stroke: "#fff", strokeWidth: 0.5 / zoomState.zoom,
+                                outline: "none", cursor: inDb ? "pointer" : "default",
+                                transition: "fill .1s",
+                              },
+                              hover: {
+                                fill: inDb ? "#15803d" : "#94a3b8",
+                                stroke: "#fff", strokeWidth: 0.5 / zoomState.zoom, outline: "none",
+                                cursor: inDb ? "pointer" : "default",
+                              },
+                              pressed: { fill: "#166534", stroke: "#fff", strokeWidth: 0.5 / zoomState.zoom, outline: "none" },
+                            }}
+                          />
+                        );
+                      })}
+                      {geographies.map(geo => {
+                        const koreanName = getKoreanName(geo.properties.name);
+                        const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
+                        if (!inDb) return null;
+                        const centroid = geoCentroid(geo);
+                        if (!centroid || centroid.some(v => Number.isNaN(v))) return null;
+                        return (
+                          <Marker key={geo.rsmKey + "-label"} coordinates={centroid} style={{pointerEvents:"none"}}>
+                            <circle r={2 / zoomState.zoom} fill="#1a1a2e" stroke="#fff" strokeWidth={0.5 / zoomState.zoom}/>
+                            <text
+                              y={-5 / zoomState.zoom} textAnchor="middle"
+                              style={{ fontSize: 7 / zoomState.zoom, fontWeight: 600, fill: "#1a1a2e", fontFamily: "inherit" }}
+                            >
+                              {koreanName}
+                            </text>
+                          </Marker>
+                        );
+                      })}
+                    </>
+                  )}
+                </Geographies>
+              </ZoomableGroup>
             </ComposableMap>
 
             {amountShare?.items?.length > 0 && (
