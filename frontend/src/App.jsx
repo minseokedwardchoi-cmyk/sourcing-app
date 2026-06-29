@@ -1516,9 +1516,9 @@ const MAP_LABEL_OVERRIDES = {
   "미국": [-97, 39],
   "중국": [104, 35],
   "호주": [134, -25],
-  "베트남": [106, 16],
+  "베트남": [106.5, 21],
   "브라질": [-52, -10],
-  "태국": [101, 15],
+  "태국": [100, 13],
   "러시아": [60, 61],
   "스페인": [-3.7, 40],
 };
@@ -1960,7 +1960,11 @@ function CountryMapPage({ navigate }) {
                             {showLabel && (
                               <text
                                 y={-6 / zoomState.zoom} textAnchor="middle"
-                                style={{ fontSize: 10 / zoomState.zoom, fontWeight: 600, fill: "#1a1a2e", fontFamily: "inherit" }}
+                                style={{
+                                  fontSize: 10 / zoomState.zoom, fontWeight: 600, fill: "#1a1a2e", fontFamily: "inherit",
+                                  paintOrder: "stroke", stroke: "rgba(255,255,255,0.9)", strokeWidth: 3 / zoomState.zoom,
+                                  strokeLinejoin: "round",
+                                }}
                               >
                                 {koreanName}
                               </text>
