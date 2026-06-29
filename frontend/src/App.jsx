@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
-import { ComposableMap, Geographies, Geography } from "react-simple-maps";
+import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
+import { geoCentroid } from "d3-geo";
 import {
   fetchSkuHistory, fetchSkuFactories,
   fetchManufacturerDetail, uploadExcel,
@@ -1767,6 +1768,11 @@ function CountryMapPage({ navigate }) {
   const [search,  setSearch]  = useState("");
   const [showSuggest, setShowSuggest] = useState(false);
   const [countryInfoCache, setCountryInfoCache] = useState({}); // { [koreanName]: { summary, topItems } }
+  const [amountShare, setAmountShare] = useState(null);
+
+  useEffect(() => {
+    fetchCountryAmountShare().then(setAmountShare).catch(() => {});
+  }, []);
 
   function loadCountryInfo(koreanName) {
     if (!koreanName || countryInfoCache[koreanName]) return;
@@ -1838,55 +1844,95 @@ function CountryMapPage({ navigate }) {
           </div>
 
           <p style={{fontSize:12, color:"#6b7280", marginBottom:10}}>
-            지도 위에서 마우스를 올리면 국가명이 표시됩니다. 데이터베이스에 보유한 국가(초록색)를 클릭하면 해당 국가의 상세 페이지로 이동합니다.
+            데이터베이스에 보유한 국가(초록색)는 국가명이 항상 표시됩니다. 마우스를 올리면 상세 정보가, 클릭하면 해당 국가의 상세 페이지가 나타납니다.
           </p>
 
           <div style={{position:"relative", border:"1px solid #e8eaed", borderRadius:8, overflow:"hidden", background:"#eff6ff"}}
             onMouseLeave={()=>setHovered(null)}>
-            <ComposableMap projectionConfig={{ scale: 148 }} width={980} height={460} style={{width:"100%",height:"auto",display:"block"}}>
+            <ComposableMap
+              projection="geoEquirectangular"
+              projectionConfig={{ scale: 148 }}
+              width={980} height={460} style={{width:"100%",height:"auto",display:"block"}}
+            >
               <Geographies geography={worldGeoData}>
-                {({ geographies }) =>
-                  geographies.map(geo => {
-                    const koreanName = getKoreanName(geo.properties.name);
-                    const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
-                    return (
-                      <Geography
-                        key={geo.rsmKey}
-                        geography={geo}
-                        onMouseMove={e => setHovered({
-                          name: koreanName || geo.properties.name,
-                          inDb,
-                          x: e.clientX, y: e.clientY,
-                        })}
-                        onMouseEnter={e => {
-                          setHovered({
+                {({ geographies }) => (
+                  <>
+                    {geographies.map(geo => {
+                      const koreanName = getKoreanName(geo.properties.name);
+                      const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
+                      return (
+                        <Geography
+                          key={geo.rsmKey}
+                          geography={geo}
+                          onMouseMove={e => setHovered({
                             name: koreanName || geo.properties.name,
                             inDb,
                             x: e.clientX, y: e.clientY,
-                          });
-                          if (inDb) loadCountryInfo(koreanName);
-                        }}
-                        onClick={() => goToCountry(koreanName)}
-                        style={{
-                          default: {
-                            fill: inDb ? "#16a34a" : "#cbd5e1",
-                            stroke: "#fff", strokeWidth: 0.5,
-                            outline: "none", cursor: inDb ? "pointer" : "default",
-                            transition: "fill .1s",
-                          },
-                          hover: {
-                            fill: inDb ? "#15803d" : "#94a3b8",
-                            stroke: "#fff", strokeWidth: 0.5, outline: "none",
-                            cursor: inDb ? "pointer" : "default",
-                          },
-                          pressed: { fill: "#166534", stroke: "#fff", strokeWidth: 0.5, outline: "none" },
-                        }}
-                      />
-                    );
-                  })
-                }
+                          })}
+                          onMouseEnter={e => {
+                            setHovered({
+                              name: koreanName || geo.properties.name,
+                              inDb,
+                              x: e.clientX, y: e.clientY,
+                            });
+                            if (inDb) loadCountryInfo(koreanName);
+                          }}
+                          onClick={() => goToCountry(koreanName)}
+                          style={{
+                            default: {
+                              fill: inDb ? "#16a34a" : "#cbd5e1",
+                              stroke: "#fff", strokeWidth: 0.5,
+                              outline: "none", cursor: inDb ? "pointer" : "default",
+                              transition: "fill .1s",
+                            },
+                            hover: {
+                              fill: inDb ? "#15803d" : "#94a3b8",
+                              stroke: "#fff", strokeWidth: 0.5, outline: "none",
+                              cursor: inDb ? "pointer" : "default",
+                            },
+                            pressed: { fill: "#166534", stroke: "#fff", strokeWidth: 0.5, outline: "none" },
+                          }}
+                        />
+                      );
+                    })}
+                    {geographies.map(geo => {
+                      const koreanName = getKoreanName(geo.properties.name);
+                      const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
+                      if (!inDb) return null;
+                      const centroid = geoCentroid(geo);
+                      if (!centroid || centroid.some(v => Number.isNaN(v))) return null;
+                      return (
+                        <Marker key={geo.rsmKey + "-label"} coordinates={centroid} style={{pointerEvents:"none"}}>
+                          <circle r={2} fill="#1a1a2e" stroke="#fff" strokeWidth={0.5}/>
+                          <text
+                            y={-5} textAnchor="middle"
+                            style={{ fontSize: 7, fontWeight: 600, fill: "#1a1a2e", fontFamily: "inherit" }}
+                          >
+                            {koreanName}
+                          </text>
+                        </Marker>
+                      );
+                    })}
+                  </>
+                )}
               </Geographies>
             </ComposableMap>
+
+            {amountShare?.items?.length > 0 && (
+              <div style={{
+                position:"absolute", left:10, top:10, zIndex:200,
+                background:"rgba(255,255,255,0.92)", border:"1px solid #e5e7eb", borderRadius:8,
+                padding:"10px 12px", fontSize:12, color:"#374151", boxShadow:"0 1px 4px rgba(0,0,0,.08)",
+              }}>
+                <div style={{fontWeight:700, marginBottom:6}}>대한민국 수입금액 기준 국가 순위</div>
+                {amountShare.items.map((it,i)=>(
+                  <div key={it.country} style={{display:"flex", alignItems:"center", gap:5, whiteSpace:"nowrap", marginBottom:2}}>
+                    <span className="legend-dot" style={{background: it.is_other ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}}/>
+                    {it.flag} {it.country} ({it.pct}%)
+                  </div>
+                ))}
+              </div>
+            )}
 
             {hovered && (() => {
               const info = hovered.inDb ? countryInfoCache[hovered.name] : null;
