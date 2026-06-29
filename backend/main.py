@@ -38,6 +38,7 @@ from country_data import (
 from schemas import (
     CountrySummaryResponse, CountryTopItemRow, CountryTopItemsResponse,
     CountryManufacturerRow, CountryManufacturersResponse,
+    CountryAmountShareRow, CountryAmountShareResponse,
 )
 
 load_dotenv()
@@ -674,6 +675,38 @@ async def get_country_summary(country: str, db: AsyncSession = Depends(get_db)):
         manufacturer_count=manufacturer_count,
         total_import_count=total_import_count,
     )
+
+
+@app.get("/api/countries/amount-share", response_model=CountryAmountShareResponse)
+async def get_country_amount_share(top_n: int = Query(8, ge=1, le=30), db: AsyncSession = Depends(get_db)):
+    rows_r = await db.execute(
+        text("SELECT country, total_amount_usd_k FROM country_import_stat ORDER BY total_amount_usd_k DESC")
+    )
+    rows = rows_r.fetchall()
+    national_total = float(NATIONAL_TOTAL_AMOUNT_USD_K)
+
+    items: list[CountryAmountShareRow] = []
+    other_amount = 0.0
+    for idx, (country, amount) in enumerate(rows):
+        amount = float(amount)
+        if idx < top_n:
+            items.append(CountryAmountShareRow(
+                country=country, flag=get_flag(country),
+                amount_usd_k=amount,
+                pct=round(amount / national_total * 100, 2) if national_total else 0,
+            ))
+        else:
+            other_amount += amount
+
+    if other_amount > 0:
+        items.append(CountryAmountShareRow(
+            country="기타", flag="🏳️",
+            amount_usd_k=other_amount,
+            pct=round(other_amount / national_total * 100, 2) if national_total else 0,
+            is_other=True,
+        ))
+
+    return CountryAmountShareResponse(national_total_amount_usd_k=national_total, items=items)
 
 
 @app.get("/api/countries/{country}/top-items", response_model=CountryTopItemsResponse)

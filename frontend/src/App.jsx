@@ -5,7 +5,7 @@ import {
   fetchManufacturerDetail, uploadExcel,
   updateManufacturerContact, uploadContacts, clearAllData,
   fetchColumnValues, fetchMonthlyImportCounts,
-  fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers,
+  fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers, fetchCountryAmountShare,
 } from "./api.js";
 import { getKoreanName } from "./countryGeo.js";
 import worldGeoData from "world-atlas/countries-110m.json";
@@ -1531,7 +1531,15 @@ function PieChart({ slices, size = 120 }) {
     const startAngle = angle;
     const endAngle = angle + portion * 360;
     angle = endAngle;
-    return <path key={i} d={pieSlicePath(r, r, r - 1, startAngle, endAngle)} fill={s.color} />;
+    return (
+      <path
+        key={i}
+        d={pieSlicePath(r, r, r - 1, startAngle, endAngle)}
+        fill={s.color}
+        onClick={s.onClick}
+        style={{ cursor: s.onClick ? "pointer" : "default" }}
+      />
+    );
   });
   return <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>{paths}</svg>;
 }
@@ -1540,6 +1548,7 @@ function CountryDetail({ navigate, state }) {
   const country = state?.country;
   const [summary,   setSummary]   = useState(null);
   const [topItems,  setTopItems]  = useState(null);
+  const [amountShare, setAmountShare] = useState(null);
   const [sumLoading, setSumLoading] = useState(true);
   const [topLoading, setTopLoading] = useState(true);
   const [error,     setError]     = useState(null);
@@ -1562,6 +1571,7 @@ function CountryDetail({ navigate, state }) {
     fetchCountrySummary(country).then(setSummary).catch(e=>setError(e.message)).finally(()=>setSumLoading(false));
     setTopLoading(true);
     fetchCountryTopItems(country).then(setTopItems).catch(e=>setError(e.message)).finally(()=>setTopLoading(false));
+    fetchCountryAmountShare().then(setAmountShare).catch(e=>setError(e.message));
   },[country]);
 
   useEffect(()=>{
@@ -1641,15 +1651,24 @@ function CountryDetail({ navigate, state }) {
                   <span className="badge b-gray">수입이력 {summary.total_import_count}건</span>
                 </div>
               </div>
-              {summary.has_amount_stats && (
+              {amountShare?.items?.length > 0 && (
                 <div className="country-pie-block">
-                  <PieChart slices={[
-                    { value: summary.total_amount_usd_k, color: "#2563eb" },
-                    { value: Math.max((summary.national_total_amount_usd_k||0) - (summary.total_amount_usd_k||0), 0), color: "#e5e7eb" },
-                  ]} size={100}/>
+                  <PieChart slices={amountShare.items.map((it,i)=>({
+                    value: it.pct,
+                    color: it.is_other ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length],
+                    onClick: it.is_other ? undefined : () => navigate("country", { country: it.country }),
+                  }))} size={100}/>
                   <div className="country-pie-legend">
-                    <div><span className="legend-dot" style={{background:"#2563eb"}}/>{summary.country} ({summary.amount_share_pct}%)</div>
-                    <div><span className="legend-dot" style={{background:"#e5e7eb"}}/>기타 국가</div>
+                    {amountShare.items.map((it,i)=>(
+                      <div
+                        key={it.country}
+                        style={{cursor: it.is_other ? "default" : "pointer", fontWeight: it.country===summary.country?700:400}}
+                        onClick={it.is_other ? undefined : () => navigate("country", { country: it.country })}
+                      >
+                        <span className="legend-dot" style={{background: it.is_other ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}}/>
+                        {it.flag} {it.country} ({it.pct}%)
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1657,22 +1676,29 @@ function CountryDetail({ navigate, state }) {
           ) : null}
         </div>
 
-        {!topLoading && topItems?.items?.length > 0 && (
-          <div className="card" style={{marginTop:12}}>
-            <div className="card-header"><span className="card-title">📊 국가별 주요 수입품목 TOP10</span></div>
-            <div className="card-body country-top-items">
-              <PieChart slices={topItems.items.map((it,i)=>({value:it.pct, color: PIE_COLORS[i % PIE_COLORS.length]}))} size={140}/>
-              <div className="country-pie-legend country-top-legend">
-                {topItems.items.map((it,i)=>(
-                  <div key={i}>
-                    <span className="legend-dot" style={{background:PIE_COLORS[i % PIE_COLORS.length]}}/>
-                    {it.rank}. {it.name} ({it.pct}%)
-                  </div>
-                ))}
+        {!topLoading && topItems?.items?.length > 0 && (() => {
+          const topPctSum = topItems.items.reduce((s,it)=>s+(it.pct||0), 0);
+          const otherPct = Math.max(100 - topPctSum, 0);
+          const legendItems = otherPct > 0.005
+            ? [...topItems.items, { rank: null, name: "기타", pct: Math.round(otherPct*100)/100, isOther: true }]
+            : topItems.items;
+          return (
+            <div className="card" style={{marginTop:12}}>
+              <div className="card-header"><span className="card-title">📊 국가별 주요 수입품목 TOP10</span></div>
+              <div className="card-body country-top-items">
+                <PieChart slices={legendItems.map((it,i)=>({value:it.pct, color: it.isOther ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}))} size={140}/>
+                <div className="country-pie-legend country-top-legend">
+                  {legendItems.map((it,i)=>(
+                    <div key={i}>
+                      <span className="legend-dot" style={{background: it.isOther ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}}/>
+                      {it.isOther ? "기타" : `${it.rank}. ${it.name}`} ({it.pct}%)
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         <div className="card" style={{marginTop:12}}>
           <div className="card-header"><span className="card-title">해당 국가 제조사 목록</span></div>
