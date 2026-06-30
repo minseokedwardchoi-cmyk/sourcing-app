@@ -1019,7 +1019,7 @@ function MainDashboard({ navigate }) {
                     <div className="modal-section-title">연도별 수입횟수</div>
                     {!allYears.some(y => y.count > 0) ? <div className="empty-state">이력 없음</div> : (
                       <div style={{overflowX:"auto"}}>
-                        <table style={{borderCollapse:"collapse", fontSize:12, tableLayout:"auto", width:"auto"}}>
+                        <table style={{borderCollapse:"collapse", fontSize:12, tableLayout:"auto", width:"fit-content"}}>
                           <tbody>
                             <tr>
                               <td style={{padding:"4px 6px", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", background:"#f1f3f5", whiteSpace:"nowrap", width:62}}>연도</td>
