@@ -1019,19 +1019,19 @@ function MainDashboard({ navigate }) {
                     <div className="modal-section-title">연도별 수입횟수</div>
                     {!allYears.some(y => y.count > 0) ? <div className="empty-state">이력 없음</div> : (
                       <div style={{overflowX:"auto"}}>
-                        <table className="yearly-table">
+                        <table style={{borderCollapse:"collapse", fontSize:12, tableLayout:"fixed", width:"auto"}}>
                           <tbody>
                             <tr>
-                              <td className="yearly-table-label">연도</td>
-                              {allYears.map(y => <td key={y.year}>{y.year}</td>)}
+                              <td style={{padding:"4px 6px", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", background:"#f1f3f5", whiteSpace:"nowrap", width:62}}>연도</td>
+                              {allYears.map(y => <td key={y.year} style={{padding:"4px 5px", border:"1px solid #e8eaed", textAlign:"center", background:"#fff", width:50}}>{y.year}</td>)}
                             </tr>
                             <tr>
-                              <td className="yearly-table-label">수입횟수</td>
+                              <td style={{padding:"4px 6px", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", background:"#f1f3f5", whiteSpace:"nowrap", width:62}}>수입횟수</td>
                               {allYears.map((y, idx) => {
                                 const rate = getYearChangeRate(y, idx);
                                 const isCurrent = Number(y.year) === thisYear;
                                 return (
-                                  <td key={y.year} style={{color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
+                                  <td key={y.year} style={{padding:"4px 5px", border:"1px solid #e8eaed", textAlign:"center", background:"#fff", width:50, color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
                                     {y.count}
                                     {rate !== null && (
                                       <span style={{
