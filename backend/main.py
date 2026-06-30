@@ -145,11 +145,37 @@ _SKU_HISTORY_MV_SQL = """
 @app.on_event("startup")
 async def startup():
     import asyncio
-    # 테이블/확장만 빠르게 생성 후 즉시 반환 — 나머지는 백그라운드
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-    asyncio.create_task(_startup_bg())
+
+        col_check = await conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'sku_history_mv' AND column_name = 'count_year1'
+        """))
+        if col_check.fetchone() is None:
+            await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_factory_mv"))
+            await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_history_mv"))
+
+        await conn.execute(text(
+            _SKU_HISTORY_MV_SQL.replace("CREATE MATERIALIZED VIEW",
+                                        "CREATE MATERIALIZED VIEW IF NOT EXISTS")
+        ))
+        await conn.execute(text("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS sku_factory_mv AS
+            SELECT
+                sku_name, factory, manufacturer, country, mc,
+                COUNT(*)            AS import_count,
+                MIN(email)          AS email,
+                MIN(homepage)       AS homepage,
+                MAX(oem_status)     AS oem_status,
+                array_agg(DISTINCT import_type) FILTER (WHERE import_type IS NOT NULL) AS import_types,
+                array_agg(DISTINCT importer)    FILTER (WHERE importer IS NOT NULL)    AS importers
+            FROM import_history
+            GROUP BY sku_name, factory, manufacturer, country, mc
+        """))
+        await _seed_country_stats(conn)
+    asyncio.create_task(_build_indexes_bg())
 
 
 async def _startup_bg():
@@ -358,7 +384,7 @@ async def get_sku_history(
                     COUNT(*)                                AS import_count,
                     manufacturer, factory, country,
                     MIN(email)                              AS email,
-                    MAX(import_date)                        AS latest_import,
+                    MAX(COALESCE(import_date, process_date)) AS latest_import,
                     (:base_year)::int                       AS base_year,
                     COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :base_year - 1
                           THEN 1 END)::int                  AS count_year1,
@@ -367,7 +393,8 @@ async def get_sku_history(
                     COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :base_year - 3
                           THEN 1 END)::int                  AS count_year3
                 FROM import_history
-                WHERE COALESCE(import_date, process_date) BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
+                WHERE process_date BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
+                   OR import_date BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
                 GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
             ) sub
             WHERE 1=1
