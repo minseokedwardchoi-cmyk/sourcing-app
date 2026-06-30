@@ -65,6 +65,10 @@ async def crawl_oem_data(page, start: str, end: str) -> pd.DataFrame:
     await open_search_page(page, start, end, oem=True)
     await page.evaluate("fnPageLimit(50)")
     await asyncio.sleep(5)
+    try:
+        await page.wait_for_selector("table tbody tr", timeout=15_000)
+    except Exception:
+        pass
 
     total_count = 0
     try:
@@ -96,6 +100,11 @@ async def crawl_oem_data(page, start: str, end: str) -> pd.DataFrame:
             await asyncio.sleep(PAGE_DELAY)
 
         log.info("OEM 크롤링 중: %d / %d 페이지", page_num, total_pages)
+        try:
+            await page.wait_for_selector("table tbody tr", timeout=15_000)
+        except Exception:
+            log.info("테이블 없음 — 종료")
+            break
         tr_els = await page.query_selector_all("table tbody tr")
         if not tr_els:
             log.info("빈 페이지 — 종료")
