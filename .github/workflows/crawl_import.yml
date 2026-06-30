@@ -2,7 +2,7 @@ name: 수입이력 자동 수집 및 업로드
 
 on:
   schedule:
-    - cron: '0 17 * * *'   # 매일 02:00 KST
+    - cron: '0 15 * * *'   # 매일 00:00 KST (지연 감안 ~02:00 실행)
   workflow_dispatch:
     inputs:
       start_date:
