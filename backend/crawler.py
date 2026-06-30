@@ -4,6 +4,7 @@ Playwright 없이 httpx만으로 동작 (메모리 ~50MB)
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import re
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import httpx
 import pandas as pd
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -139,45 +141,44 @@ def mark_and_transform(full_df: pd.DataFrame, oem_set: set, mc_map: dict) -> pd.
 
 # ── 메인 파이프라인 ───────────────────────────────────────────────────────────
 
-async def run_crawl(start: str, end: str, backend_url: str) -> dict:
+async def run_crawl(start: str, end: str, db: AsyncSession) -> dict:
     log.info("=== 크롤링 시작: %s ~ %s ===", start, end)
 
     async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True) as client:
         # 세션 쿠키 초기화
         await client.get(BASE_URL, timeout=30)
 
-        # 전체 건수 파악
+        # 전체/OEM 건수 파악
         full_count = await get_total_count(client, start, end, oem=False)
         log.info("전체 건수: %d", full_count)
-
-        # OEM 건수 파악
         oem_count = await get_total_count(client, start, end, oem=True)
         log.info("OEM 건수: %d", oem_count)
 
-        # Excel 다운로드
+        # Excel 다운로드 (I/O bound — 이벤트 루프 안전)
         full_df = await download_excel(client, start, end, full_count, oem=False)
-        oem_df  = await download_excel(client, start, end, oem_count,  oem=True) if oem_count > 0 else pd.DataFrame()
+        oem_df  = await download_excel(client, start, end, oem_count, oem=True) if oem_count > 0 else pd.DataFrame()
 
-    # OEM 마킹 + MC 변환
-    oem_set = build_oem_set(oem_df) if not oem_df.empty else set()
-    mc_map = load_mc_mapping()
-    result_df = mark_and_transform(full_df, oem_set, mc_map)
+    # CPU bound 작업 → 스레드풀로 분리해 이벤트 루프 블락 방지
+    def _transform():
+        oem_set = build_oem_set(oem_df) if not oem_df.empty else set()
+        mc_map = load_mc_mapping()
+        return mark_and_transform(full_df, oem_set, mc_map)
 
-    # 백엔드 업로드
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        result_df.to_excel(writer, index=False, sheet_name="시트1")
-    buf.seek(0)
-    filename = f"import_{start}_{end}.xlsx"
+    result_df = await asyncio.to_thread(_transform)
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f"{backend_url}/api/upload",
-            files={"file": (filename, buf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
-        )
+    # Excel 직렬화 → 스레드풀
+    def _to_excel_bytes():
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            result_df.to_excel(writer, index=False, sheet_name="시트1")
+        buf.seek(0)
+        return buf.read()
 
-    if resp.status_code != 200:
-        raise RuntimeError(f"업로드 실패 HTTP {resp.status_code}: {resp.text}")
+    file_bytes = await asyncio.to_thread(_to_excel_bytes)
+
+    # DB에 직접 적재 (HTTP 왕복 없음)
+    from importer import import_excel
+    result = await import_excel(file_bytes, db)
 
     log.info("=== 완료: %d건 업로드 ===", len(result_df))
-    return {"rows": len(result_df), "start": start, "end": end, **resp.json()}
+    return {"rows": len(result_df), "start": start, "end": end, **result}
