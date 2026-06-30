@@ -1190,3 +1190,18 @@ async def get_competitor_stats(db: AsyncSession = Depends(get_db)):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ─── 정부 사이트 접근 테스트 ─────────────────────────────────────────────────
+@app.get("/api/ping-impfood")
+async def ping_impfood():
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://impfood.mfds.go.kr/CFCCC01F01",
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            )
+        return {"status": resp.status_code, "reachable": True, "bytes": len(resp.content)}
+    except Exception as e:
+        return {"reachable": False, "error": str(e)}
