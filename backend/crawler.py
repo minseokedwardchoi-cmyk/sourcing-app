@@ -12,6 +12,7 @@ from pathlib import Path
 
 import httpx
 import pandas as pd
+from bs4 import BeautifulSoup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -69,20 +70,67 @@ async def get_total_count(client: httpx.AsyncClient, start: str, end: str, oem: 
     raise RuntimeError("totalCnt 파싱 실패 — 사이트 응답 구조가 바뀌었을 수 있습니다")
 
 
-async def download_excel(client: httpx.AsyncClient, start: str, end: str,
-                         total_cnt: int, oem: bool = False) -> pd.DataFrame:
-    """getExcelFile GET으로 Excel 다운로드 후 DataFrame 반환"""
+async def download_full_excel(client: httpx.AsyncClient, start: str, end: str,
+                              total_cnt: int) -> pd.DataFrame:
+    """전체 수입이력 Excel 다운로드"""
     params = {"totalCnt": str(total_cnt), "page": "1", "limit": "10", **_base_params(start, end)}
-    if oem:
-        params["oemFoodYn"] = "Y"
-
-    label = "OEM" if oem else "전체"
-    log.info("%s 엑셀 다운로드 중 (totalCnt=%d)", label, total_cnt)
+    log.info("전체 엑셀 다운로드 중 (totalCnt=%d)", total_cnt)
     resp = await client.get(f"{BASE_URL}/getExcelFile", params=params, timeout=120)
     resp.raise_for_status()
-
     df = pd.read_excel(io.BytesIO(resp.content), engine="openpyxl")
-    log.info("%s 다운로드 완료: %d행", label, len(df))
+    log.info("전체 다운로드 완료: %d행", len(df))
+    return df
+
+
+async def crawl_oem_pages(client: httpx.AsyncClient, start: str, end: str,
+                          total_cnt: int) -> pd.DataFrame:
+    """getList HTML 파싱으로 OEM 행 수집 (페이지당 50건)"""
+    LIMIT = 50
+    total_pages = (total_cnt + LIMIT - 1) // LIMIT
+    log.info("OEM 페이지 크롤링 시작: %d건 → %d페이지", total_cnt, total_pages)
+
+    COLS = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
+            "품목(유형)", "제조/작업/수출업소", "처리일자", "소비기한", "제조국", "수출국"]
+    rows_all = []
+
+    for page_num in range(1, total_pages + 1):
+        data = {
+            "page": str(page_num), "limit": str(LIMIT),
+            "totalCnt": str(total_cnt),
+            "oemFoodYn": "Y",
+            **_base_params(start, end),
+        }
+        resp = await client.post(f"{BASE_URL}/getList", data=data, timeout=30)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        tbody = soup.select_one("table tbody")
+        if not tbody:
+            log.info("OEM 페이지 %d: 테이블 없음 — 종료", page_num)
+            break
+
+        trs = tbody.find_all("tr")
+        if not trs:
+            break
+
+        for tr in trs:
+            tds = tr.find_all("td")
+            values = [td.get_text(strip=True) for td in tds]
+            if not any(values):
+                continue
+            if len(values) < len(COLS):
+                values += [""] * (len(COLS) - len(values))
+            rows_all.append(values[:len(COLS)])
+
+        if page_num % 10 == 0 or page_num == total_pages:
+            log.info("OEM 크롤링 진행: %d / %d 페이지 (%d건)", page_num, total_pages, len(rows_all))
+
+    if not rows_all:
+        log.warning("OEM 크롤링 결과 없음")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows_all, columns=COLS)
+    log.info("OEM 크롤링 완료: %d건", len(df))
     return df
 
 
@@ -154,9 +202,9 @@ async def run_crawl(start: str, end: str, db: AsyncSession) -> dict:
         oem_count = await get_total_count(client, start, end, oem=True)
         log.info("OEM 건수: %d", oem_count)
 
-        # Excel 다운로드 (I/O bound — 이벤트 루프 안전)
-        full_df = await download_excel(client, start, end, full_count, oem=False)
-        oem_df  = await download_excel(client, start, end, oem_count, oem=True) if oem_count > 0 else pd.DataFrame()
+        # 전체 Excel 다운로드 + OEM 페이지 크롤링
+        full_df = await download_full_excel(client, start, end, full_count)
+        oem_df  = await crawl_oem_pages(client, start, end, oem_count) if oem_count > 0 else pd.DataFrame()
 
     # CPU bound 작업 → 스레드풀로 분리해 이벤트 루프 블락 방지
     def _transform():
