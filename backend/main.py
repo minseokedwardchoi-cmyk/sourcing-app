@@ -130,13 +130,14 @@ _SKU_HISTORY_MV_SQL = """
         COUNT(*)                                AS import_count,
         manufacturer, factory, country,
         MIN(email)                              AS email,
-        MAX(import_date)                        AS latest_import,
+        MAX(COALESCE(import_date, process_date)) AS latest_import,
+        MIN(COALESCE(import_date, process_date)) AS earliest_import,
         EXTRACT(YEAR FROM CURRENT_DATE)::int    AS base_year,
-        COUNT(CASE WHEN EXTRACT(YEAR FROM process_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
+        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
               THEN 1 END)::int                  AS count_year1,
-        COUNT(CASE WHEN EXTRACT(YEAR FROM process_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
+        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
               THEN 1 END)::int                  AS count_year2,
-        COUNT(CASE WHEN EXTRACT(YEAR FROM process_date) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
+        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
               THEN 1 END)::int                  AS count_year3
     FROM import_history
     GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
@@ -151,7 +152,7 @@ async def startup():
 
         col_check = await conn.execute(text("""
             SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'sku_history_mv' AND column_name = 'count_year1'
+            WHERE table_name = 'sku_history_mv' AND column_name = 'earliest_import'
         """))
         if col_check.fetchone() is None:
             await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_factory_mv"))
@@ -188,40 +189,6 @@ async def startup():
     asyncio.create_task(_build_indexes_bg())
 
 
-async def _startup_bg():
-    """MV 생성/인덱스/시딩을 백그라운드에서 실행 (startup 블로킹 방지)"""
-    import asyncio
-    await asyncio.sleep(1)
-    async with engine.begin() as conn:
-        # MV에 연도별 컬럼이 없으면 DROP 후 재생성
-        col_check = await conn.execute(text("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'sku_history_mv' AND column_name = 'count_year1'
-        """))
-        if col_check.fetchone() is None:
-            await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_factory_mv"))
-            await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_history_mv"))
-
-        await conn.execute(text(
-            _SKU_HISTORY_MV_SQL.replace("CREATE MATERIALIZED VIEW",
-                                        "CREATE MATERIALIZED VIEW IF NOT EXISTS")
-        ))
-        await conn.execute(text("""
-            CREATE MATERIALIZED VIEW IF NOT EXISTS sku_factory_mv AS
-            SELECT
-                sku_name, factory, manufacturer, country, mc,
-                COUNT(*)            AS import_count,
-                MIN(email)          AS email,
-                MIN(homepage)       AS homepage,
-                MAX(oem_status)     AS oem_status,
-                array_agg(DISTINCT import_type) FILTER (WHERE import_type IS NOT NULL) AS import_types,
-                array_agg(DISTINCT importer)    FILTER (WHERE importer IS NOT NULL)    AS importers
-            FROM import_history
-            GROUP BY sku_name, factory, manufacturer, country, mc
-        """))
-        await _seed_country_stats(conn)
-    await _build_indexes_bg()
-    print("STARTUP BG COMPLETE")
 
 
 async def _seed_country_stats(conn):
@@ -381,32 +348,12 @@ async def get_sku_history(
         params["search"] = f"%{search.strip()}%"
 
     if date_from or date_to:
-        # 기간 필터가 있으면 MV 대신 import_history를 즉시 기간으로 집계
-        # (수입횟수/연도별 카운트 모두 선택한 기간 기준으로 재계산됨)
         params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
         params["date_to"]   = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
-        # 최근 3개년 집계 기준연도: 날짜 필터의 종료일이 있으면 그 해, 없으면 현재연도
-        params["base_year"] = date.fromisoformat(date_to).year if date_to else date.today().year
         base_sql = f"""
-            FROM (
-                SELECT
-                    category, mc, sku_name, import_type, importer,
-                    COUNT(*)                                AS import_count,
-                    manufacturer, factory, country,
-                    MIN(email)                              AS email,
-                    MAX(COALESCE(import_date, process_date)) AS latest_import,
-                    (:base_year)::int                       AS base_year,
-                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :base_year - 1
-                          THEN 1 END)::int                  AS count_year1,
-                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :base_year - 2
-                          THEN 1 END)::int                  AS count_year2,
-                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :base_year - 3
-                          THEN 1 END)::int                  AS count_year3
-                FROM import_history
-                WHERE COALESCE(import_date, process_date) BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
-                GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
-            ) sub
-            WHERE 1=1
+            FROM sku_history_mv
+            WHERE latest_import >= CAST(:date_from AS date)
+              AND earliest_import <= CAST(:date_to AS date)
             {search_cond}
             {competitor_cond}
             {col_filter_conds}
