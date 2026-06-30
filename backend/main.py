@@ -175,6 +175,19 @@ async def startup():
             GROUP BY sku_name, factory, manufacturer, country, mc
         """))
         await _seed_country_stats(conn)
+
+        # 핵심 인덱스 — startup에서 직접 생성 (백그라운드 kill 방지)
+        for sql in [
+            "CREATE INDEX IF NOT EXISTS idx_ih_process_date  ON import_history (process_date)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_import_date   ON import_history (import_date)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_coalesce_date ON import_history (COALESCE(import_date, process_date))",
+            "CREATE INDEX IF NOT EXISTS idx_ih_sku_name      ON import_history (sku_name)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_gin_sku       ON import_history USING gin (sku_name      gin_trgm_ops)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_gin_factory   ON import_history USING gin (factory       gin_trgm_ops)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_gin_importer  ON import_history USING gin (importer      gin_trgm_ops)",
+        ]:
+            await conn.execute(text(sql))
+
     asyncio.create_task(_build_indexes_bg())
 
 
