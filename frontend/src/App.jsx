@@ -166,8 +166,8 @@ const styles = `
   .monthly-panel { padding:10px 14px; overflow-x:auto; animation: monthlySlide .15s ease-out; }
   @keyframes monthlySlide { from { opacity:0; transform: translateY(-6px); } to { opacity:1; transform: translateY(0); } }
   .monthly-table { width:auto; border-collapse: collapse; font-size:12px; table-layout:fixed; }
-  .monthly-table td { padding:5px 10px; border:1px solid #e8eaed; text-align:center; white-space:nowrap; background:#fff; width:54px; max-width:54px; }
-  .monthly-table td.monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; width:70px; max-width:70px; }
+  .monthly-table td { padding:4px 6px; border:1px solid #e8eaed; text-align:center; white-space:nowrap; background:#fff; width:40px; max-width:40px; }
+  .monthly-table td.monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; width:62px; max-width:62px; }
   .date-range-wrap { display:flex; align-items:center; gap:5px; }
   .date-range-input { padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; background:#f9fafb; color:#1a1a2e; outline:none; }
   .date-range-input:focus { border-color:#16a34a; background:#fff; }
@@ -1056,11 +1056,13 @@ function MainDashboard({ navigate }) {
                       <div className="modal-section-title" style={{margin:0}}>월별 수입횟수 추이</div>
                       <div style={{display:"flex", alignItems:"center", gap:6, fontSize:12}}>
                         <input type="month" className="date-range-input" style={{padding:"3px 7px", fontSize:12}}
+                          placeholder="연도-월"
                           value={modalChartFrom}
                           onChange={e => setModalChartFrom(e.target.value)}
                         />
                         <span style={{color:"#9ca3af"}}>~</span>
                         <input type="month" className="date-range-input" style={{padding:"3px 7px", fontSize:12}}
+                          placeholder="연도-월"
                           value={modalChartTo}
                           onChange={e => setModalChartTo(e.target.value)}
                         />
@@ -1089,7 +1091,7 @@ function MainDashboard({ navigate }) {
                               contentStyle={{fontSize:12, borderRadius:6}}
                             />
                             <Line
-                              type="monotone" dataKey="count" stroke="#16a34a" strokeWidth={2}
+                              type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2}
                               dot={{ r: 3, fill: "#16a34a" }}
                               activeDot={{ r: 5 }}
                             >
