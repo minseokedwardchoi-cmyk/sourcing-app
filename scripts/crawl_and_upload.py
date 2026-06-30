@@ -107,8 +107,7 @@ async def download_full_excel(page, start: str, end: str) -> pd.DataFrame:
 
     log.info("전체 엑셀 다운로드 시작")
     async with page.expect_download(timeout=120_000) as dl_info:
-        await page.click("button.xls-i, a.xls-i, button:has-text('엑셀다운로드'), "
-                         "a:has-text('엑셀다운로드')", timeout=15_000)
+        await page.click("button[onclick='fnGetExcelFile();']", timeout=15_000)
     download = await dl_info.value
     dest = DOWNLOAD_DIR / f"full_{start}_{end}.xlsx"
     await download.save_as(str(dest))
