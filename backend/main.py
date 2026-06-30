@@ -1206,6 +1206,36 @@ async def refresh_mv(db: AsyncSession = Depends(get_db)):
     await db.commit()
     return {"status": "ok", "message": "MV 갱신 완료"}
 
+# ─── 빠른 데이터 확인 ────────────────────────────────────────────────────────
+@app.get("/api/quick-check")
+async def quick_check(db: AsyncSession = Depends(get_db)):
+    # pg_class의 근사치 행수 (즉시 반환)
+    count_r = await db.execute(text(
+        "SELECT reltuples::bigint FROM pg_class WHERE relname = 'import_history'"
+    ))
+    approx_count = count_r.scalar() or 0
+
+    # OEM 여부 (1건만 찾으면 됨)
+    oem_r = await db.execute(text(
+        "SELECT COUNT(*) FROM import_history WHERE import_type = 'OEM' LIMIT 1"
+    ))
+    # 최근 처리일자
+    date_r = await db.execute(text(
+        "SELECT MAX(process_date) FROM import_history"
+    ))
+    latest = date_r.scalar()
+
+    oem_exists_r = await db.execute(text(
+        "SELECT EXISTS(SELECT 1 FROM import_history WHERE import_type = 'OEM')"
+    ))
+    oem_exists = oem_exists_r.scalar()
+
+    return {
+        "approx_total_rows": approx_count,
+        "oem_exists": oem_exists,
+        "latest_process_date": str(latest) if latest else None,
+    }
+
 # ─── Health check ────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
