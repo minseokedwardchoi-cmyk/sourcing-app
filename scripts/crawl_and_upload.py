@@ -29,6 +29,18 @@ import httpx
 import pandas as pd
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
+# ── MC 매핑 로드 ──────────────────────────────────────────────────────────────
+_MC_MAP_PATH = Path(__file__).parent / "mc_mapping.csv"
+
+def load_mc_mapping() -> dict[str, str]:
+    if not _MC_MAP_PATH.exists():
+        log.warning("mc_mapping.csv 없음 — MC 컬럼이 모두 빈칸으로 처리됩니다")
+        return {}
+    df = pd.read_csv(_MC_MAP_PATH, encoding="utf-8-sig")
+    mapping = dict(zip(df["품목(유형)"].str.strip(), df["MC"].str.strip()))
+    log.info("MC 매핑 로드: %d개", len(mapping))
+    return mapping
+
 # ── 설정 ─────────────────────────────────────────────────────────────────────
 TARGET_URL  = "https://impfood.mfds.go.kr/CFCCC01F01"
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
@@ -281,19 +293,25 @@ def build_oem_set(oem_df: pd.DataFrame) -> set:
     return result
 
 
-def mark_and_transform(full_df: pd.DataFrame, oem_set: set) -> pd.DataFrame:
+def mark_and_transform(full_df: pd.DataFrame, oem_set: set, mc_map: dict) -> pd.DataFrame:
     """
-    전체 다운로드 df에 OEM 마킹 후 업로드 양식으로 변환
+    전체 다운로드 df에 OEM 마킹 + MC 변환 후 업로드 양식으로 변환
     업로드 컬럼: 구분, MC, 제품명(한글), 수입업체, OEM여부, 해외제조업소, 제조국, 이메일, 처리일자
     """
+    unmapped = set()
     records = []
     for _, row in full_df.iterrows():
         key = tuple(normalize_str(row.get(c, "")) for c in MATCH_KEYS_FULL)
         is_oem = key in oem_set
 
+        품목 = normalize_str(row.get("품목(유형)"))
+        mc = mc_map.get(품목)
+        if mc is None and 품목:
+            unmapped.add(품목)
+
         records.append({
             "구분":       normalize_str(row.get("구분")),
-            "MC":        None,                              # 정부 데이터에 없는 필드
+            "MC":        mc,
             "제품명(한글)": normalize_str(row.get("제품명(한글)")),
             "수입업체":    normalize_str(row.get("수입업체")),
             "OEM여부":    "O" if is_oem else None,
@@ -307,7 +325,11 @@ def mark_and_transform(full_df: pd.DataFrame, oem_set: set) -> pd.DataFrame:
         "구분", "MC", "제품명(한글)", "수입업체", "OEM여부", "해외제조업소", "제조국", "이메일", "처리일자"
     ])
     oem_count = result_df["OEM여부"].notna().sum()
+    mc_count  = result_df["MC"].notna().sum()
     log.info("OEM 마킹: %d / %d 건", oem_count, len(result_df))
+    log.info("MC 변환: %d / %d 건", mc_count, len(result_df))
+    if unmapped:
+        log.warning("MC 매핑 없는 품목(유형) %d종: %s", len(unmapped), ", ".join(sorted(unmapped)[:20]))
     return result_df
 
 
@@ -362,7 +384,8 @@ async def main():
     else:
         oem_set = build_oem_set(oem_df)
 
-    result_df = mark_and_transform(full_df, oem_set)
+    mc_map = load_mc_mapping()
+    result_df = mark_and_transform(full_df, oem_set, mc_map)
 
     # Step 4: 백엔드 업로드
     await upload_to_backend(result_df, start, end)
