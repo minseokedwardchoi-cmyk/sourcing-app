@@ -55,14 +55,22 @@ async def get_total_count(client: httpx.AsyncClient, start: str, end: str, oem: 
     resp = await client.post(f"{BASE_URL}/getList", data=data, timeout=30)
     resp.raise_for_status()
 
-    # HTML에서 totalCnt 파싱
+    # .board_count strong 에서 파싱 (가장 신뢰도 높음)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    count_tag = soup.select_one(".board_count strong")
+    if count_tag:
+        text = count_tag.get_text(strip=True).replace(",", "")
+        if text.isdigit():
+            return int(text)
+
+    # fallback: hidden input totalCnt
     m = re.search(r'name=["\']totalCnt["\'][^>]*value=["\'](\d+)["\']', resp.text)
     if not m:
         m = re.search(r'totalCnt["\s]*[:=]["\s]*["\']?(\d+)', resp.text)
     if m:
         return int(m.group(1))
 
-    # hidden input에서 못 찾으면 JS 변수에서 시도
+    # fallback: JS 변수
     m = re.search(r'var\s+totalCnt\s*=\s*["\']?(\d+)', resp.text)
     if m:
         return int(m.group(1))
@@ -105,21 +113,26 @@ async def crawl_oem_pages(client: httpx.AsyncClient, start: str, end: str,
         print(f"OEM 페이지 {page_num} 응답: HTTP {resp.status_code}, {len(resp.text)}자", flush=True)
 
         soup = BeautifulSoup(resp.text, "html.parser")
-        # <tbody> 가 없는 경우 대비해 table에서 직접 tr 검색
-        tbody = soup.select_one("table tbody") or soup.select_one("table")
-        if not tbody:
-            print(f"OEM 페이지 {page_num}: 테이블 없음 — 응답 앞부분: {resp.text[:300]}", flush=True)
+        # 네트워크 탭에서 확인된 실제 클래스명 사용
+        table = soup.select_one("table.board_list")
+        if not table:
+            print(f"OEM 페이지 {page_num}: table.board_list 없음 — 응답 앞부분: {resp.text[:500]}", flush=True)
             break
 
-        trs = tbody.find_all("tr")
+        # 헤더에서 실제 컬럼명 동적 추출 (디버그용)
+        if page_num == 1:
+            actual_cols = [th.get_text(strip=True) for th in table.select("thead th")]
+            print(f"OEM 테이블 실제 컬럼: {actual_cols}", flush=True)
+
+        trs = table.select("tbody tr")
         if not trs:
-            print(f"OEM 페이지 {page_num}: tr 없음", flush=True)
+            print(f"OEM 페이지 {page_num}: tbody tr 없음", flush=True)
             break
 
         page_rows = 0
         for tr in trs:
             tds = tr.find_all("td")
-            values = [td.get_text(strip=True) for td in tds]
+            values = [td.get_text(" ", strip=True) for td in tds]
             if not any(values):
                 continue
             if len(values) < len(COLS):
@@ -147,7 +160,8 @@ def normalize_str(s) -> str:
     return str(s).strip()
 
 
-MATCH_KEYS = ["수입업체", "제품명(한글)", "처리일자", "제조국"]
+MATCH_KEYS = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
+              "품목(유형)", "해외제조업소", "처리일자", "소비기한", "제조국", "수출국"]
 
 
 def build_oem_set(oem_df: pd.DataFrame) -> set:
