@@ -52,7 +52,7 @@ async def download_full_excel(page, start: str, end: str) -> pd.DataFrame:
     import tempfile, os
     dl_dir = Path(tempfile.mkdtemp())
     async with page.expect_download(timeout=120_000) as dl_info:
-        await page.click("button[onclick='fnGetExcelFile();']", timeout=15_000)
+        await page.click("button[onclick='fnGetExcelFile();']", timeout=15_000, no_wait_after=True)
     download = await dl_info.value
     dest = dl_dir / f"full_{start}_{end}.xlsx"
     await download.save_as(str(dest))
