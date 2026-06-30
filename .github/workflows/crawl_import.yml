@@ -28,7 +28,9 @@ jobs:
           if [ -n "$START" ] && [ -n "$END" ]; then
             URL="${{ secrets.BACKEND_URL }}/api/crawl?start_date=${START}&end_date=${END}"
           else
-            URL="${{ secrets.BACKEND_URL }}/api/crawl"
+            # KST 기준 어제 날짜 명시적으로 계산 (서버가 UTC라서 자동 계산하면 날짜 오차 발생)
+            YESTERDAY=$(TZ='Asia/Seoul' date -d 'yesterday' '+%Y-%m-%d')
+            URL="${{ secrets.BACKEND_URL }}/api/crawl?start_date=${YESTERDAY}&end_date=${YESTERDAY}"
           fi
 
           echo "요청 URL: $URL"
