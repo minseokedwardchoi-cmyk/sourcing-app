@@ -79,7 +79,8 @@ def parse_args():
 async def open_search_page(page, start: str, end: str, oem: bool = False):
     """검색 조건 설정 후 검색 실행"""
     log.info("페이지 로드: %s (oem=%s)", TARGET_URL, oem)
-    await page.goto(TARGET_URL, wait_until="networkidle", timeout=60_000)
+    await page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=90_000)
+    await asyncio.sleep(3)  # JS 초기화 대기
 
     # 날짜 입력 — JS로 직접 세팅 (jQuery datepicker가 있어서 value만 바꿔도 됨)
     await page.evaluate(f"""
@@ -96,7 +97,7 @@ async def open_search_page(page, start: str, end: str, oem: bool = False):
 
     # 검색 실행 — fnSearch(1) 직접 호출
     await page.evaluate("fnSearch(1)")
-    await page.wait_for_load_state("networkidle", timeout=30_000)
+    await asyncio.sleep(5)  # 검색 결과 로딩 대기
 
 
 # ── Step 1: 전체 엑셀 다운로드 ───────────────────────────────────────────────
@@ -125,7 +126,7 @@ async def crawl_oem_data(page, start: str, end: str) -> pd.DataFrame:
 
     # 페이지당 50건으로 설정 — fnPageLimit(50) 호출
     await page.evaluate("fnPageLimit(50)")
-    await page.wait_for_load_state("networkidle", timeout=30_000)
+    await asyncio.sleep(5)
 
     # 전체 건수 파싱 → 총 페이지 수 계산
     total_count = 0
@@ -158,7 +159,6 @@ async def crawl_oem_data(page, start: str, end: str) -> pd.DataFrame:
     for page_num in range(1, total_pages + 1):
         if page_num > 1:
             await page.evaluate(f"fnSearch({page_num})")
-            await page.wait_for_load_state("networkidle", timeout=30_000)
             await asyncio.sleep(PAGE_DELAY)
 
         log.info("OEM 크롤링 중: %d / %d 페이지", page_num, total_pages)
@@ -282,7 +282,10 @@ async def main():
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=HEADLESS)
-        context = await browser.new_context(accept_downloads=True)
+        context = await browser.new_context(
+            accept_downloads=True,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
 
         # Step 1: 전체 다운로드
         page = await context.new_page()
