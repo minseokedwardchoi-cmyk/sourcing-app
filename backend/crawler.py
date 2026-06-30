@@ -90,7 +90,7 @@ async def crawl_oem_pages(client: httpx.AsyncClient, start: str, end: str,
     log.info("OEM 페이지 크롤링 시작: %d건 → %d페이지", total_cnt, total_pages)
 
     COLS = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
-            "품목(유형)", "제조/작업/수출업소", "처리일자", "소비기한", "제조국", "수출국"]
+            "품목(유형)", "해외제조업소", "처리일자", "소비기한", "제조국", "수출국"]
     rows_all = []
 
     for page_num in range(1, total_pages + 1):
@@ -142,16 +142,14 @@ def normalize_str(s) -> str:
     return str(s).strip()
 
 
-MATCH_KEYS_FULL = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
-                   "품목(유형)", "해외제조업소", "처리일자", "소비기한", "제조국", "수출국"]
-MATCH_KEYS_OEM  = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
-                   "품목(유형)", "제조/작업/수출업소", "처리일자", "소비기한", "제조국", "수출국"]
+MATCH_KEYS = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
+              "품목(유형)", "해외제조업소", "처리일자", "소비기한", "제조국", "수출국"]
 
 
 def build_oem_set(oem_df: pd.DataFrame) -> set:
     result = set()
     for _, row in oem_df.iterrows():
-        key = tuple(normalize_str(row.get(c, "")) for c in MATCH_KEYS_OEM)
+        key = tuple(normalize_str(row.get(c, "")) for c in MATCH_KEYS)
         result.add(key)
     return result
 
@@ -160,7 +158,7 @@ def mark_and_transform(full_df: pd.DataFrame, oem_set: set, mc_map: dict) -> pd.
     unmapped = set()
     records = []
     for _, row in full_df.iterrows():
-        key = tuple(normalize_str(row.get(c, "")) for c in MATCH_KEYS_FULL)
+        key = tuple(normalize_str(row.get(c, "")) for c in MATCH_KEYS)
         is_oem = key in oem_set
         품목 = normalize_str(row.get("품목(유형)"))
         mc = mc_map.get(품목)
