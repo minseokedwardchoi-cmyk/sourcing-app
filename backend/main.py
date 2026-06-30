@@ -76,11 +76,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 async def refresh_mvs(db: AsyncSession):
-    """Materialized view refresh — advisory lock으로 동시 실행 방지, 락 타임아웃 30초"""
-    await db.execute(text("SET LOCAL lock_timeout = '30s'"))
-    await db.execute(text("SELECT pg_advisory_xact_lock(12345678)"))
-    await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
-    await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+    """Materialized view refresh — CONCURRENTLY로 읽기 차단 없이 갱신"""
+    await db.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_history_mv"))
+    await db.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_factory_mv"))
 
 
 _MV_INDEXES = [
@@ -191,6 +189,11 @@ async def startup():
             "CREATE INDEX IF NOT EXISTS idx_ih_import_date   ON import_history (import_date)",
             "CREATE INDEX IF NOT EXISTS idx_ih_coalesce_date ON import_history (COALESCE(import_date, process_date))",
             "CREATE INDEX IF NOT EXISTS idx_ih_sku_name      ON import_history (sku_name)",
+            # CONCURRENTLY refresh를 위한 MV UNIQUE 인덱스
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_unique_key ON sku_history_mv
+               (sku_name, import_type, importer, manufacturer, factory, country, category, mc)""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_sfmv_unique_key ON sku_factory_mv
+               (sku_name, factory, manufacturer, country, mc)""",
         ]:
             await conn.execute(text(sql))
 
