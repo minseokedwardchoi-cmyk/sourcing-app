@@ -168,6 +168,9 @@ const styles = `
   .monthly-table { width:auto; border-collapse: collapse; font-size:12px; table-layout:fixed; }
   .monthly-table td { padding:4px 6px; border:1px solid #e8eaed; text-align:center; white-space:nowrap; background:#fff; width:40px; max-width:40px; }
   .monthly-table td.monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; width:62px; max-width:62px; }
+  .yearly-table { width:100%; border-collapse: collapse; font-size:12px; table-layout:auto; }
+  .yearly-table td { padding:4px 6px; border:1px solid #e8eaed; text-align:center; background:#fff; }
+  .yearly-table td.yearly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; white-space:nowrap; }
   .date-range-wrap { display:flex; align-items:center; gap:5px; }
   .date-range-input { padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; background:#f9fafb; color:#1a1a2e; outline:none; }
   .date-range-input:focus { border-color:#16a34a; background:#fff; }
@@ -1016,19 +1019,19 @@ function MainDashboard({ navigate }) {
                     <div className="modal-section-title">연도별 수입횟수</div>
                     {!allYears.some(y => y.count > 0) ? <div className="empty-state">이력 없음</div> : (
                       <div style={{overflowX:"auto"}}>
-                        <table className="monthly-table">
+                        <table className="yearly-table">
                           <tbody>
                             <tr>
-                              <td className="monthly-table-label">연도</td>
+                              <td className="yearly-table-label">연도</td>
                               {allYears.map(y => <td key={y.year}>{y.year}</td>)}
                             </tr>
                             <tr>
-                              <td className="monthly-table-label">수입횟수</td>
+                              <td className="yearly-table-label">수입횟수</td>
                               {allYears.map((y, idx) => {
                                 const rate = getYearChangeRate(y, idx);
                                 const isCurrent = Number(y.year) === thisYear;
                                 return (
-                                  <td key={y.year} style={{color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400, whiteSpace:"nowrap"}}>
+                                  <td key={y.year} style={{color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
                                     {y.count}
                                     {rate !== null && (
                                       <span style={{
@@ -1055,13 +1058,13 @@ function MainDashboard({ navigate }) {
                     <div style={{marginTop:16, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8}}>
                       <div className="modal-section-title" style={{margin:0}}>월별 수입횟수 추이</div>
                       <div style={{display:"flex", alignItems:"center", gap:6, fontSize:12}}>
-                        <input type="month" className="date-range-input" style={{padding:"3px 7px", fontSize:12}}
+                        <input type="text" className="date-range-input" style={{padding:"3px 7px", fontSize:12, width:80}}
                           placeholder="연도-월"
                           value={modalChartFrom}
                           onChange={e => setModalChartFrom(e.target.value)}
                         />
                         <span style={{color:"#9ca3af"}}>~</span>
-                        <input type="month" className="date-range-input" style={{padding:"3px 7px", fontSize:12}}
+                        <input type="text" className="date-range-input" style={{padding:"3px 7px", fontSize:12, width:80}}
                           placeholder="연도-월"
                           value={modalChartTo}
                           onChange={e => setModalChartTo(e.target.value)}
