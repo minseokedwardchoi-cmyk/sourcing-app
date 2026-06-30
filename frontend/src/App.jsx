@@ -1035,9 +1035,9 @@ function MainDashboard({ navigate }) {
                                     {y.count}
                                     {rate !== null && (
                                       <span style={{
-                                        fontSize:10, marginLeft:4,
+                                        display:"block", fontSize:10,
                                         color: rate.pct >= 0 ? "#dc2626" : "#2563eb",
-                                        fontWeight:500,
+                                        fontWeight:500, whiteSpace:"nowrap",
                                       }}>
                                         {isCurrent
                                           ? `(전년 동기 대비 ${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`
