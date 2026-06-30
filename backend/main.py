@@ -406,8 +406,7 @@ async def get_sku_history(
                     COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :base_year - 3
                           THEN 1 END)::int                  AS count_year3
                 FROM import_history
-                WHERE process_date BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
-                   OR import_date BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
+                WHERE COALESCE(import_date, process_date) BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
                 GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
             ) sub
             WHERE 1=1
