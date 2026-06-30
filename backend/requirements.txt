@@ -1,5 +1,7 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
+playwright>=1.40.0
+httpx>=0.26.0
 sqlalchemy[asyncio]==2.1.0b2
 greenlet>=3.0.0
 asyncpg==0.31.0

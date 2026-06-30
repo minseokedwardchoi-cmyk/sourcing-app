@@ -1,11 +1,8 @@
 name: 수입이력 자동 수집 및 업로드
 
 on:
-  # 매일 오전 2시 (KST) = UTC 17:00 전날
   schedule:
-    - cron: '0 17 * * *'
-
-  # 수동 실행 (초기 백필 또는 재실행용)
+    - cron: '0 17 * * *'   # 매일 02:00 KST
   workflow_dispatch:
     inputs:
       start_date:
@@ -18,36 +15,21 @@ on:
         default: ''
 
 jobs:
-  crawl-and-upload:
+  trigger-crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
-      - name: 코드 체크아웃
-        uses: actions/checkout@v4
-
-      - name: Python 설치
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: scripts/requirements.txt
-
-      - name: 의존성 설치
-        run: pip install -r scripts/requirements.txt
-
-      - name: Playwright Chromium 설치
-        run: playwright install chromium --with-deps
-
-      - name: 수입이력 수집 및 업로드
-        env:
-          BACKEND_URL: ${{ secrets.BACKEND_URL }}
-          HEADLESS: '1'
+      - name: Render 백엔드에 크롤링 요청
         run: |
-          if [ -n "${{ github.event.inputs.start_date }}" ]; then
-            python3 scripts/crawl_and_upload.py \
-              --start "${{ github.event.inputs.start_date }}" \
-              --end "${{ github.event.inputs.end_date }}"
+          START="${{ github.event.inputs.start_date }}"
+          END="${{ github.event.inputs.end_date }}"
+
+          if [ -n "$START" ] && [ -n "$END" ]; then
+            URL="${{ secrets.BACKEND_URL }}/api/crawl?start_date=${START}&end_date=${END}"
           else
-            python3 scripts/crawl_and_upload.py
+            URL="${{ secrets.BACKEND_URL }}/api/crawl"
           fi
+
+          echo "요청 URL: $URL"
+          curl -sf --max-time 7200 -X POST "$URL" | jq .

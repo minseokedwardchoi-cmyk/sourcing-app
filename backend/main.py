@@ -1192,6 +1192,23 @@ async def health():
     return {"status": "ok"}
 
 
+# ─── 크롤링 트리거 ───────────────────────────────────────────────────────────
+@app.post("/api/crawl")
+async def trigger_crawl(start_date: str = "", end_date: str = ""):
+    """크롤링 + OEM 마킹 + MC 변환 + DB 업로드 실행"""
+    import asyncio
+    from datetime import date, timedelta
+    from crawler import run_crawl
+
+    if not start_date or not end_date:
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        start_date = end_date = yesterday
+
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
+    result = await run_crawl(start_date, end_date, backend_url)
+    return result
+
+
 # ─── 정부 사이트 접근 테스트 ─────────────────────────────────────────────────
 @app.get("/api/ping-impfood")
 async def ping_impfood():
