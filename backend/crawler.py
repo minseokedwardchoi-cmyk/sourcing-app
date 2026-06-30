@@ -63,12 +63,18 @@ async def download_full_excel(page, start: str, end: str) -> pd.DataFrame:
 
 async def crawl_oem_data(page, start: str, end: str) -> pd.DataFrame:
     await open_search_page(page, start, end, oem=True)
+    # 페이지당 50건 설정 후 fnSearch(1) 재호출해서 결과 갱신
     await page.evaluate("fnPageLimit(50)")
+    await asyncio.sleep(3)
+    await page.evaluate("fnSearch(1)")
     await asyncio.sleep(5)
+
+    # 첫 페이지 테이블 로드 대기
     try:
-        await page.wait_for_selector("table tbody tr", timeout=15_000)
+        await page.wait_for_selector("table tbody tr", timeout=30_000)
     except Exception:
-        pass
+        log.warning("OEM 첫 페이지 테이블 로드 실패 — OEM 데이터 없음으로 처리")
+        return pd.DataFrame()
 
     total_count = 0
     try:
@@ -98,10 +104,15 @@ async def crawl_oem_data(page, start: str, end: str) -> pd.DataFrame:
         if page_num > 1:
             await page.evaluate(f"fnSearch({page_num})")
             await asyncio.sleep(PAGE_DELAY)
+            try:
+                await page.wait_for_selector("table tbody tr", timeout=30_000)
+            except Exception:
+                log.info("테이블 없음 — 종료")
+                break
 
         log.info("OEM 크롤링 중: %d / %d 페이지", page_num, total_pages)
         try:
-            await page.wait_for_selector("table tbody tr", timeout=15_000)
+            await page.wait_for_selector("table tbody tr", timeout=30_000)
         except Exception:
             log.info("테이블 없음 — 종료")
             break
