@@ -41,7 +41,7 @@ async def open_search_page(page, start: str, end: str, oem: bool = False):
     if oem:
         checked = await page.evaluate("document.getElementById('oemFoodYn').checked")
         if not checked:
-            await page.click("#oemFoodYn")
+            await page.evaluate("document.getElementById('oemFoodYn').click()")
     await page.evaluate("fnSearch(1)")
     await asyncio.sleep(5)
 
