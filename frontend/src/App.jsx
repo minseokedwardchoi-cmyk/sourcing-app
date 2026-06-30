@@ -1018,39 +1018,30 @@ function MainDashboard({ navigate }) {
                     {/* ① 연도별 수입횟수 */}
                     <div className="modal-section-title">연도별 수입횟수</div>
                     {!allYears.some(y => y.count > 0) ? <div className="empty-state">이력 없음</div> : (
-                      <div style={{display:"flex"}}>
-                        <table style={{borderCollapse:"collapse", fontSize:12, tableLayout:"auto"}}>
-                          <tbody>
-                            <tr>
-                              <td style={{padding:"4px 6px", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", background:"#f1f3f5", whiteSpace:"nowrap", width:62}}>연도</td>
-                              {allYears.map(y => <td key={y.year} style={{padding:"4px 5px", border:"1px solid #e8eaed", textAlign:"center", background:"#fff", width:50}}>{y.year}</td>)}
-                            </tr>
-                            <tr>
-                              <td style={{padding:"4px 6px", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", background:"#f1f3f5", whiteSpace:"nowrap", width:62}}>수입횟수</td>
-                              {allYears.map((y, idx) => {
-                                const rate = getYearChangeRate(y, idx);
-                                const isCurrent = Number(y.year) === thisYear;
-                                return (
-                                  <td key={y.year} style={{padding:"4px 5px", border:"1px solid #e8eaed", textAlign:"center", background:"#fff", width:50, color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
-                                    {y.count}
-                                    {rate !== null && (
-                                      <span style={{
-                                        display:"block", fontSize:10,
-                                        color: rate.pct >= 0 ? "#dc2626" : "#2563eb",
-                                        fontWeight:500,
-                                      }}>
-                                        {isCurrent
-                                          ? `(전년 동기比 ${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`
-                                          : `(${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`
-                                        }
-                                      </span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          </tbody>
-                        </table>
+                      <div style={{display:"flex", gap:1, fontSize:12, overflowX:"auto"}}>
+                        {/* 라벨 컬럼 */}
+                        <div style={{display:"flex", flexDirection:"column", gap:1, flexShrink:0}}>
+                          <div style={{padding:"4px 8px", background:"#f1f3f5", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", whiteSpace:"nowrap"}}>연도</div>
+                          <div style={{padding:"4px 8px", background:"#f1f3f5", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", whiteSpace:"nowrap"}}>수입횟수</div>
+                        </div>
+                        {/* 연도별 컬럼 */}
+                        {allYears.map((y, idx) => {
+                          const rate = getYearChangeRate(y, idx);
+                          const isCurrent = Number(y.year) === thisYear;
+                          return (
+                            <div key={y.year} style={{display:"flex", flexDirection:"column", gap:1, flexShrink:0, textAlign:"center", minWidth:"fit-content"}}>
+                              <div style={{padding:"4px 8px", background:"#fff", border:"1px solid #e8eaed"}}>{y.year}</div>
+                              <div style={{padding:"4px 8px", background:"#fff", border:"1px solid #e8eaed", color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
+                                {y.count}
+                                {rate !== null && (
+                                  <span style={{display:"block", fontSize:10, color: rate.pct >= 0 ? "#dc2626" : "#2563eb", fontWeight:500}}>
+                                    {isCurrent ? `(전년 동기比 ${rate.pct >= 0 ? "+" : ""}${rate.pct}%)` : `(${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 
