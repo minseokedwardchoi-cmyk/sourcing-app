@@ -75,10 +75,12 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-async def refresh_mvs(db: AsyncSession):
-    """Materialized view refresh — CONCURRENTLY로 읽기 차단 없이 갱신"""
-    await db.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_history_mv"))
-    await db.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_factory_mv"))
+async def refresh_mvs(db: AsyncSession = None):
+    """Materialized view refresh — CONCURRENTLY는 트랜잭션 밖에서 실행해야 함"""
+    # CONCURRENTLY는 autocommit 커넥션 필요 (트랜잭션 블록 내 실행 불가)
+    async with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        await conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_history_mv"))
+        await conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_factory_mv"))
 
 
 _MV_INDEXES = [
