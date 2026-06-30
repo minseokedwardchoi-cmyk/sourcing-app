@@ -1204,6 +1204,11 @@ async def _crawl_task(start_date: str, end_date: str):
         try:
             result = await run_crawl(start_date, end_date, db)
             log.info("크롤링 백그라운드 완료: %s", result)
+            # MV 갱신
+            await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
+            await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+            await db.commit()
+            print("MV REFRESH COMPLETE")
         except Exception as e:
             log.error("크롤링 백그라운드 실패: %s", e, exc_info=True)
 
