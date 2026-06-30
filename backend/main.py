@@ -1230,10 +1230,23 @@ async def quick_check(db: AsyncSession = Depends(get_db)):
     ))
     oem_exists = oem_exists_r.scalar()
 
+    # 6월 데이터 OEM 건수
+    june_oem_r = await db.execute(text(
+        "SELECT COUNT(*) FROM import_history WHERE import_type = 'OEM' AND process_date >= '2026-06-01'"
+    ))
+    june_oem_count = june_oem_r.scalar() or 0
+
+    june_total_r = await db.execute(text(
+        "SELECT COUNT(*) FROM import_history WHERE process_date >= '2026-06-01'"
+    ))
+    june_total = june_total_r.scalar() or 0
+
     return {
         "approx_total_rows": approx_count,
         "oem_exists": oem_exists,
         "latest_process_date": str(latest) if latest else None,
+        "june_total": june_total,
+        "june_oem_count": june_oem_count,
     }
 
 # ─── Health check ────────────────────────────────────────────────────────────
