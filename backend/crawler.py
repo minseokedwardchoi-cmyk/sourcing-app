@@ -147,7 +147,8 @@ def normalize_str(s) -> str:
     return str(s).strip()
 
 
-MATCH_KEYS = ["수입업체", "제품명(한글)", "처리일자", "제조국"]
+MATCH_KEYS = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
+              "품목(유형)", "해외제조업소", "처리일자", "소비기한", "제조국", "수출국"]
 
 
 def build_oem_set(oem_df: pd.DataFrame) -> set:
