@@ -126,11 +126,12 @@ async def crawl_oem_pages(client: httpx.AsyncClient, start: str, end: str,
             log.info("OEM 크롤링 진행: %d / %d 페이지 (%d건)", page_num, total_pages, len(rows_all))
 
     if not rows_all:
-        log.warning("OEM 크롤링 결과 없음")
+        print("OEM 크롤링 결과 없음", flush=True)
         return pd.DataFrame()
 
     df = pd.DataFrame(rows_all, columns=COLS)
-    log.info("OEM 크롤링 완료: %d건", len(df))
+    print(f"OEM 크롤링 완료: {len(df)}건", flush=True)
+    print("OEM 샘플:\n", df[["수입업체", "제품명(한글)", "처리일자", "제조국"]].head(3).to_string(), flush=True)
     return df
 
 
@@ -142,8 +143,7 @@ def normalize_str(s) -> str:
     return str(s).strip()
 
 
-MATCH_KEYS = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
-              "품목(유형)", "해외제조업소", "처리일자", "소비기한", "제조국", "수출국"]
+MATCH_KEYS = ["수입업체", "제품명(한글)", "처리일자", "제조국"]
 
 
 def build_oem_set(oem_df: pd.DataFrame) -> set:
@@ -151,6 +151,7 @@ def build_oem_set(oem_df: pd.DataFrame) -> set:
     for _, row in oem_df.iterrows():
         key = tuple(normalize_str(row.get(c, "")) for c in MATCH_KEYS)
         result.add(key)
+    print(f"OEM 키 샘플: {list(result)[:3]}", flush=True)
     return result
 
 
@@ -178,17 +179,18 @@ def mark_and_transform(full_df: pd.DataFrame, oem_set: set, mc_map: dict) -> pd.
     result_df = pd.DataFrame(records, columns=[
         "구분", "MC", "제품명(한글)", "수입업체", "OEM여부", "해외제조업소", "제조국", "이메일", "처리일자"
     ])
-    log.info("OEM 마킹: %d / %d건", result_df["OEM여부"].notna().sum(), len(result_df))
-    log.info("MC 변환: %d / %d건", result_df["MC"].notna().sum(), len(result_df))
+    oem_count = result_df["OEM여부"].notna().sum()
+    print(f"OEM 마킹: {oem_count} / {len(result_df)}건", flush=True)
+    print(f"MC 변환: {result_df['MC'].notna().sum()} / {len(result_df)}건", flush=True)
     if unmapped:
-        log.warning("MC 매핑 없는 품목 %d종: %s", len(unmapped), ", ".join(sorted(unmapped)[:20]))
+        print(f"MC 매핑 없는 품목 {len(unmapped)}종: {', '.join(sorted(unmapped)[:20])}", flush=True)
     return result_df
 
 
 # ── 메인 파이프라인 ───────────────────────────────────────────────────────────
 
 async def run_crawl(start: str, end: str, db: AsyncSession) -> dict:
-    log.info("=== 크롤링 시작: %s ~ %s ===", start, end)
+    print(f"=== 크롤링 시작: {start} ~ {end} ===", flush=True)
 
     async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True) as client:
         # 세션 쿠키 초기화
@@ -196,17 +198,22 @@ async def run_crawl(start: str, end: str, db: AsyncSession) -> dict:
 
         # 전체/OEM 건수 파악
         full_count = await get_total_count(client, start, end, oem=False)
-        log.info("전체 건수: %d", full_count)
+        print(f"전체 건수: {full_count}", flush=True)
         oem_count = await get_total_count(client, start, end, oem=True)
-        log.info("OEM 건수: %d", oem_count)
+        print(f"OEM 건수: {oem_count}", flush=True)
 
         # 전체 Excel 다운로드 + OEM 페이지 크롤링
         full_df = await download_full_excel(client, start, end, full_count)
+        print(f"전체 Excel 다운로드 완료: {len(full_df)}행", flush=True)
         oem_df  = await crawl_oem_pages(client, start, end, oem_count) if oem_count > 0 else pd.DataFrame()
+        print(f"OEM 크롤링 완료: {len(oem_df)}행", flush=True)
 
     # CPU bound 작업 → 스레드풀로 분리해 이벤트 루프 블락 방지
     def _transform():
         oem_set = build_oem_set(oem_df) if not oem_df.empty else set()
+        if full_df is not None and not full_df.empty:
+            sample_keys = [tuple(normalize_str(full_df.iloc[i].get(c, "")) for c in MATCH_KEYS) for i in range(min(3, len(full_df)))]
+            print(f"FULL_DF 키 샘플: {sample_keys}", flush=True)
         mc_map = load_mc_mapping()
         return mark_and_transform(full_df, oem_set, mc_map)
 
