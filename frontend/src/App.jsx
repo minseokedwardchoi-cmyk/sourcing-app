@@ -1037,10 +1037,10 @@ function MainDashboard({ navigate }) {
                                       <span style={{
                                         display:"block", fontSize:10,
                                         color: rate.pct >= 0 ? "#dc2626" : "#2563eb",
-                                        fontWeight:500, whiteSpace:"nowrap",
+                                        fontWeight:500,
                                       }}>
                                         {isCurrent
-                                          ? `(전년 동기 대비 ${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`
+                                          ? `(동기比 ${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`
                                           : `(${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`
                                         }
                                       </span>
