@@ -169,7 +169,7 @@ const styles = `
   .monthly-table td { padding:4px 6px; border:1px solid #e8eaed; text-align:center; white-space:nowrap; background:#fff; width:40px; max-width:40px; }
   .monthly-table td.monthly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; position:sticky; left:0; width:62px; max-width:62px; }
   .yearly-table { width:auto; border-collapse: collapse; font-size:12px; table-layout:fixed; }
-  .yearly-table td { padding:4px 5px; border:1px solid #e8eaed; text-align:center; background:#fff; width:55px; }
+  .yearly-table td { padding:4px 5px; border:1px solid #e8eaed; text-align:center; background:#fff; width:30px; }
   .yearly-table td.yearly-table-label { font-weight:600; color:#6b7280; background:#f1f3f5 !important; white-space:nowrap; width:62px; }
   .date-range-wrap { display:flex; align-items:center; gap:5px; }
   .date-range-input { padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; background:#f9fafb; color:#1a1a2e; outline:none; }
