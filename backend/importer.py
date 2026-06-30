@@ -336,20 +336,4 @@ async def import_excel(file_bytes: bytes, db: AsyncSession) -> dict:
 
     await db.commit()
 
-    # FTS 벡터 업데이트 (새로 추가된 것만)
-    await db.execute(text("""
-        UPDATE import_history
-        SET search_vector = to_tsvector('simple',
-            coalesce(sku_name,'') || ' ' ||
-            coalesce(manufacturer,'') || ' ' ||
-            coalesce(factory,'') || ' ' ||
-            coalesce(importer,'') || ' ' ||
-            coalesce(mc,'') || ' ' ||
-            coalesce(country,'') || ' ' ||
-            coalesce(category,'')
-        )
-        WHERE search_vector IS NULL
-    """))
-    await db.commit()
-
     return {"inserted": inserted, "skipped": skipped, "total_rows": len(df)}
