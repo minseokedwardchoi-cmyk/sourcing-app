@@ -1198,6 +1198,14 @@ async def get_competitor_stats(db: AsyncSession = Depends(get_db)):
         result[comp] = r.scalar() or 0
     return result
 
+# ─── MV 수동 갱신 ────────────────────────────────────────────────────────────
+@app.post("/api/refresh-mv")
+async def refresh_mv(db: AsyncSession = Depends(get_db)):
+    await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
+    await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+    await db.commit()
+    return {"status": "ok", "message": "MV 갱신 완료"}
+
 # ─── Health check ────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
