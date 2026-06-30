@@ -76,7 +76,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 async def refresh_mvs(db: AsyncSession):
-    """Materialized view refresh — advisory lock으로 동시 실행 방지"""
+    """Materialized view refresh — advisory lock으로 동시 실행 방지, 락 타임아웃 30초"""
+    await db.execute(text("SET LOCAL lock_timeout = '30s'"))
     await db.execute(text("SELECT pg_advisory_xact_lock(12345678)"))
     await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
     await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
@@ -1253,12 +1254,20 @@ async def _crawl_task(start_date: str, end_date: str):
         try:
             result = await run_crawl(start_date, end_date, db)
             log.info("크롤링 백그라운드 완료: %s", result)
-            # MV 갱신
-            await refresh_mvs(db)
-            await db.commit()
-            print("MV REFRESH COMPLETE")
+            print(f"CRAWL COMPLETE: {result}", flush=True)
         except Exception as e:
             log.error("크롤링 백그라운드 실패: %s", e, exc_info=True)
+            print(f"CRAWL ERROR: {e}", flush=True)
+            return
+
+        # MV 갱신 — 데이터 적재와 분리해서 실패해도 크롤링 결과는 보존
+        try:
+            await refresh_mvs(db)
+            await db.commit()
+            print("MV REFRESH COMPLETE", flush=True)
+        except Exception as e:
+            log.error("MV 갱신 실패 (데이터는 저장됨): %s", e, exc_info=True)
+            print(f"MV REFRESH ERROR (data saved): {e}", flush=True)
 
 
 @app.post("/api/crawl")
