@@ -69,12 +69,21 @@ export async function fetchMonthlyImportCounts(row, dateFrom, dateTo) {
   });
   if (dateFrom) url.searchParams.set("date_from", dateFrom);
   if (dateTo)   url.searchParams.set("date_to", dateTo);
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "API 오류");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(url.toString(), { signal: controller.signal });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || "API 오류");
+    }
+    return res.json();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("서버 응답 시간 초과 (20초). 잠시 후 다시 시도해주세요.");
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 }
 
 /** SKU 취급 제조사 목록 */

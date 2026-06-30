@@ -528,18 +528,25 @@ function MainDashboard({ navigate }) {
     );
   }
 
+  function rowKey(row) {
+    return ["category","mc","sku_name","import_type","importer","manufacturer","factory","country"]
+      .map(k => String(row[k] ?? "")).join("|");
+  }
+
   function openMonthlyModal(row) {
+    const key = rowKey(row);
     setModalChartFrom(""); setModalChartTo("");
-    setMonthlyModal({ row, loading: true, error: null, yearly: [], monthly: [] });
+    setMonthlyModal({ row, key, loading: true, error: null, yearly: [], monthly: [] });
     fetchMonthlyImportCounts(row, null, null)
-      .then(res => setMonthlyModal(m => (m && m.row===row) ? { ...m, loading:false, yearly: res.yearly||[], monthly: res.data||[] } : m))
-      .catch(e => setMonthlyModal(m => (m && m.row===row) ? { ...m, loading:false, error: e.message || "조회 실패" } : m));
+      .then(res => setMonthlyModal(m => (m && m.key===key) ? { ...m, loading:false, yearly: res.yearly||[], monthly: res.data||[] } : m))
+      .catch(e => setMonthlyModal(m => (m && m.key===key) ? { ...m, loading:false, error: e.message || "조회 실패" } : m));
   }
 
   function refetchModalChart(row, from, to) {
+    const key = rowKey(row);
     setMonthlyModal(m => m ? { ...m, chartLoading: true } : m);
     fetchMonthlyImportCounts(row, from || null, to || null)
-      .then(res => setMonthlyModal(m => (m && m.row===row) ? { ...m, chartLoading:false, monthly: res.data||[] } : m))
+      .then(res => setMonthlyModal(m => (m && m.key===key) ? { ...m, chartLoading:false, monthly: res.data||[] } : m))
       .catch(() => setMonthlyModal(m => m ? { ...m, chartLoading: false } : m));
   }
 
@@ -1012,7 +1019,12 @@ function MainDashboard({ navigate }) {
               </div>
               <div className="modal-body">
                 {monthlyModal.loading ? <div className="empty-state">불러오는 중...</div>
-                : monthlyModal.error ? <div className="error-box">오류: {monthlyModal.error}</div>
+                : monthlyModal.error ? (
+                  <div className="error-box" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
+                    <span>오류: {monthlyModal.error}</span>
+                    <button className="trend-btn" onClick={()=>openMonthlyModal(monthlyModal.row)}>다시 시도</button>
+                  </div>
+                )
                 : (
                   <>
                     {/* ① 연도별 수입횟수 */}
