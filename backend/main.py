@@ -142,10 +142,18 @@ _SKU_HISTORY_MV_SQL = """
 @app.on_event("startup")
 async def startup():
     import asyncio
+    # 테이블/확장만 빠르게 생성 후 즉시 반환 — 나머지는 백그라운드
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+    asyncio.create_task(_startup_bg())
 
+
+async def _startup_bg():
+    """MV 생성/인덱스/시딩을 백그라운드에서 실행 (startup 블로킹 방지)"""
+    import asyncio
+    await asyncio.sleep(1)
+    async with engine.begin() as conn:
         # MV에 연도별 컬럼이 없으면 DROP 후 재생성
         col_check = await conn.execute(text("""
             SELECT column_name FROM information_schema.columns
@@ -173,7 +181,8 @@ async def startup():
             GROUP BY sku_name, factory, manufacturer, country, mc
         """))
         await _seed_country_stats(conn)
-    asyncio.create_task(_build_indexes_bg())
+    await _build_indexes_bg()
+    print("STARTUP BG COMPLETE")
 
 
 async def _seed_country_stats(conn):
