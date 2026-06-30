@@ -1018,8 +1018,8 @@ function MainDashboard({ navigate }) {
                     {/* ① 연도별 수입횟수 */}
                     <div className="modal-section-title">연도별 수입횟수</div>
                     {!allYears.some(y => y.count > 0) ? <div className="empty-state">이력 없음</div> : (
-                      <div>
-                        <table style={{borderCollapse:"collapse", fontSize:12, tableLayout:"auto", display:"inline-table"}}>
+                      <div style={{display:"flex"}}>
+                        <table style={{borderCollapse:"collapse", fontSize:12, tableLayout:"auto"}}>
                           <tbody>
                             <tr>
                               <td style={{padding:"4px 6px", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", background:"#f1f3f5", whiteSpace:"nowrap", width:62}}>연도</td>
@@ -1040,7 +1040,7 @@ function MainDashboard({ navigate }) {
                                         fontWeight:500,
                                       }}>
                                         {isCurrent
-                                          ? `(동기比 ${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`
+                                          ? `(전년 동기比 ${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`
                                           : `(${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`
                                         }
                                       </span>
@@ -1095,8 +1095,8 @@ function MainDashboard({ navigate }) {
                             />
                             <Line
                               type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2}
-                              dot={{ r: 3, fill: "#16a34a" }}
-                              activeDot={{ r: 5 }}
+                              dot={{ r: 2, fill: "#16a34a" }}
+                              activeDot={{ r: 4 }}
                             >
                               <LabelList
                                 dataKey="count"
