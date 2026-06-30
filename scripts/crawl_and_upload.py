@@ -78,67 +78,24 @@ def parse_args():
 # ── 페이지 공통 초기화 ────────────────────────────────────────────────────────
 async def open_search_page(page, start: str, end: str, oem: bool = False):
     """검색 조건 설정 후 검색 실행"""
-    log.info("페이지 로드: %s", TARGET_URL)
+    log.info("페이지 로드: %s (oem=%s)", TARGET_URL, oem)
     await page.goto(TARGET_URL, wait_until="networkidle", timeout=60_000)
 
-    # 처리일자 시작 — 여러 selector 시도
-    for sel in ["#strtDt", "input[name='strtDt']", "input[placeholder='시작일']"]:
-        try:
-            await page.fill(sel, start, timeout=3_000)
-            break
-        except Exception:
-            pass
-
-    # 처리일자 종료
-    for sel in ["#endDt", "input[name='endDt']", "input[placeholder='종료일']"]:
-        try:
-            await page.fill(sel, end, timeout=3_000)
-            break
-        except Exception:
-            pass
-
-    # 날짜 입력이 안 됐을 경우 JS로 강제 세팅
+    # 날짜 입력 — JS로 직접 세팅 (jQuery datepicker가 있어서 value만 바꿔도 됨)
     await page.evaluate(f"""
-        (() => {{
-            const inputs = document.querySelectorAll('input[type="text"]');
-            // 처리일자 관련 input을 순서대로 찾아서 설정
-            let dateInputs = Array.from(inputs).filter(el =>
-                el.value && el.value.match(/\\d{{4}}-\\d{{2}}-\\d{{2}}/)
-            );
-            if (dateInputs.length >= 2) {{
-                dateInputs[0].value = '{start}';
-                dateInputs[1].value = '{end}';
-                dateInputs.forEach(el => el.dispatchEvent(new Event('change', {{bubbles: true}})));
-            }}
-        }})()
+        document.getElementById('srchStrtDt').value = '{start}';
+        document.getElementById('srchEndDt').value = '{end}';
     """)
 
     # OEM 체크박스
     if oem:
-        oem_checked = False
-        for sel in [
-            "input[type='checkbox'][id*='oem' i]",
-            "input[type='checkbox'][name*='oem' i]",
-            "input[type='checkbox']",
-        ]:
-            try:
-                boxes = await page.query_selector_all(sel)
-                for box in boxes:
-                    label = await box.evaluate("el => el.labels?.[0]?.textContent || el.closest('label')?.textContent || ''")
-                    if "OEM" in label or "주문자" in label:
-                        if not await box.is_checked():
-                            await box.check()
-                        oem_checked = True
-                        break
-                if oem_checked:
-                    break
-            except Exception:
-                pass
-        if not oem_checked:
-            log.warning("OEM 체크박스를 찾지 못했습니다 — 수동 확인 필요")
+        checked = await page.evaluate("document.getElementById('oemFoodYn').checked")
+        if not checked:
+            await page.click("#oemFoodYn")
+        log.info("OEM 체크박스 선택 완료")
 
-    # 검색 버튼 클릭
-    await page.click("button:has-text('검색')", timeout=10_000)
+    # 검색 실행 — fnSearch(1) 직접 호출
+    await page.evaluate("fnSearch(1)")
     await page.wait_for_load_state("networkidle", timeout=30_000)
 
 
@@ -150,11 +107,8 @@ async def download_full_excel(page, start: str, end: str) -> pd.DataFrame:
 
     log.info("전체 엑셀 다운로드 시작")
     async with page.expect_download(timeout=120_000) as dl_info:
-        # 엑셀다운로드 버튼 — 텍스트 또는 이미지 버튼
-        await page.click("button:has-text('엑셀'), a:has-text('엑셀'), "
-                         "button:has-text('Excel'), a:has-text('Excel'), "
-                         "img[alt*='엑셀'], input[value*='엑셀']",
-                         timeout=15_000)
+        await page.click("button.xls-i, a.xls-i, button:has-text('엑셀다운로드'), "
+                         "a:has-text('엑셀다운로드')", timeout=15_000)
     download = await dl_info.value
     dest = DOWNLOAD_DIR / f"full_{start}_{end}.xlsx"
     await download.save_as(str(dest))
@@ -167,106 +121,70 @@ async def download_full_excel(page, start: str, end: str) -> pd.DataFrame:
 
 # ── Step 2: OEM 크롤링 ────────────────────────────────────────────────────────
 async def crawl_oem_data(page, start: str, end: str) -> pd.DataFrame:
-    """OEM 필터 후 페이지네이션 전체 크롤링"""
+    """OEM 필터 후 fnSearch(페이지번호) 로 전체 페이지 크롤링 (페이지당 50건)"""
     await open_search_page(page, start, end, oem=True)
 
-    # 페이지당 건수를 100으로 늘리기 (드롭다운)
+    # 페이지당 50건으로 설정 — fnPageLimit(50) 호출
+    await page.evaluate("fnPageLimit(50)")
+    await page.wait_for_load_state("networkidle", timeout=30_000)
+
+    # 전체 건수 파싱 → 총 페이지 수 계산
+    total_count = 0
     try:
-        await page.select_option("select", "100", timeout=5_000)
-        await page.wait_for_load_state("networkidle", timeout=20_000)
+        count_text = await page.inner_text("span.total, .total-count, #totalCount, .list-count")
+        total_count = int("".join(filter(str.isdigit, count_text)))
     except Exception:
         try:
-            # 일부 사이트는 드롭다운이 여러 개 있음 — 마지막 것이 보통 페이지수
-            dropdowns = await page.query_selector_all("select")
-            if dropdowns:
-                await dropdowns[-1].select_option("100")
-                await page.wait_for_load_state("networkidle", timeout=20_000)
-        except Exception:
-            log.info("페이지당 건수 변경 실패 — 기본값(10) 사용")
-
-    rows_all = []
-    page_num = 1
-
-    while True:
-        log.info("OEM 크롤링 중: %d 페이지", page_num)
-
-        # 테이블 헤더 읽기
-        headers = []
-        try:
-            th_els = await page.query_selector_all("table thead th, table tr:first-child th")
-            headers = [await th.inner_text() for th in th_els]
-            headers = [h.strip() for h in headers if h.strip()]
+            # 페이지 텍스트에서 '총 N건' 패턴 찾기
+            body = await page.inner_text("body")
+            import re
+            m = re.search(r"총\s*([\d,]+)\s*건", body)
+            if m:
+                total_count = int(m.group(1).replace(",", ""))
         except Exception:
             pass
 
-        # 테이블 데이터 행 읽기
-        try:
-            rows = await page.query_selector_all("table tbody tr")
-            for row in rows:
-                cells = await row.query_selector_all("td")
-                values = [await c.inner_text() for c in cells]
-                values = [v.strip() for v in values]
-                if values and any(values):
-                    rows_all.append(values)
-        except Exception as e:
-            log.warning("테이블 읽기 실패 (p%d): %s", page_num, e)
+    if total_count == 0:
+        log.warning("전체 건수 파악 실패 — 페이지 끝날 때까지 크롤링")
+        total_pages = 9999
+    else:
+        total_pages = (total_count + 49) // 50
+        log.info("OEM 전체 %d건 → %d페이지 크롤링 시작", total_count, total_pages)
 
-        # 다음 페이지 버튼
-        next_btn = None
-        for sel in [
-            "a.next", "button.next",
-            "a[title='다음']", "button[title='다음']",
-            "a:has-text('다음')", "button:has-text('다음')",
-            ".pagination .next",
-        ]:
-            try:
-                btn = page.locator(sel).first
-                if await btn.count() > 0 and await btn.is_visible():
-                    next_btn = btn
-                    break
-            except Exception:
-                pass
+    COLS = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
+            "품목(유형)", "제조/작업/수출업소", "처리일자", "소비기한", "제조국", "수출국"]
 
-        if next_btn is None:
-            # 페이지 번호 버튼으로 시도
-            try:
-                next_page_btn = page.locator(f"a:has-text('{page_num + 1}'), button:has-text('{page_num + 1}')").first
-                if await next_page_btn.count() > 0:
-                    next_btn = next_page_btn
-            except Exception:
-                pass
+    rows_all = []
 
-        if next_btn is None:
-            log.info("마지막 페이지 도달 (총 %d 페이지)", page_num)
+    for page_num in range(1, total_pages + 1):
+        if page_num > 1:
+            await page.evaluate(f"fnSearch({page_num})")
+            await page.wait_for_load_state("networkidle", timeout=30_000)
+            await asyncio.sleep(PAGE_DELAY)
+
+        log.info("OEM 크롤링 중: %d / %d 페이지", page_num, total_pages)
+
+        tr_els = await page.query_selector_all("table tbody tr")
+        if not tr_els:
+            log.info("빈 페이지 — 크롤링 종료")
             break
 
-        await next_btn.click()
-        await page.wait_for_load_state("networkidle", timeout=30_000)
-        await asyncio.sleep(PAGE_DELAY)
-        page_num += 1
+        for tr in tr_els:
+            tds = await tr.query_selector_all("td")
+            values = [await td.inner_text() for td in tds]
+            values = [v.strip() for v in values]
+            if not any(values):
+                continue
+            # 컬럼 수 맞추기
+            if len(values) < len(COLS):
+                values += [""] * (len(COLS) - len(values))
+            rows_all.append(values[:len(COLS)])
 
     if not rows_all:
         log.warning("OEM 크롤링 결과 없음")
         return pd.DataFrame()
 
-    # 컬럼명 결정
-    expected_cols = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
-                     "품목(유형)", "제조/작업/수출업소", "처리일자", "소비기한", "제조국", "수출국"]
-
-    if headers and len(headers) >= len(expected_cols):
-        col_names = headers[:len(expected_cols)]
-    else:
-        col_names = expected_cols
-
-    # 행 길이 맞추기
-    normalized = []
-    for r in rows_all:
-        if len(r) < len(col_names):
-            r = r + [""] * (len(col_names) - len(r))
-        normalized.append(r[:len(col_names)])
-
-    df = pd.DataFrame(normalized, columns=col_names)
-    df["OEM여부"] = "Y"
+    df = pd.DataFrame(rows_all, columns=COLS)
     log.info("OEM 크롤링 완료: %d 건", len(df))
     return df
 
