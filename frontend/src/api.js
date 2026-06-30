@@ -176,16 +176,26 @@ export async function uploadContacts(file, overwrite = false) {
 
 /** 전체 데이터 삭제 (복구 불가) */
 export async function clearAllData() {
-  const res = await fetch(`${BASE_URL}/api/data`, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ confirm: "DELETE" }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "삭제 실패");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch(`${BASE_URL}/api/data`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: "DELETE" }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || "삭제 실패");
+    }
+    return res.json();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("서버 응답 시간 초과 (30초). 서버가 시작 중일 수 있으니 잠시 후 다시 시도해주세요.");
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 }
 
 /** 경쟁사별 해외제조업체 수 통계 */
