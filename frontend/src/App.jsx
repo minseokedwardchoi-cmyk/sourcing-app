@@ -1005,7 +1005,7 @@ function MainDashboard({ navigate }) {
 
         return (
           <div className="modal-overlay" onClick={()=>setMonthlyModal(null)}>
-            <div className="modal-box" style={{maxWidth:780}} onClick={e=>e.stopPropagation()}>
+            <div className="modal-box" style={{maxWidth:"min(1100px, 95vw)"}} onClick={e=>e.stopPropagation()}>
               <div className="modal-header">
                 <span className="modal-title">{monthlyModal.row.sku_name} — 연도별 / 월별 수입횟수</span>
                 <button className="modal-close" onClick={()=>setMonthlyModal(null)}>✕</button>
@@ -1018,20 +1018,28 @@ function MainDashboard({ navigate }) {
                     {/* ① 연도별 수입횟수 */}
                     <div className="modal-section-title">연도별 수입횟수</div>
                     {!allYears.some(y => y.count > 0) ? <div className="empty-state">이력 없음</div> : (
-                      <div style={{display:"flex", gap:1, fontSize:12, overflowX:"auto"}}>
-                        {/* 라벨 컬럼 */}
-                        <div style={{display:"flex", flexDirection:"column", gap:1, flexShrink:0}}>
-                          <div style={{padding:"4px 8px", background:"#f1f3f5", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", whiteSpace:"nowrap"}}>연도</div>
-                          <div style={{padding:"4px 8px", background:"#f1f3f5", border:"1px solid #e8eaed", fontWeight:600, color:"#6b7280", whiteSpace:"nowrap"}}>수입횟수</div>
-                        </div>
-                        {/* 연도별 컬럼 */}
-                        {allYears.map((y, idx) => {
-                          const rate = getYearChangeRate(y, idx);
-                          const isCurrent = Number(y.year) === thisYear;
-                          return (
-                            <div key={y.year} style={{display:"flex", flexDirection:"column", gap:1, flexShrink:0, textAlign:"center", minWidth:"fit-content"}}>
-                              <div style={{padding:"4px 8px", background:"#fff", border:"1px solid #e8eaed"}}>{y.year}</div>
-                              <div style={{padding:"4px 8px", background:"#fff", border:"1px solid #e8eaed", color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
+                      <div style={{overflowX:"auto"}}>
+                        <div style={{
+                          display:"grid",
+                          gridTemplateColumns:`auto repeat(${allYears.length}, auto)`,
+                          gap:1,
+                          background:"#e8eaed",
+                          fontSize:12,
+                          width:"fit-content",
+                          border:"1px solid #e8eaed",
+                          borderRadius:4,
+                          overflow:"hidden",
+                        }}>
+                          <div style={{padding:"5px 10px", background:"#f1f3f5", fontWeight:600, color:"#6b7280", whiteSpace:"nowrap"}}>연도</div>
+                          {allYears.map(y => (
+                            <div key={y.year} style={{padding:"5px 10px", background:"#fff", textAlign:"center"}}>{y.year}</div>
+                          ))}
+                          <div style={{padding:"5px 10px", background:"#f1f3f5", fontWeight:600, color:"#6b7280", whiteSpace:"nowrap"}}>수입횟수</div>
+                          {allYears.map((y, idx) => {
+                            const rate = getYearChangeRate(y, idx);
+                            const isCurrent = Number(y.year) === thisYear;
+                            return (
+                              <div key={y.year} style={{padding:"5px 10px", background:"#fff", textAlign:"center", color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
                                 {y.count}
                                 {rate !== null && (
                                   <span style={{display:"block", fontSize:10, color: rate.pct >= 0 ? "#dc2626" : "#2563eb", fontWeight:500}}>
@@ -1039,9 +1047,9 @@ function MainDashboard({ navigate }) {
                                   </span>
                                 )}
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
 
@@ -1049,14 +1057,12 @@ function MainDashboard({ navigate }) {
                     <div style={{marginTop:16, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8}}>
                       <div className="modal-section-title" style={{margin:0}}>월별 수입횟수 추이</div>
                       <div style={{display:"flex", alignItems:"center", gap:6, fontSize:12}}>
-                        <input type="text" className="date-range-input" style={{padding:"3px 7px", fontSize:12, width:80}}
-                          placeholder="연도-월"
+                        <input type="month" className="date-range-input" style={{padding:"3px 7px", fontSize:12}}
                           value={modalChartFrom}
                           onChange={e => setModalChartFrom(e.target.value)}
                         />
                         <span style={{color:"#9ca3af"}}>~</span>
-                        <input type="text" className="date-range-input" style={{padding:"3px 7px", fontSize:12, width:80}}
-                          placeholder="연도-월"
+                        <input type="month" className="date-range-input" style={{padding:"3px 7px", fontSize:12}}
                           value={modalChartTo}
                           onChange={e => setModalChartTo(e.target.value)}
                         />
