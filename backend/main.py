@@ -13,7 +13,10 @@ import os
 import math
 from datetime import date
 from typing import Optional, List
-from fastapi import FastAPI, Depends, Query, UploadFile, File, HTTPException, Form
+import logging
+from fastapi import FastAPI, BackgroundTasks, Depends, Query, UploadFile, File, HTTPException, Form
+
+log = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func, select
@@ -1193,18 +1196,34 @@ async def health():
 
 
 # ─── 크롤링 트리거 ───────────────────────────────────────────────────────────
-@app.post("/api/crawl")
-async def trigger_crawl(start_date: str = "", end_date: str = "", db: AsyncSession = Depends(get_db)):
-    """크롤링 + OEM 마킹 + MC 변환 + DB 직접 적재"""
-    from datetime import date, timedelta
+async def _crawl_task(start_date: str, end_date: str):
+    """백그라운드에서 실행되는 크롤링 작업"""
     from crawler import run_crawl
+    from database import get_db
+    async for db in get_db():
+        try:
+            result = await run_crawl(start_date, end_date, db)
+            log.info("크롤링 백그라운드 완료: %s", result)
+        except Exception as e:
+            log.error("크롤링 백그라운드 실패: %s", e, exc_info=True)
+
+
+@app.post("/api/crawl")
+async def trigger_crawl(
+    start_date: str = "",
+    end_date: str = "",
+    background_tasks: BackgroundTasks = None,
+):
+    """크롤링 즉시 202 반환, 실제 작업은 백그라운드에서 실행"""
+    from datetime import date, timedelta
+    import asyncio
 
     if not start_date or not end_date:
         yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
         start_date = end_date = yesterday
 
-    result = await run_crawl(start_date, end_date, db)
-    return result
+    asyncio.ensure_future(_crawl_task(start_date, end_date))
+    return {"status": "accepted", "start": start_date, "end": end_date}
 
 
 # ─── 정부 사이트 접근 테스트 ─────────────────────────────────────────────────
