@@ -75,6 +75,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+async def refresh_mvs(db: AsyncSession):
+    """Materialized view refresh — advisory lock으로 동시 실행 방지"""
+    await db.execute(text("SELECT pg_advisory_xact_lock(12345678)"))
+    await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
+    await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+
+
 _MV_INDEXES = [
     # sku_history_mv 인덱스
     "CREATE INDEX IF NOT EXISTS idx_mv_import_count ON sku_history_mv (import_count DESC)",
@@ -1033,8 +1040,7 @@ async def upload_excel(
 
     content = await file.read()
     result  = await import_excel(content, db)
-    await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
-    await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+    await refresh_mvs(db)
     for sql in _MV_INDEXES:
         await db.execute(text(sql))
     await db.commit()
@@ -1094,8 +1100,7 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
     if records:
         await db.execute(ImportHistory.__table__.insert(), records)
         await db.commit()
-        await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
-        await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+        await refresh_mvs(db)
         for sql in _MV_INDEXES:
             await db.execute(text(sql))
         await db.commit()
@@ -1127,8 +1132,7 @@ async def clear_all_data(
     deleted_rows = count_r.scalar() or 0
 
     await db.execute(text("TRUNCATE TABLE import_history"))
-    await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
-    await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+    await refresh_mvs(db)
     await db.commit()
 
     return ClearDataResponse(
@@ -1187,8 +1191,7 @@ async def get_competitor_stats(db: AsyncSession = Depends(get_db)):
 # ─── MV 수동 갱신 ────────────────────────────────────────────────────────────
 @app.post("/api/refresh-mv")
 async def refresh_mv(db: AsyncSession = Depends(get_db)):
-    await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
-    await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+    await refresh_mvs(db)
     await db.commit()
     return {"status": "ok", "message": "MV 갱신 완료"}
 
@@ -1251,8 +1254,7 @@ async def _crawl_task(start_date: str, end_date: str):
             result = await run_crawl(start_date, end_date, db)
             log.info("크롤링 백그라운드 완료: %s", result)
             # MV 갱신
-            await db.execute(text("REFRESH MATERIALIZED VIEW sku_history_mv"))
-            await db.execute(text("REFRESH MATERIALIZED VIEW sku_factory_mv"))
+            await refresh_mvs(db)
             await db.commit()
             print("MV REFRESH COMPLETE")
         except Exception as e:
