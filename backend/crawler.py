@@ -87,7 +87,7 @@ async def crawl_oem_pages(client: httpx.AsyncClient, start: str, end: str,
     """getList HTML 파싱으로 OEM 행 수집 (페이지당 50건)"""
     LIMIT = 50
     total_pages = (total_cnt + LIMIT - 1) // LIMIT
-    log.info("OEM 페이지 크롤링 시작: %d건 → %d페이지", total_cnt, total_pages)
+    print(f"OEM 페이지 크롤링 시작: {total_cnt}건 → {total_pages}페이지", flush=True)
 
     COLS = ["구분", "수입업체", "제품명(한글)", "제품명(영문)",
             "품목(유형)", "해외제조업소", "처리일자", "소비기한", "제조국", "수출국"]
@@ -102,17 +102,21 @@ async def crawl_oem_pages(client: httpx.AsyncClient, start: str, end: str,
         }
         resp = await client.post(f"{BASE_URL}/getList", data=data, timeout=30)
         resp.raise_for_status()
+        print(f"OEM 페이지 {page_num} 응답: HTTP {resp.status_code}, {len(resp.text)}자", flush=True)
 
         soup = BeautifulSoup(resp.text, "html.parser")
-        tbody = soup.select_one("table tbody")
+        # <tbody> 가 없는 경우 대비해 table에서 직접 tr 검색
+        tbody = soup.select_one("table tbody") or soup.select_one("table")
         if not tbody:
-            log.info("OEM 페이지 %d: 테이블 없음 — 종료", page_num)
+            print(f"OEM 페이지 {page_num}: 테이블 없음 — 응답 앞부분: {resp.text[:300]}", flush=True)
             break
 
         trs = tbody.find_all("tr")
         if not trs:
+            print(f"OEM 페이지 {page_num}: tr 없음", flush=True)
             break
 
+        page_rows = 0
         for tr in trs:
             tds = tr.find_all("td")
             values = [td.get_text(strip=True) for td in tds]
@@ -121,9 +125,9 @@ async def crawl_oem_pages(client: httpx.AsyncClient, start: str, end: str,
             if len(values) < len(COLS):
                 values += [""] * (len(COLS) - len(values))
             rows_all.append(values[:len(COLS)])
+            page_rows += 1
 
-        if page_num % 10 == 0 or page_num == total_pages:
-            log.info("OEM 크롤링 진행: %d / %d 페이지 (%d건)", page_num, total_pages, len(rows_all))
+        print(f"OEM 페이지 {page_num}: {page_rows}행 수집 (누적 {len(rows_all)}건)", flush=True)
 
     if not rows_all:
         print("OEM 크롤링 결과 없음", flush=True)
