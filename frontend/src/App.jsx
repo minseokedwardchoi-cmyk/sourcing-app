@@ -1269,7 +1269,7 @@ function SkuManufacturers({ navigate, state }) {
                           })()}
                         </div>
                       </td>
-                      <td><OemBadge value={g.import_types?.join(", ")}/></td>
+                      <td><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{(g.import_types||[]).length>0?(g.import_types||[]).map((t,j)=><OemBadge key={j} value={t}/>):<span className="badge b-gray">-</span>}</div></td>
                       <td title={g.factory}>
                         <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:g.manufacturer,factory:g.factory,...g},from:"sku",skuState:state})}>
                           {g.factory}
