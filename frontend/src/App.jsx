@@ -528,26 +528,19 @@ function MainDashboard({ navigate }) {
     );
   }
 
-  function rowKey(row) {
-    return ["category","mc","sku_name","import_type","importer","manufacturer","factory","country"]
-      .map(k => String(row[k] ?? "")).join("|");
-  }
-
   function openMonthlyModal(row) {
-    const key = rowKey(row);
     setModalChartFrom(""); setModalChartTo("");
-    setMonthlyModal({ row, key, loading: true, error: null, yearly: [], monthly: [] });
+    setMonthlyModal({ row, loading: true, error: null, yearly: [], monthly: [] });
     fetchMonthlyImportCounts(row, null, null)
-      .then(res => setMonthlyModal(m => (m && m.key===key) ? { ...m, loading:false, yearly: res.yearly||[], monthly: res.data||[] } : m))
-      .catch(e => setMonthlyModal(m => (m && m.key===key) ? { ...m, loading:false, error: e.message || "조회 실패" } : m));
+      .then(res => setMonthlyModal(m => m ? { ...m, loading: false, yearly: res.yearly || [], monthly: res.data || [] } : null))
+      .catch(e => setMonthlyModal(m => m ? { ...m, loading: false, error: e.message || "조회 실패" } : null));
   }
 
   function refetchModalChart(row, from, to) {
-    const key = rowKey(row);
     setMonthlyModal(m => m ? { ...m, chartLoading: true } : m);
     fetchMonthlyImportCounts(row, from || null, to || null)
-      .then(res => setMonthlyModal(m => (m && m.key===key) ? { ...m, chartLoading:false, monthly: res.data||[] } : m))
-      .catch(() => setMonthlyModal(m => m ? { ...m, chartLoading: false } : m));
+      .then(res => setMonthlyModal(m => m ? { ...m, chartLoading: false, monthly: res.data || [] } : null))
+      .catch(() => setMonthlyModal(m => m ? { ...m, chartLoading: false } : null));
   }
 
   // 히어로(KPI) 영역은 페이지와 함께 스크롤되어 사라지고, 패널 헤더(경쟁사카드+툴바)가
