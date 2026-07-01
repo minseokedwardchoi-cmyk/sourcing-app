@@ -1945,13 +1945,38 @@ function CountryDetail({ navigate, state }) {
   useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
   useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
 
+  const TOP5_FILTER_VALS = ["A", "B", "C", "이마트", "홈플러스", "롯데마트", "쿠팡", "코스트코"];
+  const GRADE_VALS = ["A", "B", "C"];
+
   const filteredMfr = useMemo(() => {
     let rows = mfrRes?.data || [];
-    if (colFilters.primary_mc?.length) rows = rows.filter(r => (r.all_mcs||[]).some(mc => colFilters.primary_mc.includes(mc)));
-    return rows;
-  }, [mfrRes, colFilters]);
+    if (colFilters.primary_mc?.length)        rows = rows.filter(r => (r.all_mcs||[]).some(mc => colFilters.primary_mc.includes(mc)));
+    if (colFilters.mfr_name?.length)          rows = rows.filter(r => colFilters.mfr_name.includes(r.manufacturer));
+    if (colFilters.sku_count?.length)         rows = rows.filter(r => colFilters.sku_count.includes(String(r.sku_count)));
+    if (colFilters.top5_grade?.length)        rows = rows.filter(r =>
+      colFilters.top5_grade.some(v =>
+        ["A","B","C"].includes(v) ? r.top5_retailer_grade === v : (r.top5_retailers_matched||[]).includes(v)
+      )
+    );
+    if (colFilters.import_count_grade?.length) rows = rows.filter(r => colFilters.import_count_grade.includes(r.import_count_grade));
+    if (colFilters.growth_grade?.length)      rows = rows.filter(r => colFilters.growth_grade.includes(r.growth_trend_grade));
 
-  const mfrMcVals = useMemo(() => Array.from(new Set((mfrRes?.data||[]).flatMap(r=>r.all_mcs||[]).filter(Boolean))).sort(), [mfrRes]);
+    // 클라이언트 사이드 정렬 (등급/제조사명)
+    if (sortBy === "manufacturer") {
+      const dir = sortDir === "asc" ? 1 : -1;
+      rows = [...rows].sort((a,b) => (a.manufacturer||"").localeCompare(b.manufacturer||"","ko") * dir);
+    } else if (["top5_retailer_grade","import_count_grade","growth_trend_grade"].includes(sortBy)) {
+      const g = {"A":0,"B":1,"C":2};
+      const dir = sortDir === "asc" ? 1 : -1;
+      rows = [...rows].sort((a,b) => ((g[a[sortBy]]??3) - (g[b[sortBy]]??3)) * dir);
+    }
+
+    return rows;
+  }, [mfrRes, colFilters, sortBy, sortDir]);
+
+  const mfrMcVals    = useMemo(() => Array.from(new Set((mfrRes?.data||[]).flatMap(r=>r.all_mcs||[]).filter(Boolean))).sort(), [mfrRes]);
+  const mfrNameVals  = useMemo(() => Array.from(new Set((mfrRes?.data||[]).map(r=>r.manufacturer).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ko")), [mfrRes]);
+  const mfrSkuCountVals = useMemo(() => [...new Set((mfrRes?.data||[]).map(r=>String(r.sku_count)))].sort((a,b)=>Number(a)-Number(b)), [mfrRes]);
 
   useEffect(()=>{
     if (!country) return;
@@ -1989,6 +2014,11 @@ function CountryDetail({ navigate, state }) {
   const activeFilters = [];
   if (debSearch) activeFilters.push(`검색: "${debSearch}"`);
   if (mcFilter)  activeFilters.push(`MC: ${mcFilter}`);
+  if (colFilters.mfr_name?.length)           activeFilters.push(`제조사: ${colFilters.mfr_name.join(", ")}`);
+  if (colFilters.sku_count?.length)          activeFilters.push(`SKU수: ${colFilters.sku_count.join(", ")}`);
+  if (colFilters.top5_grade?.length)         activeFilters.push(`탑5: ${colFilters.top5_grade.join(", ")}`);
+  if (colFilters.import_count_grade?.length) activeFilters.push(`수입횟수 등급: ${colFilters.import_count_grade.join(", ")}`);
+  if (colFilters.growth_grade?.length)       activeFilters.push(`성장추세: ${colFilters.growth_grade.join(", ")}`);
 
   if (!country) {
     return (
@@ -2110,13 +2140,48 @@ function CountryDetail({ navigate, state }) {
             <table>
               <thead>
                 <tr>
-                  <th style={{minWidth:200}}>제조사명</th>
-                  <th style={{minWidth:160}}><div className="th-inner"><span className="th-label">주요 MC</span><ColumnFilter colKey={null} isNumeric={false} activeValues={colFilters.primary_mc||null} activeSortCol={false} activeSortDir="asc" localValues={mfrMcVals} onSort={()=>{}} onApply={vals=>setColFilters(p=>({...p,primary_mc:vals}))}/></div></th>
-                  <th style={{minWidth:80}} onClick={()=>handleSort("sku_count")}>취급 SKU 수 <SortIcon col="sku_count" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:130}} onClick={()=>handleSort("ranking_score")}>종합점수 <SortIcon col="ranking_score" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:220}}>탑5 유통사 거래 다양성</th>
-                  <th style={{minWidth:120}} onClick={()=>handleSort("total_import_count")}>국내 수입횟수 <SortIcon col="total_import_count" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:220}}>최근 3개년 성장추세</th>
+                  <th style={{minWidth:200}}>
+                    <div className="th-inner">
+                      <span className="th-label">제조사명</span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.mfr_name||null} activeSortCol={sortBy==="manufacturer"} activeSortDir={sortDir} localValues={mfrNameVals} onSort={dir=>{setSortBy("manufacturer");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,mfr_name:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:160}}>
+                    <div className="th-inner">
+                      <span className="th-label">주요 MC</span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.primary_mc||null} activeSortCol={false} activeSortDir="asc" localValues={mfrMcVals} onSort={()=>{}} onApply={vals=>setColFilters(p=>({...p,primary_mc:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:80}}>
+                    <div className="th-inner">
+                      <span className="th-label">취급 SKU 수 <SortIcon col="sku_count" sortCol={sortBy} sortDir={sortDir}/></span>
+                      <ColumnFilter colKey="_l" isNumeric={true} activeValues={colFilters.sku_count||null} activeSortCol={sortBy==="sku_count"} activeSortDir={sortDir} localValues={mfrSkuCountVals} onSort={dir=>{setSortBy("sku_count");setSortDir(dir);setPage(1);}} onApply={vals=>setColFilters(p=>({...p,sku_count:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:130}}>
+                    <div className="th-inner">
+                      <span className="th-label">종합점수 <SortIcon col="ranking_score" sortCol={sortBy} sortDir={sortDir}/></span>
+                      <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="ranking_score"} activeSortDir={sortDir} localValues={null} onSort={dir=>{setSortBy("ranking_score");setSortDir(dir);setPage(1);}} onApply={()=>{}}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:220}}>
+                    <div className="th-inner">
+                      <span className="th-label">탑5 유통사 거래 다양성</span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.top5_grade||null} activeSortCol={sortBy==="top5_count"} activeSortDir={sortDir} localValues={TOP5_FILTER_VALS} onSort={dir=>{setSortBy("top5_count");setSortDir(dir);setPage(1);}} onApply={vals=>setColFilters(p=>({...p,top5_grade:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:120}}>
+                    <div className="th-inner">
+                      <span className="th-label">국내 수입횟수 <SortIcon col="total_import_count" sortCol={sortBy} sortDir={sortDir}/></span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.import_count_grade||null} activeSortCol={sortBy==="import_count_grade"} activeSortDir={sortDir} localValues={GRADE_VALS} onSort={dir=>{setSortBy("import_count_grade");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,import_count_grade:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:220}}>
+                    <div className="th-inner">
+                      <span className="th-label">최근 3개년 성장추세</span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.growth_grade||null} activeSortCol={sortBy==="growth_trend_grade"} activeSortDir={sortDir} localValues={GRADE_VALS} onSort={dir=>{setSortBy("growth_trend_grade");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,growth_grade:vals}))}/>
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
