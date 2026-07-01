@@ -1159,7 +1159,6 @@ function SkuManufacturers({ navigate, state }) {
   const [error,        setError]       = useState(null);
   const [search,       setSearch]      = useState("");
   const [debSearch,    setDebSearch]   = useState("");
-  const [page,         setPage]        = useState(1);
   const [skuSort,      setSkuSort]     = useState("ranking_score");
   const [skuDir,       setSkuDir]      = useState("desc");
   const [colFilters,   setColFilters]  = useState({});
@@ -1203,15 +1202,13 @@ function SkuManufacturers({ navigate, state }) {
   const skuOemVals     = useMemo(() => Array.from(new Set((res?.data||[]).flatMap(r=>r.import_types||[]).filter(Boolean))).sort(), [res]);
   const skuEmailVals   = useMemo(() => Array.from(new Set((res?.data||[]).map(r=>r.email).filter(Boolean))).sort(), [res]);
 
-  useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
-
-  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+  useEffect(()=>{const t=setTimeout(()=>setDebSearch(search),400);return()=>clearTimeout(t);},[search]);
 
   useEffect(()=>{
     setLoading(true); setError(null);
-    fetchSkuFactories(skuName,{ search:debSearch, dateFrom:dateFrom||undefined, dateTo:dateTo||undefined, page, pageSize:50 })
+    fetchSkuFactories(skuName,{ search:debSearch, dateFrom:dateFrom||undefined, dateTo:dateTo||undefined, page:1, pageSize:2000 })
       .then(setRes).catch(e=>setError(e.message)).finally(()=>setLoading(false));
-  },[skuName,debSearch,dateFrom,dateTo,page]);
+  },[skuName,debSearch,dateFrom,dateTo]);
 
   const countries = useMemo(()=>{
     if(!res)return[];
@@ -1264,7 +1261,7 @@ function SkuManufacturers({ navigate, state }) {
               <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
               {(dateFrom||dateTo)&&<button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>}
             </div>
-            <span className="count-label">{res ? `${filteredRows.length}/${res.meta.total}개 제조사` : ""}</span>
+            <span className="count-label">{res ? `${filteredRows.length}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredRows.map(g=>({
               제조업체: g.factory, 제조국: g.country, OEM여부: (g.import_types||[]).join("/"),
               수입업체: (g.importers||[]).join("/"), 종합점수: g.ranking_score, 이메일: g.email||"",
@@ -1349,7 +1346,6 @@ function SkuManufacturers({ navigate, state }) {
               </tbody>
             </table>
           </div>
-          <Pagination meta={res?.meta} page={page} setPage={setPage}/>
         </div>
       </div>
     </div>
@@ -1932,7 +1928,6 @@ function CountryDetail({ navigate, state }) {
   const [search,     setSearch]    = useState("");
   const [debSearch,  setDebSearch] = useState("");
   const [mcFilter,   setMcFilter]  = useState("");
-  const [page,       setPage]      = useState(1);
   const [sortBy,     setSortBy]    = useState(null);
   const [sortDir,    setSortDir]   = useState("desc");
   const [dateFrom,   setDateFrom]  = useState("");
@@ -1942,8 +1937,7 @@ function CountryDetail({ navigate, state }) {
   const [mfrRes,     setMfrRes]     = useState(null);
   const [mfrLoading, setMfrLoading] = useState(true);
 
-  useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
-  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+  useEffect(()=>{const t=setTimeout(()=>setDebSearch(search),400);return()=>clearTimeout(t);},[search]);
 
   const filteredMfr = useMemo(() => {
     let rows = mfrRes?.data || [];
@@ -1970,11 +1964,11 @@ function CountryDetail({ navigate, state }) {
       query: debSearch || undefined,
       sortBy: sortBy || undefined,
       sortOrder: sortDir,
-      page, pageSize: 20,
+      page: 1, pageSize: 10000,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
     }).then(setMfrRes).catch(e=>setError(e.message)).finally(()=>setMfrLoading(false));
-  },[country,mcFilter,debSearch,sortBy,sortDir,page,dateFrom,dateTo]);
+  },[country,mcFilter,debSearch,sortBy,sortDir,dateFrom,dateTo]);
 
   function handleSort(col) {
     if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -1983,7 +1977,7 @@ function CountryDetail({ navigate, state }) {
   }
 
   function resetFilters() {
-    setSearch(""); setDebSearch(""); setMcFilter(""); setDateFrom(""); setDateTo(""); setColFilters({}); setPage(1);
+    setSearch(""); setDebSearch(""); setMcFilter(""); setDateFrom(""); setDateTo(""); setColFilters({});
   }
 
   const activeFilters = [];
@@ -2097,7 +2091,7 @@ function CountryDetail({ navigate, state }) {
               <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
               {(dateFrom||dateTo)&&<button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>}
             </div>
-            <span className="count-label">{mfrRes ? `${filteredMfr.length}/${mfrRes.meta.total}개 제조사` : ""}</span>
+            <span className="count-label">{mfrRes ? `${filteredMfr.length}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredMfr,"country_manufacturers.csv")}>⬇ CSV</button>
           </div>
           {activeFilters.length > 0 && (
@@ -2174,7 +2168,6 @@ function CountryDetail({ navigate, state }) {
               </tbody>
             </table>
           </div>
-          <Pagination meta={mfrRes?.meta} page={page} setPage={setPage}/>
         </div>
       </div>
     </div>
