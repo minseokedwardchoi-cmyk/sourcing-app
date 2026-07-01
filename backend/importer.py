@@ -205,6 +205,14 @@ def read_excel_file(file_bytes: bytes) -> pd.DataFrame:
             for v in df_raw.iloc[0].tolist()
         ]
 
+        # 헤더 행은 있어도 특정 칸만 비어있으면 그 칸의 값이 어떤 필드인지 인식
+        # 못 하고 유실된다. 이 프로젝트 엑셀들은 공통적으로 category, mc, sku_name,
+        # importer, import_type, factory, country 순서를 따르므로, 빈 헤더 칸은
+        # 그 위치의 기본 컬럼명으로 채운다.
+        for i, h in enumerate(headers):
+            if not h and i < len(HEADERLESS_COLS):
+                headers[i] = HEADERLESS_COLS[i]
+
         df = df_raw.iloc[1:].copy()
         df.columns = headers
         df.columns = [str(c).strip() for c in df.columns]
