@@ -265,11 +265,12 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
       if (dropRef.current?.contains(e.target)) return;
       setOpen(false);
     };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
+    document.addEventListener("mousedown", h, true);
+    return () => document.removeEventListener("mousedown", h, true);
   }, [open]);
 
   function handleToggle(e) {
+    e.preventDefault();
     e.stopPropagation();
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
@@ -317,7 +318,7 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
   const sortDescIcon  = isNumeric ? "9→1" : "ㅎ→ㄱ";
 
   const dropdown = (
-    <div ref={dropRef} className="filter-dropdown" style={dropStyle} onClick={e => e.stopPropagation()}>
+    <div ref={dropRef} className="filter-dropdown" style={dropStyle} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
       <div className="filter-sort-section">
         <button className="filter-sort-btn" onClick={() => handleSort("asc")}>
           <span className="filter-sort-icon">{sortAscIcon}</span>
@@ -367,8 +368,8 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
   );
 
   return (
-    <div style={{position:"relative",display:"inline-block"}} onClick={e => e.stopPropagation()}>
-      <button ref={btnRef} className={`filter-icon-btn${isActive ? " active" : ""}`} onClick={handleToggle} title="필터">▾</button>
+    <div style={{position:"relative",display:"inline-block"}} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+      <button type="button" ref={btnRef} className={`filter-icon-btn${isActive ? " active" : ""}`} onMouseDown={handleToggle} onClick={e => { e.preventDefault(); e.stopPropagation(); }} title="필터">▾</button>
       {open && createPortal(dropdown, document.body)}
     </div>
   );
