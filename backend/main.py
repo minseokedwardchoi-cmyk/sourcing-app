@@ -36,7 +36,7 @@ from schemas import (
 )
 from importer import import_excel, COMPETITOR_MAP
 from contact_importer import import_contacts
-from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, TOP5_RETAILERS
+from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, TOP5_RETAILERS
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
 )
@@ -897,20 +897,19 @@ async def get_country_manufacturers(
             meta=PaginationMeta(total=0, page=page, page_size=page_size, total_pages=1),
         )
 
-    primary_mc_r = await db.execute(text(f"""
-        SELECT mfr_key, mc FROM (
-            SELECT COALESCE(manufacturer, factory) AS mfr_key, mc, COUNT(*) AS cnt,
-                   ROW_NUMBER() OVER (PARTITION BY COALESCE(manufacturer, factory) ORDER BY COUNT(*) DESC) AS rn
+    all_mcs_r = await db.execute(text(f"""
+        SELECT mfr_key, array_agg(mc ORDER BY cnt DESC) AS all_mcs FROM (
+            SELECT COALESCE(manufacturer, factory) AS mfr_key, mc, COUNT(*) AS cnt
             FROM import_history
             WHERE country = :country AND mc IS NOT NULL AND COALESCE(manufacturer, factory) IS NOT NULL
             {date_cond}
             GROUP BY COALESCE(manufacturer, factory), mc
-        ) t WHERE rn = 1
+        ) t GROUP BY mfr_key
     """), date_params)
-    primary_mc_by_key = {r[0]: r[1] for r in primary_mc_r.fetchall()}
+    all_mcs_by_key = {r[0]: list(r[1]) for r in all_mcs_r.fetchall()}
 
-    # 제조사 점수: 기존 ranking.py 로직을 그대로 재사용 (country 단위로 스코프만 변경)
-    rankings = await compute_manufacturer_rankings_by_country(db, country)
+    # 제조사 점수: SKU별 평가 점수 중 최고 점수를 사용
+    rankings = await compute_best_sku_rankings_for_country(db, country)
 
     mc_included: Optional[set] = None
     if mc and mc.strip():
@@ -929,7 +928,8 @@ async def get_country_manufacturers(
             SELECT DISTINCT COALESCE(manufacturer, factory), sku_name FROM import_history
             WHERE country = :country
               AND COALESCE(manufacturer, factory) IS NOT NULL
-              AND (mc ILIKE :like_q OR sku_name ILIKE :like_q OR sku_name % :q)
+              AND (mc ILIKE :like_q OR sku_name ILIKE :like_q OR sku_name % :q
+                   OR COALESCE(manufacturer, factory) ILIKE :like_q)
         """), {"country": country, "like_q": f"%{q}%", "q": q})
         query_included = set()
         for mfr_key, sku_name in q_r.fetchall():
@@ -946,24 +946,27 @@ async def get_country_manufacturers(
 
         rk = rankings.get(mfr_key, {})
         importers = set(r["importers"] or [])
-        top5_matched = sorted(importers & set(TOP5_RETAILERS), key=TOP5_RETAILERS.index)
-        mc_count = r["mc_count"] or 0
-        primary_mc = primary_mc_by_key.get(mfr_key)
-        primary_mc_label = None
-        if primary_mc:
-            primary_mc_label = primary_mc if mc_count <= 1 else f"{primary_mc} 외 {mc_count - 1}개"
+        top5_matched = rk.get("top5_retailers_matched") or sorted(importers & set(TOP5_RETAILERS), key=TOP5_RETAILERS.index)
+        all_mcs = all_mcs_by_key.get(mfr_key, [])
+        primary_mc = all_mcs[0] if all_mcs else None
 
         rows.append({
             "manufacturer":           mfr_key,
             "factory":                r["sample_factory"],
             "country":                r["country"],
-            "primary_mc":             primary_mc_label,
+            "all_mcs":                all_mcs,
+            "primary_mc":             primary_mc,
             "sku_count":              r["sku_count"] or 0,
-            "total_import_count":     r["total_import_count"] or 0,
+            "total_import_count":     rk.get("total_import_count") or r["total_import_count"] or 0,
             "top5_count":             len(top5_matched),
             "top5_retailers_matched": top5_matched,
             "latest_import":          r["latest_import"],
             "ranking_score":          rk.get("ranking_score"),
+            "best_sku_name":          rk.get("best_sku_name"),
+            "top5_retailer_grade":    rk.get("top5_retailer_grade"),
+            "import_count_grade":     rk.get("import_count_grade"),
+            "growth_trend_grade":     rk.get("growth_trend_grade"),
+            "growth_yearly":          rk.get("growth_yearly", []),
             "matched_sku":            matched_sku_by_key.get(mfr_key),
         })
 
