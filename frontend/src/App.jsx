@@ -1164,6 +1164,20 @@ function SkuManufacturers({ navigate, state }) {
   const [colFilters,   setColFilters]  = useState({});
   const [dateFrom,     setDateFrom]    = useState("");
   const [dateTo,       setDateTo]      = useState("");
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
+
+  function cellKey(col, i) { return `${col}:${i}`; }
+  function toggleOverflowExpand(col, i) {
+    const k = cellKey(col, i);
+    setExpandedOverflow(prev => { const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n; });
+  }
+  function overflowTextRef(el, col, i) {
+    if (!el) return;
+    const k = cellKey(col, i);
+    const over = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
 
   function handleSkuSort(col) {
     if (skuSort === col) setSkuDir(d => d === "asc" ? "desc" : "asc");
@@ -1290,7 +1304,12 @@ function SkuManufacturers({ navigate, state }) {
                   ? <tr><td colSpan={10}><div className="empty-state">선택한 SKU와 연결된 제조사 정보가 없습니다.</div></td></tr>
                   : filteredRows.map((g,i)=>(
                     <tr key={i}>
-                      <td title={g.skus?.[0]}><span style={{fontSize:12}}>{g.skus?.[0]||"-"}</span></td>
+                      <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("sku_name",i))?"normal":"nowrap"}}>
+                        <div className="sku-cell">
+                          <span ref={el=>overflowTextRef(el,"sku_name",i)} className="sku-cell-text" style={{fontSize:12,...(expandedOverflow.has(cellKey("sku_name",i))?{whiteSpace:"normal",wordBreak:"break-all"}:{})}} title={g.skus?.[0]}>{g.skus?.[0]||"-"}</span>
+                          {(overflowCells.has(cellKey("sku_name",i))||expandedOverflow.has(cellKey("sku_name",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("sku_name",i);}} title={expandedOverflow.has(cellKey("sku_name",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("sku_name",i))?"▲":"▼"}</button>}
+                        </div>
+                      </td>
                       <td>
                         <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                           {(() => {
@@ -1305,10 +1324,11 @@ function SkuManufacturers({ navigate, state }) {
                         </div>
                       </td>
                       <td><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{(g.import_types||[]).length>0?(g.import_types||[]).map((t,j)=><OemBadge key={j} value={t}/>):<span className="badge b-gray">-</span>}</div></td>
-                      <td title={g.factory}>
-                        <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:g.manufacturer,factory:g.factory,...g},from:"sku",skuState:state})}>
-                          {g.factory}
-                        </span>
+                      <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("factory",i))?"normal":"nowrap"}}>
+                        <div className="sku-cell">
+                          <span ref={el=>overflowTextRef(el,"factory",i)} className="link-cell sku-cell-text" style={expandedOverflow.has(cellKey("factory",i))?{whiteSpace:"normal",wordBreak:"break-all"}:undefined} onClick={()=>navigate("mfr",{row:{manufacturer:g.manufacturer,factory:g.factory,...g},from:"sku",skuState:state})} title={g.factory}>{g.factory}</span>
+                          {(overflowCells.has(cellKey("factory",i))||expandedOverflow.has(cellKey("factory",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("factory",i);}} title={expandedOverflow.has(cellKey("factory",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("factory",i))?"▲":"▼"}</button>}
+                        </div>
                       </td>
                       <td>{g.country||"-"}</td>
                       <td><span className="score-cell">{g.ranking_score!=null?`${g.ranking_score.toFixed(1)}점`:"-"}</span></td>
@@ -1428,6 +1448,20 @@ function ManufacturerDetail({ navigate, state }) {
   const [skuDateFrom, setSkuDateFrom]  = useState("");
   const [skuDateTo,   setSkuDateTo]    = useState("");
   const [skuColFilters, setSkuColFilters] = useState({});
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
+
+  function cellKey(col, i) { return `${col}:${i}`; }
+  function toggleOverflowExpand(col, i) {
+    const k = cellKey(col, i);
+    setExpandedOverflow(prev => { const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n; });
+  }
+  function overflowTextRef(el, col, i) {
+    if (!el) return;
+    const k = cellKey(col, i);
+    const over = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
 
   useEffect(()=>{const t=setTimeout(()=>setSkuDebSearch(skuSearch),400);return()=>clearTimeout(t);},[skuSearch]);
 
@@ -1803,10 +1837,11 @@ function ManufacturerDetail({ navigate, state }) {
                             <tr key={i}>
                               <td><span className="badge b-cat">{r.category||"-"}</span></td>
                               <td><span className="badge b-mc">{r.mc||"-"}</span></td>
-                              <td title={r.sku_name}>
-                                <span className="link-cell" onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category}})}>
-                                  {r.sku_name}
-                                </span>
+                              <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("sku_name",i))?"normal":"nowrap"}}>
+                                <div className="sku-cell">
+                                  <span ref={el=>overflowTextRef(el,"sku_name",i)} className="link-cell sku-cell-text" style={expandedOverflow.has(cellKey("sku_name",i))?{whiteSpace:"normal",wordBreak:"break-all"}:undefined} onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category}})} title={r.sku_name}>{r.sku_name}</span>
+                                  {(overflowCells.has(cellKey("sku_name",i))||expandedOverflow.has(cellKey("sku_name",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("sku_name",i);}} title={expandedOverflow.has(cellKey("sku_name",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("sku_name",i))?"▲":"▼"}</button>}
+                                </div>
                               </td>
                               <td style={{fontSize:12}}>{r.import_type||"-"}</td>
                               <td>{renderImporters(r.importers)}</td>
@@ -1936,6 +1971,20 @@ function CountryDetail({ navigate, state }) {
 
   const [mfrRes,     setMfrRes]     = useState(null);
   const [mfrLoading, setMfrLoading] = useState(true);
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
+
+  function cellKey(col, i) { return `${col}:${i}`; }
+  function toggleOverflowExpand(col, i) {
+    const k = cellKey(col, i);
+    setExpandedOverflow(prev => { const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n; });
+  }
+  function overflowTextRef(el, col, i) {
+    if (!el) return;
+    const k = cellKey(col, i);
+    const over = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
 
   useEffect(()=>{const t=setTimeout(()=>setDebSearch(search),400);return()=>clearTimeout(t);},[search]);
 
@@ -2119,10 +2168,11 @@ function CountryDetail({ navigate, state }) {
                   ? <tr><td colSpan={7}><div className="empty-state">조건에 맞는 제조사가 없습니다.</div></td></tr>
                   : filteredMfr.map((m,i)=>(
                     <tr key={i}>
-                      <td title={m.manufacturer}>
-                        <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:m.manufacturer,factory:m.factory||m.manufacturer},from:"country",countryState:state})}>
-                          {m.manufacturer}
-                        </span>
+                      <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("manufacturer",i))?"normal":"nowrap"}}>
+                        <div className="sku-cell">
+                          <span ref={el=>overflowTextRef(el,"manufacturer",i)} className="link-cell sku-cell-text" style={expandedOverflow.has(cellKey("manufacturer",i))?{whiteSpace:"normal",wordBreak:"break-all"}:undefined} onClick={()=>navigate("mfr",{row:{manufacturer:m.manufacturer,factory:m.factory||m.manufacturer},from:"country",countryState:state})} title={m.manufacturer}>{m.manufacturer}</span>
+                          {(overflowCells.has(cellKey("manufacturer",i))||expandedOverflow.has(cellKey("manufacturer",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("manufacturer",i);}} title={expandedOverflow.has(cellKey("manufacturer",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("manufacturer",i))?"▲":"▼"}</button>}
+                        </div>
                       </td>
                       <td>
                         <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
