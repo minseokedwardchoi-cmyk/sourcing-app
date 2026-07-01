@@ -286,10 +286,14 @@ async def _fetch_with_playwright(year: str) -> tuple[list[CountryStat], dict[str
 
 # ── 전체 수집 파이프라인 ──────────────────────────────────────────────────────
 
-async def fetch_all_stats(year: str | None = None) -> FetchResult:
+async def fetch_all_stats(
+    year: str | None = None,
+    extra_codes: list[str] | None = None,
+) -> FetchResult:
     """
     ①②를 모두 수집해 FetchResult로 반환.
-    httpx 직접 호출 → 403/실패 시 Playwright fallback 순으로 시도.
+    extra_codes: MFDS 상위 20개국 외에 추가로 품목을 수집할 국가코드 목록.
+                 /api/refresh-country-stats 가 DB의 모든 국가를 넘겨준다.
     """
     import datetime
     if year is None:
@@ -309,12 +313,11 @@ async def fetch_all_stats(year: str | None = None) -> FetchResult:
             log.warning("httpx top20 수집 실패: %s", e)
             result.errors.append(f"top20 httpx 실패: {e}")
 
-        # 상위 20개국 코드 목록 (httpx 성공 시) 또는 기본 목록
-        codes = [s.country_code for s in result.top20 if s.country_code] or [
-            "US", "CN", "AU", "VN", "BR", "ES", "TH", "DE",
-            "RU", "NZ", "CA", "FR", "IT", "JP", "NO", "CL",
-            "MY", "NL", "PE", "PH",
-        ]
+        # 품목 수집 대상: MFDS 상위 20개국 + 호출자가 넘긴 추가 국가 (중복 제거)
+        top20_codes = [s.country_code for s in result.top20 if s.country_code]
+        codes = list(dict.fromkeys(top20_codes + (extra_codes or [])))
+        if not codes:
+            codes = list(COUNTRY_CODE_TO_KO.keys())
 
         item_errors = 0
         for code in codes:
