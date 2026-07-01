@@ -297,7 +297,7 @@ async def fetch_all_stats(
     """
     import datetime
     if year is None:
-        year = str(datetime.date.today().year)
+        year = str(datetime.date.today().year - 1)  # 당해연도는 미완성이므로 전년도 사용
 
     result = FetchResult(year=year, top20=[], top_items={})
 
@@ -361,13 +361,14 @@ async def upsert_stats_to_db(result: FetchResult, conn) -> dict:
     updated_countries = 0
     updated_items = 0
 
+    # ① 전체 삭제 후 재삽입 — 순위 밖으로 빠진 나라는 자동 제거됨
+    await conn.execute(text("DELETE FROM country_import_stat"))
     for stat in result.top20:
         if not stat.country_ko or stat.amount_usd_k == 0:
             continue
         await conn.execute(text("""
             INSERT INTO country_import_stat (country, total_amount_usd_k)
             VALUES (:country, :amount)
-            ON CONFLICT (country) DO UPDATE SET total_amount_usd_k = EXCLUDED.total_amount_usd_k
         """), {"country": stat.country_ko, "amount": stat.amount_usd_k})
         updated_countries += 1
 
