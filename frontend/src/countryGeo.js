@@ -48,10 +48,34 @@ export const KOREAN_TO_ENGLISH = {
   "엘살바도르": "El Salvador", "니카라과": "Nicaragua", "벨리즈": "Belize",
 };
 
+// 여러 한글 별칭이 같은 영문명으로 매핑되는 경우(예: "러시아"/"러시아연방",
+// "남아프리카"/"남아프리카공화국")를 대비해 영문명 → 한글 별칭 "목록"을 만든다.
+// 단순 역매핑(영문명 → 마지막 별칭 하나)만 쓰면, DB에 실제 저장된 별칭과
+// 지도가 확인하는 별칭이 달라서 데이터가 있어도 매칭에 실패할 수 있다.
+const ENGLISH_TO_KOREAN_ALIASES = {};
+for (const [ko, en] of Object.entries(KOREAN_TO_ENGLISH)) {
+  (ENGLISH_TO_KOREAN_ALIASES[en] ??= []).push(ko);
+}
+
 export const ENGLISH_TO_KOREAN = Object.fromEntries(
-  Object.entries(KOREAN_TO_ENGLISH).map(([ko, en]) => [en, ko])
+  Object.entries(ENGLISH_TO_KOREAN_ALIASES).map(([en, aliases]) => [en, aliases[0]])
 );
 
+/** 지도 라벨 등 대표 이름 하나만 필요할 때 (DB 보유 여부와 무관). */
 export function getKoreanName(englishGeoName) {
   return ENGLISH_TO_KOREAN[englishGeoName] || null;
+}
+
+/**
+ * DB(dbCountries)에 실제로 존재하는 별칭을 우선 반환한다.
+ * 일치하는 별칭이 없으면 대표 이름(getKoreanName과 동일)을 반환한다.
+ */
+export function resolveKoreanName(englishGeoName, dbCountries) {
+  const aliases = ENGLISH_TO_KOREAN_ALIASES[englishGeoName];
+  if (!aliases) return null;
+  if (dbCountries) {
+    const match = aliases.find(a => dbCountries.has(a));
+    if (match) return match;
+  }
+  return aliases[0];
 }
