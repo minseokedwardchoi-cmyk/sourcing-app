@@ -314,27 +314,65 @@ def _competitor_condition(competitor: str | None) -> str:
 # ─── 0-1. 컬럼별 고유값 목록 ─────────────────────────────────────────────────
 @app.get("/api/column-values")
 async def get_column_values(
-    col: str = Query(..., description="컬럼명"),
-    search: Optional[str] = Query(None),
+    col:                str                 = Query(..., description="컬럼명"),
+    search:             Optional[str]       = Query(None),
+    competitor:         Optional[str]       = Query(None),
+    date_from:          Optional[str]       = Query(None),
+    date_to:            Optional[str]       = Query(None),
+    filter_category:    Optional[List[str]] = Query(None),
+    filter_mc:          Optional[List[str]] = Query(None),
+    filter_import_type: Optional[List[str]] = Query(None),
+    filter_importer:    Optional[List[str]] = Query(None),
+    filter_country:     Optional[List[str]] = Query(None),
+    filter_factory:     Optional[List[str]] = Query(None),
+    filter_email:       Optional[List[str]] = Query(None),
+    filter_sku_name:    Optional[List[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     allowed = {"category", "mc", "import_type", "importer", "country", "factory", "email", "sku_name"}
     if col not in allowed:
         raise HTTPException(status_code=400, detail="허용되지 않은 컬럼")
 
-    search_cond = ""
     params: dict = {}
+    conds = [f"{col} IS NOT NULL"]
+
     if search and search.strip():
-        search_cond = f"AND {col} ILIKE :search"
+        conds.append("""(
+            sku_name ILIKE :search OR factory ILIKE :search OR
+            manufacturer ILIKE :search OR importer ILIKE :search OR
+            country ILIKE :search OR mc ILIKE :search
+        )""")
         params["search"] = f"%{search.strip()}%"
 
+    if competitor and competitor != "전체":
+        aliases = COMPETITOR_MAP.get(competitor, [competitor])
+        comp_parts = " OR ".join(f"importer ILIKE '%{a}%'" for a in aliases)
+        conds.append(f"({comp_parts})")
+
+    if date_from or date_to:
+        params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
+        params["date_to"]   = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
+        conds.append("latest_import >= CAST(:date_from AS date)")
+        conds.append("earliest_import <= CAST(:date_to AS date)")
+
+    col_filter_map = {
+        "category": filter_category, "mc": filter_mc, "import_type": filter_import_type,
+        "importer": filter_importer, "country": filter_country, "factory": filter_factory,
+        "email": filter_email, "sku_name": filter_sku_name,
+    }
+    for fc, values in col_filter_map.items():
+        if values and fc != col:
+            in_keys = {f"cv_{fc}_{i}": v for i, v in enumerate(values)}
+            in_clause = ", ".join(f":cv_{fc}_{i}" for i in range(len(values)))
+            conds.append(f"{fc} IN ({in_clause})")
+            params.update(in_keys)
+
+    where_clause = " AND ".join(conds)
     r = await db.execute(text(f"""
         SELECT DISTINCT {col}
         FROM sku_history_mv
-        WHERE {col} IS NOT NULL
-        {search_cond}
+        WHERE {where_clause}
         ORDER BY {col}
-        LIMIT 300
     """), params)
     return [row[0] for row in r.fetchall()]
 
@@ -347,7 +385,7 @@ async def get_sku_history(
     sort_by:         str                 = Query("import_count", description="정렬 컬럼"),
     sort_dir:        str                 = Query("desc",          description="asc | desc"),
     page:            int                 = Query(1,    ge=1),
-    page_size:       int                 = Query(50,   ge=1, le=200),
+    page_size:       int                 = Query(50,   ge=1, le=10000),
     date_from:       Optional[str]       = Query(None, description="조회 시작일 (YYYY-MM-DD)"),
     date_to:         Optional[str]       = Query(None, description="조회 종료일 (YYYY-MM-DD)"),
     filter_category:    Optional[List[str]] = Query(None),
@@ -782,10 +820,21 @@ async def get_country_manufacturers(
     sort_by:    Optional[str] = Query(None),
     sort_order: str           = Query("desc"),
     page:       int           = Query(1,  ge=1),
-    page_size:  int           = Query(20, ge=1, le=200),
+    page_size:  int           = Query(20, ge=1, le=10000),
+    date_from:  Optional[str] = Query(None),
+    date_to:    Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    base_r = await db.execute(text("""
+    date_cond = ""
+    date_params: dict = {"country": country}
+    if date_from or date_to:
+        df = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
+        dt = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
+        date_cond = "AND process_date >= :df AND process_date <= :dt"
+        date_params["df"] = df
+        date_params["dt"] = dt
+
+    base_r = await db.execute(text(f"""
         SELECT
             COALESCE(manufacturer, factory)                                       AS mfr_key,
             MAX(factory)                                                          AS sample_factory,
@@ -797,8 +846,9 @@ async def get_country_manufacturers(
             array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)      AS importers
         FROM import_history
         WHERE country = :country AND COALESCE(manufacturer, factory) IS NOT NULL
+        {date_cond}
         GROUP BY COALESCE(manufacturer, factory)
-    """), {"country": country})
+    """), date_params)
     base_rows = base_r.mappings().all()
 
     if not base_rows:
@@ -807,15 +857,16 @@ async def get_country_manufacturers(
             meta=PaginationMeta(total=0, page=page, page_size=page_size, total_pages=1),
         )
 
-    primary_mc_r = await db.execute(text("""
+    primary_mc_r = await db.execute(text(f"""
         SELECT mfr_key, mc FROM (
             SELECT COALESCE(manufacturer, factory) AS mfr_key, mc, COUNT(*) AS cnt,
                    ROW_NUMBER() OVER (PARTITION BY COALESCE(manufacturer, factory) ORDER BY COUNT(*) DESC) AS rn
             FROM import_history
             WHERE country = :country AND mc IS NOT NULL AND COALESCE(manufacturer, factory) IS NOT NULL
+            {date_cond}
             GROUP BY COALESCE(manufacturer, factory), mc
         ) t WHERE rn = 1
-    """), {"country": country})
+    """), date_params)
     primary_mc_by_key = {r[0]: r[1] for r in primary_mc_r.fetchall()}
 
     # 제조사 점수: 기존 ranking.py 로직을 그대로 재사용 (country 단위로 스코프만 변경)
@@ -910,8 +961,11 @@ async def get_country_manufacturers(
 # ─── 3. 제조사 상세 정보 ──────────────────────────────────────────────────────
 @app.get("/api/manufacturer", response_model=ManufacturerDetailResponse)
 async def get_manufacturer_detail(
-    manufacturer: str = Query(..., description="제조사명"),
-    factory:      str = Query(..., description="해외제조업소"),
+    manufacturer: str           = Query(..., description="제조사명"),
+    factory:      str           = Query(..., description="해외제조업소"),
+    sku_search:   Optional[str] = Query(None, description="SKU명 검색"),
+    date_from:    Optional[str] = Query(None),
+    date_to:      Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     rows_r = await db.execute(
@@ -936,19 +990,32 @@ async def get_manufacturer_detail(
     certs_raw = first["certificates"] or ""
     certs = [c.strip() for c in certs_raw.split(",") if c.strip()]
 
-    # 취급 SKU 집계
+    # 취급 SKU 집계 (검색/날짜 필터 적용)
+    sku_conds = ["manufacturer = :m AND factory = :f"]
+    sku_params: dict = {"m": manufacturer, "f": factory}
+    if sku_search and sku_search.strip():
+        sku_conds.append("sku_name ILIKE :sku_search")
+        sku_params["sku_search"] = f"%{sku_search.strip()}%"
+    if date_from or date_to:
+        df = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
+        dt = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
+        sku_conds.append("import_date >= :df AND import_date <= :dt")
+        sku_params["df"] = df
+        sku_params["dt"] = dt
+    sku_where = " AND ".join(sku_conds)
+
     sku_agg_r = await db.execute(
-        text("""
+        text(f"""
             SELECT
                 sku_name, mc, category, importer,
                 COUNT(*)         AS import_count,
                 MAX(import_date) AS latest_import
             FROM import_history
-            WHERE manufacturer = :m AND factory = :f
+            WHERE {sku_where}
             GROUP BY sku_name, mc, category, importer
             ORDER BY import_count DESC
         """),
-        {"m": manufacturer, "f": factory},
+        sku_params,
     )
     sku_rows = sku_agg_r.mappings().all()
 
@@ -1244,7 +1311,7 @@ async def get_factory_view(
     sort_by:            str                 = Query("import_count"),
     sort_dir:           str                 = Query("desc"),
     page:               int                 = Query(1,   ge=1),
-    page_size:          int                 = Query(50,  ge=1, le=200),
+    page_size:          int                 = Query(50,  ge=1, le=10000),
     date_from:          Optional[str]       = Query(None),
     date_to:            Optional[str]       = Query(None),
     filter_category:    Optional[List[str]] = Query(None),

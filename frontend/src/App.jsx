@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, LabelList, ResponsiveContainer,
 } from "recharts";
@@ -228,32 +229,59 @@ const styles = `
 `;
 
 // ─── 컬럼 필터 컴포넌트 (엑셀 스타일) ───────────────────────────────────────
-function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSortDir, onApply, onSort }) {
+// contextParams: { search, competitor, dateFrom, dateTo, colFilters } — 서버 컨텍스트 필터링용
+// localValues: 클라이언트 사이드 데이터에서 직접 넘겨줄 값 배열 (서버 API 미사용)
+function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSortDir, onApply, onSort, contextParams, localValues }) {
   const [open, setOpen]         = useState(false);
   const [values, setValues]     = useState([]);
   const [search, setSearch]     = useState("");
   const [selected, setSelected] = useState(new Set(activeValues || []));
   const [loading, setLoading]   = useState(false);
-  const ref = useRef(null);
+  const [dropStyle, setDropStyle] = useState({});
+  const btnRef  = useRef(null);
+  const dropRef = useRef(null);
 
   // 드롭다운 열릴 때 값 로드
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!open || !colKey) return;
+    if (!open) return;
+    if (localValues) { setValues(localValues); return; }
+    if (!colKey) return;
     setLoading(true);
-    fetchColumnValues(colKey).then(setValues).finally(() => setLoading(false));
-  }, [open, colKey]);
+    fetchColumnValues(colKey, contextParams || {}).then(setValues).finally(() => setLoading(false));
+  }, [open, colKey, localValues, JSON.stringify(contextParams)]);
 
-  // 드롭다운 닫힐 때 선택값 원래대로 복원 (취소 효과)
+  // 드롭다운 닫힐 때 선택값 복원 (취소 효과)
   useEffect(() => {
     if (!open) { setSelected(new Set(activeValues || [])); setSearch(""); }
   }, [open, activeValues]);
 
   // 외부 클릭 시 닫기
   useEffect(() => {
-    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    if (!open) return;
+    const h = e => {
+      if (btnRef.current?.contains(e.target)) return;
+      if (dropRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
-  }, []);
+  }, [open]);
+
+  function handleToggle(e) {
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      // 화면 아래 공간이 충분하면 아래로, 아니면 위로 표시
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < 320 && rect.top > 320) {
+        setDropStyle({ position:"fixed", bottom: window.innerHeight - rect.top + 2, left: rect.left, zIndex:9999 });
+      } else {
+        setDropStyle({ position:"fixed", top: rect.bottom + 2, left: rect.left, zIndex:9999 });
+      }
+    }
+    setOpen(v => !v);
+  }
 
   const filtered = values.filter(v => !search || String(v).toLowerCase().includes(search.toLowerCase()));
   const allSelected = filtered.length > 0 && filtered.every(v => selected.has(String(v)));
@@ -271,10 +299,7 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
     setSelected(prev => { const s = new Set(prev); s.has(v) ? s.delete(v) : s.add(v); return s; });
   }
 
-  function handleSort(dir) {
-    onSort(dir);
-    setOpen(false);
-  }
+  function handleSort(dir) { onSort(dir); setOpen(false); }
 
   function handleOk() {
     const sel = [...selected];
@@ -282,9 +307,7 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
     setOpen(false);
   }
 
-  function handleCancel() {
-    setOpen(false); // 선택값 복원은 위 useEffect에서 처리
-  }
+  function handleCancel() { setOpen(false); }
 
   const isActive = (activeValues && activeValues.length > 0) || activeSortCol;
   const sortAscLabel  = isNumeric ? "숫자 오름차순 정렬" : "텍스트 오름차순 정렬 (ㄱ→ㅎ)";
@@ -292,74 +315,60 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
   const sortAscIcon   = isNumeric ? "1→9" : "ㄱ→ㅎ";
   const sortDescIcon  = isNumeric ? "9→1" : "ㅎ→ㄱ";
 
-  return (
-    <div ref={ref} style={{ position:"relative", display:"inline-block" }} onClick={e => e.stopPropagation()}>
-      <button
-        className={`filter-icon-btn${isActive ? " active" : ""}`}
-        onClick={() => setOpen(v => !v)}
-        title="필터"
-      >▾</button>
-
-      {open && (
-        <div className="filter-dropdown">
-          {/* 정렬 섹션 */}
-          <div className="filter-sort-section">
-            <button className="filter-sort-btn" onClick={() => handleSort("asc")}>
-              <span className="filter-sort-icon">{sortAscIcon}</span>
-              {sortAscLabel}
-              {activeSortCol && activeSortDir === "asc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
-            </button>
-            <button className="filter-sort-btn" onClick={() => handleSort("desc")}>
-              <span className="filter-sort-icon">{sortDescIcon}</span>
-              {sortDescLabel}
-              {activeSortCol && activeSortDir === "desc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
-            </button>
+  const dropdown = (
+    <div ref={dropRef} className="filter-dropdown" style={dropStyle} onClick={e => e.stopPropagation()}>
+      <div className="filter-sort-section">
+        <button className="filter-sort-btn" onClick={() => handleSort("asc")}>
+          <span className="filter-sort-icon">{sortAscIcon}</span>
+          {sortAscLabel}
+          {activeSortCol && activeSortDir === "asc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
+        </button>
+        <button className="filter-sort-btn" onClick={() => handleSort("desc")}>
+          <span className="filter-sort-icon">{sortDescIcon}</span>
+          {sortDescLabel}
+          {activeSortCol && activeSortDir === "desc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
+        </button>
+      </div>
+      {colKey ? (
+        <>
+          <div className="filter-search-section">
+            <input className="filter-search" placeholder="검색..." value={search} onChange={e => setSearch(e.target.value)}/>
           </div>
-
-          {/* 검색 + 체크박스 (텍스트 컬럼만) */}
-          {colKey && (
-            <>
-              <div className="filter-search-section">
-                <input
-                  className="filter-search"
-                  placeholder="검색..."
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                />
-              </div>
-              <div className="filter-list">
-                {loading
-                  ? <div style={{ padding:"10px", fontSize:12, color:"#9ca3af", textAlign:"center" }}>로딩 중...</div>
-                  : <>
-                    <label className="filter-item">
-                      <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-                      <span style={{ fontWeight:600 }}>(모두 선택)</span>
-                    </label>
-                    {filtered.map((v, i) => (
-                      <label key={i} className="filter-item">
-                        <input type="checkbox" checked={selected.has(String(v))} onChange={() => toggle(String(v))} />
-                        <span title={String(v)}>{v || "(비어있음)"}</span>
-                      </label>
-                    ))}
-                    {filtered.length === 0 && <div style={{ padding:"8px 12px", fontSize:12, color:"#9ca3af" }}>결과 없음</div>}
-                  </>
-                }
-              </div>
-              <div className="filter-actions">
-                <button className="filter-ok-btn" onClick={handleOk}>확인</button>
-                <button className="filter-cancel-btn" onClick={handleCancel}>취소</button>
-              </div>
-            </>
-          )}
-
-          {/* 숫자 컬럼은 정렬만 */}
-          {!colKey && (
-            <div style={{ padding:"6px 10px 8px", borderTop:"1px solid #e8eaed" }}>
-              <button className="filter-cancel-btn" style={{width:"100%"}} onClick={handleCancel}>닫기</button>
-            </div>
-          )}
+          <div className="filter-list">
+            {loading
+              ? <div style={{padding:"10px",fontSize:12,color:"#9ca3af",textAlign:"center"}}>로딩 중...</div>
+              : <>
+                <label className="filter-item">
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll}/>
+                  <span style={{fontWeight:600}}>(모두 선택)</span>
+                </label>
+                {filtered.map((v,i) => (
+                  <label key={i} className="filter-item">
+                    <input type="checkbox" checked={selected.has(String(v))} onChange={() => toggle(String(v))}/>
+                    <span title={String(v)}>{v || "(비어있음)"}</span>
+                  </label>
+                ))}
+                {filtered.length === 0 && <div style={{padding:"8px 12px",fontSize:12,color:"#9ca3af"}}>결과 없음</div>}
+              </>
+            }
+          </div>
+          <div className="filter-actions">
+            <button className="filter-ok-btn" onClick={handleOk}>확인</button>
+            <button className="filter-cancel-btn" onClick={handleCancel}>취소</button>
+          </div>
+        </>
+      ) : (
+        <div style={{padding:"6px 10px 8px",borderTop:"1px solid #e8eaed"}}>
+          <button className="filter-cancel-btn" style={{width:"100%"}} onClick={handleCancel}>닫기</button>
         </div>
       )}
+    </div>
+  );
+
+  return (
+    <div style={{position:"relative",display:"inline-block"}} onClick={e => e.stopPropagation()}>
+      <button ref={btnRef} className={`filter-icon-btn${isActive ? " active" : ""}`} onClick={handleToggle} title="필터">▾</button>
+      {open && createPortal(dropdown, document.body)}
     </div>
   );
 }
@@ -799,7 +808,13 @@ function MainDashboard({ navigate }) {
               )}
             </div>
             <span className="count-label">{meta?`총 ${meta.total.toLocaleString()}건 중 표시`:""}</span>
-            <button className="icon-btn" onClick={()=>downloadCSV(data,"sku_history.csv")}>⬇ CSV</button>
+            <button className="icon-btn" onClick={async()=>{
+              if(!meta||meta.total===0){downloadCSV(data,"sku_history.csv");return;}
+              try{
+                const r=await fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page:1,pageSize:meta.total,colFilters,dateFrom,dateTo});
+                downloadCSV(r.data,"sku_history.csv");
+              }catch{downloadCSV(data,"sku_history.csv");}
+            }}>⬇ CSV</button>
             <div className="col-wrap" ref={colMenuRef}>
               <button className="icon-btn" onClick={()=>setShowColMenu(v=>!v)}>⚙ 열 설정</button>
               {showColMenu&&(
@@ -844,6 +859,10 @@ function MainDashboard({ navigate }) {
                               setPage(1);
                             }
                           }}
+                          contextParams={c.filterKey ? {
+                            search: debSearch, competitor, dateFrom, dateTo,
+                            colFilters: Object.fromEntries(Object.entries(colFilters).filter(([k]) => k !== c.filterKey)),
+                          } : null}
                         />
                       </div>
                     </th>
@@ -2472,7 +2491,13 @@ function FactoryViewDashboard({ navigate }) {
               )}
             </div>
             <span className="count-label">{meta?`총 ${meta.total.toLocaleString()}건 중 표시`:""}</span>
-            <button className="icon-btn" onClick={()=>downloadCSV(data,"factory_view.csv")}>⬇ CSV</button>
+            <button className="icon-btn" onClick={async()=>{
+              if(!meta||meta.total===0){downloadCSV(data,"factory_view.csv");return;}
+              try{
+                const r=await fetchFactoryView({search:debSearch,competitor,sortBy,sortDir,page:1,pageSize:meta.total,colFilters,dateFrom,dateTo});
+                downloadCSV(r.data,"factory_view.csv");
+              }catch{downloadCSV(data,"factory_view.csv");}
+            }}>⬇ CSV</button>
             <div className="col-wrap" ref={colMenuRef}>
               <button className="icon-btn" onClick={()=>setShowColMenu(v=>!v)}>⚙ 열 설정</button>
               {showColMenu&&(
@@ -2516,6 +2541,10 @@ function FactoryViewDashboard({ navigate }) {
                               setPage(1);
                             }
                           }}
+                          contextParams={c.filterKey ? {
+                            search: debSearch, competitor, dateFrom, dateTo,
+                            colFilters: Object.fromEntries(Object.entries(colFilters).filter(([k]) => k !== c.filterKey)),
+                          } : null}
                         />
                       </div>
                     </th>
