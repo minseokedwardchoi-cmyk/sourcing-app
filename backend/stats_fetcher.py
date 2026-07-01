@@ -26,11 +26,11 @@ log = logging.getLogger(__name__)
 _ORIGIN   = "https://impfood.mfds.go.kr"
 _MAIN_URL = f"{_ORIGIN}/ifs/websquare/websquare.html?w2xPath=/ifs/ui/index.xml"
 
-# ① 국가별 수입 상위 20개국 현황 — discover_mfds_urls.py 로 실제 URL 확인 후 교체
-_TOP20_URL = f"{_ORIGIN}/CFCCC07F01/selectNationTop20List.action"
+# ① 국가별 수입 상위 20개국 현황
+_TOP20_URL = f"{_ORIGIN}/ifs/CFSBB01F010/selectCFSBB01F060.action"
 
-# ② 국가별 주요품목 통계 — 브라우저 Network 탭에서 확인된 URL
-_ITEMS_URL = f"{_ORIGIN}/CFCCC08F01/selectStatistics.action"
+# ② 국가별 주요품목 통계
+_ITEMS_URL = f"{_ORIGIN}/ifs/CFDAA07F010/selectStatistics.action"
 
 _HEADERS = {
     "User-Agent":        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -117,31 +117,31 @@ async def _init_session(client: httpx.AsyncClient) -> None:
 
 
 async def _fetch_top20_httpx(client: httpx.AsyncClient, year: str) -> list[CountryStat]:
-    payload = {"stdrYear": year, "searchGubun": "3"}
+    # columnInfo: 응답에 포함할 필드 목록 (브라우저 Network 탭에서 확인된 값)
+    payload = {
+        "dma_Search": f'{{"stdrYear":"{year}","columnInfo":"rank,ccntNtncd,ccntNtnnm,ccnt,ccntRate,wtNtncd,wtNtnnm,wt,wtRate,amtNtncd,amtNtnnm,amt,amtRate","mberNo":"","transferYn":""}}'
+    }
     resp = await client.post(_TOP20_URL, data=payload, timeout=30)
     resp.raise_for_status()
     data = resp.json()
 
-    # 응답 키가 사이트 버전마다 다를 수 있으므로 유연하게 파싱
-    rows = (
-        data.get("dlt_DataList")
-        or data.get("dlt_DataList1")
-        or data.get("dlt_DataList3")
-        or _first_list(data)
-    )
+    # 응답: {"dlt_DataList": [...], "dma_Search": {...}, ...}
+    rows = data.get("dlt_DataList") or _first_list(data)
 
     result: list[CountryStat] = []
-    total_amt = sum(_parse_amount(r.get("sumAmt") or r.get("col3") or "0") for r in rows)
+    total_amt = sum(_parse_amount(r.get("amt") or "0") for r in rows)
 
     for r in rows:
-        ko = (r.get("ntnNm") or r.get("col1") or "").strip()
-        raw_amt = r.get("sumAmt") or r.get("col3") or r.get("amt") or "0"
-        amount = _parse_amount(raw_amt)
+        # 금액 기준 국가명: amtNtnnm, 금액: amt, 비중: amtRate
+        ko = (r.get("amtNtnnm") or r.get("ccntNtnnm") or r.get("wtNtnnm") or "").strip()
+        amount = _parse_amount(r.get("amt") or "0")
         try:
-            pct = float(str(r.get("rateAmt") or r.get("col4") or "").replace("%", "").strip())
+            pct = float(str(r.get("amtRate") or "").replace("%", "").strip())
         except (ValueError, TypeError):
             pct = round(amount / total_amt * 100, 1) if total_amt else 0.0
 
+        if not ko:
+            continue
         result.append(CountryStat(
             country_ko=ko,
             country_code=KO_TO_CODE.get(ko, ""),
@@ -156,7 +156,9 @@ async def _fetch_top20_httpx(client: httpx.AsyncClient, year: str) -> list[Count
 async def _fetch_items_httpx(
     client: httpx.AsyncClient, year: str, code: str, top_n: int = 10
 ) -> list[TopItem]:
-    payload = {"stdrYear": year, "ntncd": code, "transferYn": ""}
+    payload = {
+        "dma_Search": f'{{"columnInfo":"","stdrYear":"{year}","ntncd":"{code}","mberNo":"","transferYn":""}}'
+    }
     resp = await client.post(_ITEMS_URL, data=payload, timeout=30)
     resp.raise_for_status()
     data = resp.json()
