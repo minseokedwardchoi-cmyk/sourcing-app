@@ -1130,6 +1130,11 @@ async def get_manufacturer_detail(
             count_year2   = r["count_year2"] or 0,
             count_year3   = r["count_year3"] or 0,
             ranking_score = sku_score_map.get(r["sku_name"]),
+            ranking_grade = (
+                "A" if (sku_score_map.get(r["sku_name"]) or 0) >= 80
+                else "B" if (sku_score_map.get(r["sku_name"]) or 0) >= 50
+                else "C"
+            ) if sku_score_map.get(r["sku_name"]) is not None else None,
         ))
 
     # 최근 수입일: 모든 행 중 최대값

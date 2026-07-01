@@ -384,6 +384,13 @@ function OemBadge({ value }) {
   return <span className="badge b-gray">{value}</span>;
 }
 
+function scoreToGrade(score) {
+  if (score == null) return null;
+  if (score >= 80) return "A";
+  if (score >= 50) return "B";
+  return "C";
+}
+
 function GradeBadge({ grade }) {
   if (!grade) return <span style={{color:"#9ca3af",fontSize:12}}>-</span>;
   const cls = grade === "A" ? "b-grade-a" : grade === "B" ? "b-grade-b" : "b-grade-c";
@@ -1280,7 +1287,7 @@ function SkuManufacturers({ navigate, state }) {
             <span className="count-label">{res ? `${filteredRows.length}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredRows.map(g=>({
               제조업체: g.factory, 제조국: g.country, OEM여부: (g.import_types||[]).join("/"),
-              수입업체: (g.importers||[]).join("/"), 종합점수: g.ranking_score, 이메일: g.email||"",
+              수입업체: (g.importers||[]).join("/"), 종합점수: scoreToGrade(g.ranking_score)??"-", 이메일: g.email||"",
             })), "sku_factories.csv")}>⬇ CSV</button>
           </div>
           {error&&<div className="error-box">오류: {error}</div>}
@@ -1333,7 +1340,7 @@ function SkuManufacturers({ navigate, state }) {
                         </div>
                       </td>
                       <td>{g.country||"-"}</td>
-                      <td><span className="score-cell">{g.ranking_score!=null?`${g.ranking_score.toFixed(1)}점`:"-"}</span></td>
+                      <td><GradeBadge grade={scoreToGrade(g.ranking_score)}/></td>
                       <td style={{maxWidth:"none",overflow:"visible"}}>
                         <div style={{display:"flex",alignItems:"center",gap:5}}>
                           <GradeBadge grade={g.top5_retailer_grade}/>
@@ -1861,7 +1868,7 @@ function ManufacturerDetail({ navigate, state }) {
                             <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(2,baseYear)}</th>
                             <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(1,baseYear)}</th>
                             <th style={{minWidth:90,textAlign:"center"}}>수입횟수 추이</th>
-                            <th style={{minWidth:80,textAlign:"right"}}>역량점수</th>
+                            <th style={{minWidth:60,textAlign:"center"}}>등급</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1884,13 +1891,7 @@ function ManufacturerDetail({ navigate, state }) {
                               <td style={{textAlign:"center"}}>
                                 <button className="trend-btn" onClick={e=>{e.stopPropagation();openMonthlyModal(r);}}>📈 추이 보기</button>
                               </td>
-                              <td style={{textAlign:"right"}}>
-                                {r.ranking_score!=null
-                                  ? <span className="badge" style={{background: r.ranking_score>=70?"#dcfce7":r.ranking_score>=40?"#fef9c3":"#fee2e2", color: r.ranking_score>=70?"#15803d":r.ranking_score>=40?"#92400e":"#b91c1c", minWidth:36, display:"inline-block", textAlign:"center"}}>
-                                      {Math.round(r.ranking_score)}점
-                                    </span>
-                                  : <span style={{color:"#9ca3af"}}>-</span>}
-                              </td>
+                              <td style={{textAlign:"center"}}><GradeBadge grade={r.ranking_grade}/></td>
                             </tr>
                           ))}
                           {filteredSkus.length===0&&<tr><td colSpan={11}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
@@ -2363,7 +2364,7 @@ function CountryDetail({ navigate, state }) {
                       <td>
                         <span className="score-cell">
                           {m.ranking_score!=null
-                            ? `${m.ranking_score.toFixed(1)}점${m.best_sku_name ? ` (${m.best_sku_name})` : ""}`
+                            ? <><GradeBadge grade={scoreToGrade(m.ranking_score)}/>{m.best_sku_name ? <span style={{marginLeft:4,fontSize:11,color:"#6b7280"}}>({m.best_sku_name})</span> : null}</>
                             : "-"}
                         </span>
                       </td>

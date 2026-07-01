@@ -126,6 +126,7 @@ class ManufacturerSkuRow(BaseModel):
     count_year2:   int           = 0
     count_year3:   int           = 0
     ranking_score: Optional[float] = None
+    ranking_grade: Optional[str] = Field(None, description="제조사 역량 등급 (A/B/C)")
 
 
 class ManufacturerDetailResponse(BaseModel):
