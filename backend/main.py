@@ -360,11 +360,18 @@ async def get_column_values(
         comp_parts = " OR ".join(f"importer ILIKE '%{a}%'" for a in aliases)
         conds.append(f"({comp_parts})")
 
+    source_sql = "sku_history_mv"
     if date_from or date_to:
+        # 날짜 필터가 있으면 그룹 전체 기간(latest/earliest)이 겹치는지가 아니라,
+        # 그 기간에 실제 거래가 있는 값만 옵션으로 내려줘야 하므로 원본에서 직접 조회.
         params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
         params["date_to"]   = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
-        conds.append("latest_import >= CAST(:date_from AS date)")
-        conds.append("earliest_import <= CAST(:date_to AS date)")
+        source_sql = """(
+            SELECT category, mc, sku_name, import_type, importer, manufacturer, factory, country, email
+            FROM import_history
+            WHERE COALESCE(import_date, process_date)
+                  BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
+        ) AS date_filtered_import_history"""
 
     col_filter_map = {
         "category": filter_category, "mc": filter_mc, "import_type": filter_import_type,
@@ -381,7 +388,7 @@ async def get_column_values(
     where_clause = " AND ".join(conds)
     r = await db.execute(text(f"""
         SELECT DISTINCT {col}
-        FROM sku_history_mv
+        FROM {source_sql}
         WHERE {where_clause}
         ORDER BY {col}
     """), params)
@@ -462,12 +469,33 @@ async def get_sku_history(
         params["search"] = f"%{search.strip()}%"
 
     if date_from or date_to:
+        # 날짜 필터가 있으면 전체 기간 집계 뷰(sku_history_mv)의 날짜 "범위 겹침"으로
+        # 판단하지 않고, 그 기간에 해당하는 원본 데이터만 즉석에서 재집계한다.
+        # (구체화 뷰는 그룹의 earliest~latest 전체 기간을 저장하므로, 그 범위가
+        # 검색 기간과 겹치기만 해도 실제 거래가 없는 기간까지 매칭되는 문제가 있었음)
         params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
         params["date_to"]   = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
         base_sql = f"""
-            FROM sku_history_mv
-            WHERE latest_import >= CAST(:date_from AS date)
-              AND earliest_import <= CAST(:date_to AS date)
+            FROM (
+                SELECT
+                    category, mc, sku_name, import_type, importer,
+                    COUNT(*)::int AS import_count,
+                    manufacturer, factory, country,
+                    MIN(email) AS email,
+                    MAX(COALESCE(import_date, process_date)) AS latest_import,
+                    EXTRACT(YEAR FROM CURRENT_DATE)::int AS base_year,
+                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
+                          = EXTRACT(YEAR FROM CURRENT_DATE) - 1 THEN 1 END)::int AS count_year1,
+                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
+                          = EXTRACT(YEAR FROM CURRENT_DATE) - 2 THEN 1 END)::int AS count_year2,
+                    COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
+                          = EXTRACT(YEAR FROM CURRENT_DATE) - 3 THEN 1 END)::int AS count_year3
+                FROM import_history
+                WHERE COALESCE(import_date, process_date)
+                      BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
+                GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+            ) AS date_filtered_sku_history
+            WHERE 1=1
             {search_cond}
             {competitor_cond}
             {col_filter_conds}
@@ -1480,13 +1508,33 @@ async def get_factory_view(
         )"""
         params["search"] = f"%{search.strip()}%"
 
-    # date 조건 — MV의 latest_import / earliest_import 활용
-    date_cond = ""
+    # date 필터가 있으면 전체 기간 집계 뷰(sku_history_mv) 대신, 그 기간에 해당하는
+    # 원본 데이터만 즉석에서 재집계한 걸 소스로 쓴다 (get_sku_history와 동일한 이유 —
+    # MV의 "그룹 전체 기간이 검색 기간과 겹치는지"가 아니라, 그 기간 내 실제 거래
+    # 존재 여부로 판단해야 함).
+    source_sql = "sku_history_mv"
     if date_from or date_to:
         params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
         params["date_to"]   = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
-        date_cond = """AND MAX(latest_import) >= CAST(:date_from AS date)
-                       AND MIN(earliest_import) <= CAST(:date_to AS date)"""
+        source_sql = """(
+            SELECT
+                category, mc, sku_name, import_type, importer,
+                COUNT(*)::int AS import_count,
+                manufacturer, factory, country,
+                MIN(email) AS email,
+                MAX(COALESCE(import_date, process_date)) AS latest_import,
+                EXTRACT(YEAR FROM CURRENT_DATE)::int AS base_year,
+                COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
+                      = EXTRACT(YEAR FROM CURRENT_DATE) - 1 THEN 1 END)::int AS count_year1,
+                COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
+                      = EXTRACT(YEAR FROM CURRENT_DATE) - 2 THEN 1 END)::int AS count_year2,
+                COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
+                      = EXTRACT(YEAR FROM CURRENT_DATE) - 3 THEN 1 END)::int AS count_year3
+            FROM import_history
+            WHERE COALESCE(import_date, process_date)
+                  BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
+            GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+        ) AS date_filtered_sku_history"""
 
     # importer를 제외한 컬럼 필터 (WHERE 절)
     col_filter_map = {
@@ -1514,10 +1562,7 @@ async def get_factory_view(
         having_conds += f" AND bool_or(importer IN ({in_clause}))"
         params.update(in_keys)
 
-    having_clause = f"HAVING 1=1 {having_conds}" if having_conds else ""
-
-    # date_cond는 GROUP 후 HAVING에 넣어야 함
-    having_full = f"HAVING 1=1 {having_conds} {date_cond}" if (having_conds or date_cond) else ""
+    having_full = f"HAVING 1=1 {having_conds}" if having_conds else ""
 
     sort_expr = sort_by if sort_by != "import_type" else "import_type"
 
@@ -1533,7 +1578,7 @@ async def get_factory_view(
             SUM(count_year2)::int                                                  AS count_year2,
             SUM(count_year3)::int                                                  AS count_year3,
             array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)       AS importers
-        FROM sku_history_mv
+        FROM {source_sql}
         WHERE 1=1
             {search_cond}
             {where_col_conds}
@@ -1546,7 +1591,7 @@ async def get_factory_view(
     count_sql = f"""
         SELECT COUNT(*) FROM (
             SELECT 1
-            FROM sku_history_mv
+            FROM {source_sql}
             WHERE 1=1
                 {search_cond}
                 {where_col_conds}
