@@ -1787,6 +1787,46 @@ async def rebuild_import_indexes(db: AsyncSession = Depends(get_db)):
         built.append(name)
     return {"status": "ok", "message": "import_history 인덱스 재생성 완료", "built": built}
 
+
+# ─── mc 컬럼 백필 (엑셀 파싱 버그로 mc가 유실된 행 보정) ────────────────────
+@app.post("/api/admin/backfill-mc")
+async def backfill_mc(db: AsyncSession = Depends(get_db)):
+    """
+    mc가 NULL인 행에 대해, 같은 (sku_name, importer, manufacturer, factory,
+    country, import_type) 조합 중 mc가 채워진 다른 행들에서 가장 흔한 값을
+    찾아 채워 넣는다. 원본 파일을 다시 읽지 않고 추정으로 채우는 것이므로
+    100% 정확하다고 보장하진 않는다.
+    """
+    import asyncio
+    result = await db.execute(text("""
+        WITH fill AS (
+            SELECT sku_name, importer, manufacturer, factory, country, import_type,
+                   MODE() WITHIN GROUP (ORDER BY mc) AS mc
+            FROM import_history
+            WHERE mc IS NOT NULL
+            GROUP BY sku_name, importer, manufacturer, factory, country, import_type
+        )
+        UPDATE import_history t
+        SET mc = fill.mc
+        FROM fill
+        WHERE t.mc IS NULL
+          AND t.sku_name = fill.sku_name
+          AND t.importer     IS NOT DISTINCT FROM fill.importer
+          AND t.manufacturer IS NOT DISTINCT FROM fill.manufacturer
+          AND t.factory      IS NOT DISTINCT FROM fill.factory
+          AND t.country      IS NOT DISTINCT FROM fill.country
+          AND t.import_type  IS NOT DISTINCT FROM fill.import_type
+    """))
+    await db.commit()
+
+    asyncio.create_task(refresh_mvs())
+
+    return {
+        "status": "ok",
+        "message": "mc 백필 완료",
+        "updated_rows": result.rowcount,
+    }
+
 # ─── 빠른 데이터 확인 ────────────────────────────────────────────────────────
 @app.get("/api/quick-check")
 async def quick_check(db: AsyncSession = Depends(get_db)):
