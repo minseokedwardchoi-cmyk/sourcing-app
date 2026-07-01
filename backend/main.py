@@ -232,6 +232,16 @@ class RefreshCountryStatsResponse(BaseModel):
     errors: list[str]
 
 
+@app.get("/api/debug-countries")
+async def debug_countries(db: AsyncSession = Depends(get_db)):
+    from stats_fetcher import KO_TO_CODE
+    rows = await db.execute(text("SELECT DISTINCT country FROM import_history WHERE country IS NOT NULL ORDER BY country"))
+    db_countries = [r[0] for r in rows.fetchall()]
+    mapped = [c for c in db_countries if c in KO_TO_CODE]
+    unmapped = [c for c in db_countries if c not in KO_TO_CODE]
+    return {"total": len(db_countries), "mapped": mapped, "unmapped": unmapped}
+
+
 @app.post("/api/refresh-country-stats", response_model=RefreshCountryStatsResponse)
 async def refresh_country_stats(year: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     """
