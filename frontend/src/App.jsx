@@ -1814,7 +1814,7 @@ function CountryDetail({ navigate, state }) {
                 {summary.has_amount_stats ? (
                   <div className="country-rank-line">
                     대한민국 수입금액 기준 국가 순위 <strong>{summary.amount_rank}위</strong>
-                    {" "}(비중 {summary.amount_share_pct}%)
+                    {" "}(비중 {summary.amount_share_pct}%) ({new Date().getFullYear() - 1}년 기준)
                   </div>
                 ) : (
                   <div className="country-rank-line muted">수입금액 통계 없음</div>
@@ -1851,7 +1851,7 @@ function CountryDetail({ navigate, state }) {
             : topItems.items;
           return (
             <div className="card" style={{marginTop:12}}>
-              <div className="card-header"><span className="card-title">📊 국가별 주요 수입품목 TOP10</span></div>
+              <div className="card-header"><span className="card-title">📊 국가별 주요 수입품목 TOP10 ({new Date().getFullYear() - 1}년 기준)</span></div>
               <div className="card-body country-top-items">
                 <PieChart slices={legendItems.map((it,i)=>({value:it.pct, label: it.isOther ? "기타" : `${it.rank}. ${it.name}`, color: it.isOther ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}))} size={140}/>
                 <div className="country-pie-legend country-top-legend">
@@ -2121,7 +2121,7 @@ function CountryMapPage({ navigate }) {
                 background:"rgba(255,255,255,0.92)", border:"1px solid #e5e7eb", borderRadius:8,
                 padding:"10px 12px", fontSize:12, color:"#374151", boxShadow:"0 1px 4px rgba(0,0,0,.08)",
               }}>
-                <div style={{fontWeight:700, marginBottom:6}}>대한민국 수입금액 기준 국가 순위</div>
+                <div style={{fontWeight:700, marginBottom:6}}>대한민국 수입금액 기준 국가 순위 ({new Date().getFullYear() - 1}년 기준)</div>
                 {amountShare.items.map((it,i)=>(
                   <div key={it.country} style={{display:"flex", alignItems:"center", gap:5, whiteSpace:"nowrap", marginBottom:2}}>
                     <span className="legend-dot" style={{background: it.is_other ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}}/>
