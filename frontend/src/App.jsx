@@ -1860,15 +1860,15 @@ function ManufacturerDetail({ navigate, state }) {
                           <tr>
                             <th style={{minWidth:80}}><div className="th-inner"><span className="th-label">구분</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.category||null} activeSortCol={false} activeSortDir="asc" localValues={skuCategoryVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,category:vals}))}/></div></th>
                             <th style={{minWidth:100}}><div className="th-inner"><span className="th-label">MC</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.mc||null} activeSortCol={false} activeSortDir="asc" localValues={skuMcVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,mc:vals}))}/></div></th>
-                            <th style={{minWidth:260}}>제품명</th>
+                            <th style={{minWidth:240}}>제품명</th>
                             <th style={{minWidth:70}}>OEM/수입</th>
                             <th style={{minWidth:180}}>수입업체</th>
-                            <th className="col-highlight" style={{minWidth:60,textAlign:"right"}}>수입횟수(전체)</th>
-                            <th className="col-highlight" style={{minWidth:54,textAlign:"right"}}>{yearLabel(3,baseYear)}</th>
-                            <th className="col-highlight" style={{minWidth:54,textAlign:"right"}}>{yearLabel(2,baseYear)}</th>
-                            <th className="col-highlight" style={{minWidth:54,textAlign:"right"}}>{yearLabel(1,baseYear)}</th>
-                            <th style={{minWidth:80,textAlign:"center"}}>수입횟수 추이</th>
-                            <th style={{minWidth:60,textAlign:"center"}}>등급</th>
+                            <th className="col-highlight" style={{width:72,minWidth:72,maxWidth:72,textAlign:"center"}}>수입횟수(전체)</th>
+                            <th className="col-highlight" style={{width:56,minWidth:56,maxWidth:56,textAlign:"center"}}>{yearLabel(3,baseYear)}</th>
+                            <th className="col-highlight" style={{width:56,minWidth:56,maxWidth:56,textAlign:"center"}}>{yearLabel(2,baseYear)}</th>
+                            <th className="col-highlight" style={{width:56,minWidth:56,maxWidth:56,textAlign:"center"}}>{yearLabel(1,baseYear)}</th>
+                            <th style={{width:82,minWidth:82,maxWidth:82,textAlign:"center"}}>수입횟수 추이</th>
+                            <th style={{width:56,minWidth:56,maxWidth:56,textAlign:"center"}}>등급</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1884,10 +1884,10 @@ function ManufacturerDetail({ navigate, state }) {
                               </td>
                               <td style={{padding:"8px 4px",textAlign:"center"}}><OemBadge value={r.import_type}/></td>
                               <td>{renderImporters(r.importers)}</td>
-                              <td className="col-highlight"><span className="badge b-count">{r.import_count}</span></td>
-                              <td className="col-highlight"><span style={{color:(r.count_year3||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year3||0)>0?600:400}}>{(r.count_year3||0)>0?r.count_year3:"-"}</span></td>
-                              <td className="col-highlight"><span style={{color:(r.count_year2||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year2||0)>0?600:400}}>{(r.count_year2||0)>0?r.count_year2:"-"}</span></td>
-                              <td className="col-highlight"><span style={{color:(r.count_year1||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year1||0)>0?600:400}}>{(r.count_year1||0)>0?r.count_year1:"-"}</span></td>
+                              <td className="col-highlight" style={{textAlign:"center"}}><span className="badge b-count">{r.import_count}</span></td>
+                              <td className="col-highlight" style={{textAlign:"center"}}><span style={{color:(r.count_year3||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year3||0)>0?600:400}}>{(r.count_year3||0)>0?r.count_year3:"-"}</span></td>
+                              <td className="col-highlight" style={{textAlign:"center"}}><span style={{color:(r.count_year2||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year2||0)>0?600:400}}>{(r.count_year2||0)>0?r.count_year2:"-"}</span></td>
+                              <td className="col-highlight" style={{textAlign:"center"}}><span style={{color:(r.count_year1||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year1||0)>0?600:400}}>{(r.count_year1||0)>0?r.count_year1:"-"}</span></td>
                               <td style={{textAlign:"center"}}>
                                 <button className="trend-btn" onClick={e=>{e.stopPropagation();openMonthlyModal(r);}}>📈 추이 보기</button>
                               </td>
