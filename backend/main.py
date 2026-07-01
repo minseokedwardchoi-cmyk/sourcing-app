@@ -616,49 +616,89 @@ async def get_sku_factories(
     country_filter: Optional[str] = Query(None),
     has_contact:    Optional[bool] = Query(None),
     oem_possible:   Optional[bool] = Query(None),
+    date_from:      Optional[str]  = Query(None),
+    date_to:        Optional[str]  = Query(None),
     page:           int           = Query(1,  ge=1),
     page_size:      int           = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
     similar_skus = [sku_name]
-
-    # 추가 필터 조건
-    extra_conds = []
-    params: dict = {"sku_name": sku_name}
-
-    if country_filter:
-        extra_conds.append("country = :country")
-        params["country"] = country_filter
-    if has_contact is True:
-        extra_conds.append("(email IS NOT NULL OR homepage IS NOT NULL)")
-    if has_contact is False:
-        extra_conds.append("(email IS NULL AND homepage IS NULL)")
-    if oem_possible is True:
-        extra_conds.append("oem_status ILIKE '%가능%'")
-    if search and search.strip():
-        extra_conds.append("(factory ILIKE :q OR country ILIKE :q OR importers::text ILIKE :q)")
-        params["q"] = f"%{search.strip()}%"
-
-    extra_where = ("AND " + " AND ".join(extra_conds)) if extra_conds else ""
-
-    in_params = {f"s{i}": s for i, s in enumerate(similar_skus)}
-    in_clause = ", ".join(f":s{i}" for i in range(len(similar_skus)))
-
-    # 랭킹 점수는 검색/필터와 무관하게 유사 SKU 제조사 집단 전체를 기준으로 계산한다
     rankings = await compute_factory_rankings(db, similar_skus)
 
-    agg_sql = f"""
-        SELECT sku_name, factory, manufacturer, country, mc,
-               import_count, email, homepage, oem_status, import_types, importers
-        FROM sku_factory_mv
-        WHERE sku_name IN ({in_clause})
-        {extra_where}
-    """
+    params: dict = {"sku_name": sku_name}
 
-    all_params = {**params, **in_params}
+    if date_from or date_to:
+        # 날짜 필터가 있을 때: import_history 직접 집계 후 MV에서 email/homepage 보완
+        df = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
+        dt = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
+        params["df"] = df
+        params["dt"] = dt
 
-    rows_r = await db.execute(text(agg_sql), all_params)
-    rows   = rows_r.mappings().all()
+        date_extra_conds = ["COALESCE(import_date, process_date) BETWEEN :df AND :dt"]
+        if search and search.strip():
+            date_extra_conds.append("(factory ILIKE :q OR country ILIKE :q OR importer ILIKE :q)")
+            params["q"] = f"%{search.strip()}%"
+        if country_filter:
+            date_extra_conds.append("country = :country")
+            params["country"] = country_filter
+
+        date_where = " AND ".join(date_extra_conds)
+
+        agg_sql = f"""
+            WITH base AS (
+                SELECT factory, manufacturer, country, mc,
+                       COUNT(*) AS import_count,
+                       ARRAY_AGG(DISTINCT import_type) FILTER (WHERE import_type IS NOT NULL) AS import_types,
+                       ARRAY_AGG(DISTINCT importer)    FILTER (WHERE importer IS NOT NULL)    AS importers
+                FROM import_history
+                WHERE sku_name = :sku_name AND {date_where}
+                GROUP BY factory, manufacturer, country, mc
+            )
+            SELECT b.factory, b.manufacturer, b.country, b.mc, b.import_count,
+                   b.import_types, b.importers,
+                   mv.email, mv.homepage, mv.oem_status
+            FROM base b
+            LEFT JOIN sku_factory_mv mv ON mv.factory = b.factory AND mv.sku_name = :sku_name
+        """
+        rows_r = await db.execute(text(agg_sql), params)
+        rows = rows_r.mappings().all()
+
+        # has_contact / oem_possible 후처리 필터
+        if has_contact is True:
+            rows = [r for r in rows if r["email"] or r["homepage"]]
+        elif has_contact is False:
+            rows = [r for r in rows if not r["email"] and not r["homepage"]]
+        if oem_possible is True:
+            rows = [r for r in rows if r["oem_status"] and "가능" in r["oem_status"]]
+    else:
+        # 날짜 필터 없을 때: MV 사용 (빠름)
+        extra_conds = []
+        if country_filter:
+            extra_conds.append("country = :country")
+            params["country"] = country_filter
+        if has_contact is True:
+            extra_conds.append("(email IS NOT NULL OR homepage IS NOT NULL)")
+        if has_contact is False:
+            extra_conds.append("(email IS NULL AND homepage IS NULL)")
+        if oem_possible is True:
+            extra_conds.append("oem_status ILIKE '%가능%'")
+        if search and search.strip():
+            extra_conds.append("(factory ILIKE :q OR country ILIKE :q OR importers::text ILIKE :q)")
+            params["q"] = f"%{search.strip()}%"
+
+        extra_where = ("AND " + " AND ".join(extra_conds)) if extra_conds else ""
+        in_params = {f"s{i}": s for i, s in enumerate(similar_skus)}
+        in_clause = ", ".join(f":s{i}" for i in range(len(similar_skus)))
+
+        agg_sql = f"""
+            SELECT sku_name, factory, manufacturer, country, mc,
+                   import_count, email, homepage, oem_status, import_types, importers
+            FROM sku_factory_mv
+            WHERE sku_name IN ({in_clause})
+            {extra_where}
+        """
+        rows_r = await db.execute(text(agg_sql), {**params, **in_params})
+        rows = rows_r.mappings().all()
 
     # 종합점수 내림차순 정렬 (동점 시 기존 import_count 내림차순 유지)
     rows = sorted(

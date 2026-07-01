@@ -103,12 +103,14 @@ export async function fetchMonthlyImportCounts(row, dateFrom, dateTo) {
 }
 
 /** SKU 취급 제조사 목록 */
-export function fetchSkuFactories(skuName, { search, countryFilter, hasContact, oemPossible, page, pageSize } = {}) {
+export function fetchSkuFactories(skuName, { search, countryFilter, hasContact, oemPossible, dateFrom, dateTo, page, pageSize } = {}) {
   return request(`/api/sku/${encodeURIComponent(skuName)}/factories`, {
     search,
     country_filter: countryFilter,
     has_contact:    hasContact,
     oem_possible:   oemPossible,
+    date_from:      dateFrom,
+    date_to:        dateTo,
     page,
     page_size: pageSize,
   });
