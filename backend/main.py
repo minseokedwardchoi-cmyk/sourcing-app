@@ -1732,10 +1732,15 @@ async def drop_import_indexes(db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/admin/rebuild-import-indexes")
 async def rebuild_import_indexes(db: AsyncSession = Depends(get_db)):
-    for _, ddl in _IMPORT_HISTORY_INDEXES:
+    # 인덱스마다 바로 커밋 — 큰 인덱스(예: ix_agg_key)의 정렬용 임시 파일이
+    # 다음 인덱스를 만들기 전에 정리되도록 해서 순간 디스크 사용량을 줄인다.
+    # 또한 중간에 실패해도 이미 만든 인덱스는 남아있어 재실행 시 다시 안 만들어도 됨.
+    built = []
+    for name, ddl in _IMPORT_HISTORY_INDEXES:
         await db.execute(text(ddl))
-    await db.commit()
-    return {"status": "ok", "message": "import_history 인덱스 재생성 완료"}
+        await db.commit()
+        built.append(name)
+    return {"status": "ok", "message": "import_history 인덱스 재생성 완료", "built": built}
 
 # ─── 빠른 데이터 확인 ────────────────────────────────────────────────────────
 @app.get("/api/quick-check")

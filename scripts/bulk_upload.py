@@ -45,13 +45,65 @@ MAX_RETRIES = 3
 VERIFY_WAIT = 5  # 타임아웃 후 서버에 실제 반영됐는지 확인하기 전 대기 시간(초)
 
 
+# 백엔드 importer.py의 FIELD_MAP 키(헤더로 쓰이는 한글/영문 컬럼명들). 첫 행이
+# 이 중 하나라도 포함하면 "헤더 있는 파일"로 판단한다. 없으면 헤더가 없는
+# 파일로 보고 컬럼 수에 따라 위치 기준으로 이름을 붙인다 (헤더가 없는데도
+# header=0으로 읽으면 첫 데이터 행이 컬럼명이 되어, 그 값이 날짜 등일 경우
+# json 직렬화 시 "keys must be str..." 에러가 남).
+_FIELD_MAP_KEYS = {
+    "구분", "분류", "MC", "자사MC", "자사 MC", "카테고리",
+    "제품명(한글)", "제품명", "상품명", "SKU명", "SKU", "품목명",
+    "수입업체", "수입사", "수입/OEM업체", "거래한 유통사",
+    "OEM여부", "OEM 여부", "OEM/수입", "수입/OEM",
+    "해외제조업소", "해외 제조업소", "해외제조업체", "제조업소", "제조사", "제조업체",
+    "제조국", "제조국가", "국가",
+    "이메일", "연락처", "email", "Email",
+    "수입처리일자", "처리일자", "처리 일자", "수입일자", "수입 일자",
+}
+_HEADERLESS_COLS = ["category", "mc", "sku_name", "importer", "import_type", "factory", "country"]
+
+
+def load_excel(path: str) -> list[dict]:
+    df_raw = pd.read_excel(path, engine="openpyxl", header=None)
+    df_raw = df_raw.dropna(how="all").dropna(axis=1, how="all")
+    if df_raw.empty:
+        return []
+
+    first_row_values = {
+        str(v).strip() for v in df_raw.iloc[0].tolist() if pd.notna(v) and str(v).strip()
+    }
+    has_header = bool(first_row_values & _FIELD_MAP_KEYS)
+
+    if has_header:
+        headers = [str(v).strip() if pd.notna(v) else "" for v in df_raw.iloc[0].tolist()]
+        df = df_raw.iloc[1:].copy()
+        df.columns = headers
+    else:
+        df = df_raw.copy()
+        n_cols = len(df.columns)
+        if n_cols == 6:
+            df.columns = ["category", "mc", "sku_name", "importer", "factory", "country"]
+        elif n_cols == 7:
+            df.columns = _HEADERLESS_COLS
+        elif n_cols == 8:
+            df.columns = _HEADERLESS_COLS + ["email"]
+        else:
+            base_cols = _HEADERLESS_COLS.copy()
+            if n_cols <= len(base_cols):
+                df.columns = base_cols[:n_cols]
+            else:
+                df.columns = base_cols + [f"extra_{i}" for i in range(n_cols - len(base_cols))]
+
+    df = df.where(pd.notnull(df), None)
+    return df.to_dict(orient="records")
+
+
 def load_rows(path: str) -> list[dict]:
     if path.lower().endswith(".csv"):
         df = pd.read_csv(path)
-    else:
-        df = pd.read_excel(path)
-    df = df.where(pd.notnull(df), None)
-    return df.to_dict(orient="records")
+        df = df.where(pd.notnull(df), None)
+        return df.to_dict(orient="records")
+    return load_excel(path)
 
 
 def fetch_total_count(base_url: str, timeout: int = 30) -> int | None:
