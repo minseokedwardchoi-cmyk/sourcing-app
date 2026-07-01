@@ -130,6 +130,7 @@ const styles = `
   .contact-edit-box { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f3f5; }
   .contact-edit-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: #374151; }
   .contact-edit-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .contact-edit-inline { grid-template-columns: minmax(180px, 260px) minmax(160px, 240px); align-items: end; column-gap: 12px; }
   .contact-edit-field label { display: block; font-size: 11px; color: #6b7280; margin-bottom: 4px; }
   .contact-edit-field input { width: 100%; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; outline: none; background: #f9fafb; color: #1a1a2e; }
   .contact-edit-field input:focus { border-color: #16a34a; background: #fff; }
@@ -1607,7 +1608,7 @@ function ManufacturerDetail({ navigate, state }) {
       <div className="contact-edit-title">연락처 직접 입력</div>
 
       {/* 컨택 상태 + MD명 */}
-      <div className="contact-edit-grid" style={{marginBottom:0}}>
+      <div className="contact-edit-grid contact-edit-inline" style={{marginBottom:0}}>
         <div className="contact-edit-field">
           <label>컨택 여부</label>
           <ContactStatusSelect
