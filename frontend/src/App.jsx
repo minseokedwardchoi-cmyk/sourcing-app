@@ -14,7 +14,7 @@ import {
   fetchFactoryView, fetchFactoryViewMonthly,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
-import worldGeoData from "world-atlas/countries-110m.json";
+import worldGeoData from "world-atlas/countries-50m.json";
 
 // ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
 const COMPETITORS = ["전체", "홈플러스", "이마트", "롯데마트", "쿠팡", "코스트코"];
