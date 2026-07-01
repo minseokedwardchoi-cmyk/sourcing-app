@@ -329,7 +329,7 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
           {activeSortCol && activeSortDir === "desc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
         </button>
       </div>
-      {colKey ? (
+      {(colKey || localValues) ? (
         <>
           <div className="filter-search-section">
             <input className="filter-search" placeholder="검색..." value={search} onChange={e => setSearch(e.target.value)}/>
@@ -2050,18 +2050,6 @@ function CountryDetail({ navigate, state }) {
     setPage(1);
   }
 
-  function resetFilters() {
-    setSearch(""); setDebSearch(""); setMcFilter(""); setDateFrom(""); setDateTo(""); setColFilters({});
-  }
-
-  const activeFilters = [];
-  if (debSearch) activeFilters.push(`검색: "${debSearch}"`);
-  if (mcFilter)  activeFilters.push(`MC: ${mcFilter}`);
-  if (colFilters.mfr_name?.length)           activeFilters.push(`제조사: ${colFilters.mfr_name.join(", ")}`);
-  if (colFilters.sku_count?.length)          activeFilters.push(`SKU수: ${colFilters.sku_count.join(", ")}`);
-  if (colFilters.top5_grade?.length)         activeFilters.push(`탑5: ${colFilters.top5_grade.join(", ")}`);
-  if (colFilters.import_count_grade?.length) activeFilters.push(`수입횟수 등급: ${colFilters.import_count_grade.join(", ")}`);
-  if (colFilters.growth_grade?.length)       activeFilters.push(`성장추세: ${colFilters.growth_grade.join(", ")}`);
 
   if (!country) {
     return (
@@ -2173,12 +2161,6 @@ function CountryDetail({ navigate, state }) {
             <span className="count-label">{mfrRes ? `${filteredMfr.length}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredMfr,"country_manufacturers.csv")}>⬇ CSV</button>
           </div>
-          {activeFilters.length > 0 && (
-            <div className="filter-bar">
-              <span className="filter-label">적용된 필터: {activeFilters.join(" / ")}</span>
-              <button className="icon-btn" onClick={resetFilters}>필터 초기화</button>
-            </div>
-          )}
           <div className="table-wrap">
             <table>
               <thead>
