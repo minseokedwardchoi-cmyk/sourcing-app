@@ -20,11 +20,27 @@ async function request(path, params = {}) {
   return res.json();
 }
 
-/** 컬럼별 고유값 목록 */
-export async function fetchColumnValues(col, search = "") {
+/** 컬럼별 고유값 목록 (contextParams로 현재 필터 컨텍스트 전달) */
+export async function fetchColumnValues(col, contextParams = {}) {
   const url = new URL(`${BASE_URL}/api/column-values`, window.location.origin);
   url.searchParams.set("col", col);
+  const { search, competitor, dateFrom, dateTo, colFilters } = contextParams;
   if (search) url.searchParams.set("search", search);
+  if (competitor && competitor !== "전체") url.searchParams.set("competitor", competitor);
+  if (dateFrom) url.searchParams.set("date_from", dateFrom);
+  if (dateTo)   url.searchParams.set("date_to", dateTo);
+  const colMap = {
+    category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
+    importer: "filter_importer", country: "filter_country", factory: "filter_factory",
+    email: "filter_email", sku_name: "filter_sku_name",
+  };
+  if (colFilters) {
+    Object.entries(colFilters).forEach(([k, vals]) => {
+      if (vals && vals.length > 0 && colMap[k]) {
+        vals.forEach(v => url.searchParams.append(colMap[k], v));
+      }
+    });
+  }
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error("컬럼값 로드 실패");
   return res.json();
@@ -99,8 +115,11 @@ export function fetchSkuFactories(skuName, { search, countryFilter, hasContact, 
 }
 
 /** 제조사 상세 정보 */
-export function fetchManufacturerDetail(manufacturer, factory) {
-  return request("/api/manufacturer", { manufacturer, factory });
+export function fetchManufacturerDetail(manufacturer, factory, { skuSearch, dateFrom, dateTo } = {}) {
+  return request("/api/manufacturer", {
+    manufacturer, factory,
+    sku_search: skuSearch, date_from: dateFrom, date_to: dateTo,
+  });
 }
 
 /** DB 통계 */
@@ -219,9 +238,10 @@ export function fetchCountryTopItems(country) {
 }
 
 /** 국가 상세: 제조사 목록 */
-export function fetchCountryManufacturers(country, { mc, query, sortBy, sortOrder, page, pageSize } = {}) {
+export function fetchCountryManufacturers(country, { mc, query, sortBy, sortOrder, page, pageSize, dateFrom, dateTo } = {}) {
   return request(`/api/countries/${encodeURIComponent(country)}/manufacturers`, {
     mc, query, sort_by: sortBy, sort_order: sortOrder, page, page_size: pageSize,
+    date_from: dateFrom, date_to: dateTo,
   });
 }
 
