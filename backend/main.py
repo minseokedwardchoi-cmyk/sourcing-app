@@ -104,60 +104,12 @@ _MV_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sfmv_count      ON sku_factory_mv (import_count DESC)",
 ]
 
-async def _build_indexes_bg():
-    """인덱스 생성을 백그라운드에서 실행 (헬스체크 타임아웃 방지)"""
+async def _startup_bg():
+    """MV 생성 + 인덱스 생성을 백그라운드에서 실행 (startup 락 충돌 방지)"""
     import asyncio
-    await asyncio.sleep(2)
+    await asyncio.sleep(3)
+    # MV 생성/마이그레이션
     async with engine.begin() as conn:
-        for sql in _MV_INDEXES:
-            try:
-                await conn.execute(text(sql))
-            except Exception:
-                pass
-        for sql in [
-            "CREATE INDEX IF NOT EXISTS idx_ih_sku_name     ON import_history (sku_name)",
-            "CREATE INDEX IF NOT EXISTS idx_ih_factory      ON import_history (factory)",
-            "CREATE INDEX IF NOT EXISTS idx_ih_mfr          ON import_history (manufacturer)",
-            "CREATE INDEX IF NOT EXISTS idx_ih_process_date ON import_history (process_date)",
-            "CREATE INDEX IF NOT EXISTS idx_ih_import_date  ON import_history (import_date)",
-            "CREATE INDEX IF NOT EXISTS idx_ih_coalesce_date ON import_history (COALESCE(import_date, process_date))",
-            "CREATE INDEX IF NOT EXISTS idx_ih_gin_sku      ON import_history USING gin (sku_name      gin_trgm_ops)",
-            "CREATE INDEX IF NOT EXISTS idx_ih_gin_factory  ON import_history USING gin (factory       gin_trgm_ops)",
-            "CREATE INDEX IF NOT EXISTS idx_ih_gin_importer ON import_history USING gin (importer      gin_trgm_ops)",
-        ]:
-            try:
-                await conn.execute(text(sql))
-            except Exception:
-                pass
-    print("INDEX BUILD COMPLETE")
-
-_SKU_HISTORY_MV_SQL = """
-    CREATE MATERIALIZED VIEW sku_history_mv AS
-    SELECT
-        category, mc, sku_name, import_type, importer,
-        COUNT(*)                                AS import_count,
-        manufacturer, factory, country,
-        MIN(email)                              AS email,
-        MAX(COALESCE(import_date, process_date)) AS latest_import,
-        MIN(COALESCE(import_date, process_date)) AS earliest_import,
-        EXTRACT(YEAR FROM CURRENT_DATE)::int    AS base_year,
-        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
-              THEN 1 END)::int                  AS count_year1,
-        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
-              THEN 1 END)::int                  AS count_year2,
-        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
-              THEN 1 END)::int                  AS count_year3
-    FROM import_history
-    GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
-"""
-
-@app.on_event("startup")
-async def startup():
-    import asyncio
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-
         col_check = await conn.execute(text("""
             SELECT column_name FROM information_schema.columns
             WHERE table_name = 'sku_history_mv' AND column_name = 'earliest_import'
@@ -183,23 +135,69 @@ async def startup():
             FROM import_history
             GROUP BY sku_name, factory, manufacturer, country, mc
         """))
-        await _seed_country_stats(conn)
 
-        # B-tree 인덱스만 startup에서 생성 (빠름, 락 없음)
+        # UNIQUE 인덱스 (CONCURRENTLY refresh 필수)
         for sql in [
-            "CREATE INDEX IF NOT EXISTS idx_ih_process_date  ON import_history (process_date)",
-            "CREATE INDEX IF NOT EXISTS idx_ih_import_date   ON import_history (import_date)",
-            "CREATE INDEX IF NOT EXISTS idx_ih_coalesce_date ON import_history (COALESCE(import_date, process_date))",
-            "CREATE INDEX IF NOT EXISTS idx_ih_sku_name      ON import_history (sku_name)",
-            # CONCURRENTLY refresh를 위한 MV UNIQUE 인덱스
             """CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_unique_key ON sku_history_mv
                (sku_name, import_type, importer, manufacturer, factory, country, category, mc)""",
             """CREATE UNIQUE INDEX IF NOT EXISTS idx_sfmv_unique_key ON sku_factory_mv
                (sku_name, factory, manufacturer, country, mc)""",
         ]:
-            await conn.execute(text(sql))
+            try:
+                await conn.execute(text(sql))
+            except Exception:
+                pass
 
-    asyncio.create_task(_build_indexes_bg())
+    # GIN/B-tree 인덱스
+    await asyncio.sleep(1)
+    async with engine.begin() as conn:
+        for sql in _MV_INDEXES + [
+            "CREATE INDEX IF NOT EXISTS idx_ih_sku_name      ON import_history (sku_name)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_factory       ON import_history (factory)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_mfr           ON import_history (manufacturer)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_process_date  ON import_history (process_date)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_import_date   ON import_history (import_date)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_coalesce_date ON import_history (COALESCE(import_date, process_date))",
+            "CREATE INDEX IF NOT EXISTS idx_ih_gin_sku       ON import_history USING gin (sku_name      gin_trgm_ops)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_gin_factory   ON import_history USING gin (factory       gin_trgm_ops)",
+            "CREATE INDEX IF NOT EXISTS idx_ih_gin_importer  ON import_history USING gin (importer      gin_trgm_ops)",
+        ]:
+            try:
+                await conn.execute(text(sql))
+            except Exception:
+                pass
+    print("STARTUP BG COMPLETE")
+
+_SKU_HISTORY_MV_SQL = """
+    CREATE MATERIALIZED VIEW sku_history_mv AS
+    SELECT
+        category, mc, sku_name, import_type, importer,
+        COUNT(*)                                AS import_count,
+        manufacturer, factory, country,
+        MIN(email)                              AS email,
+        MAX(COALESCE(import_date, process_date)) AS latest_import,
+        MIN(COALESCE(import_date, process_date)) AS earliest_import,
+        EXTRACT(YEAR FROM CURRENT_DATE)::int    AS base_year,
+        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
+              THEN 1 END)::int                  AS count_year1,
+        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
+              THEN 1 END)::int                  AS count_year2,
+        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
+              THEN 1 END)::int                  AS count_year3
+    FROM import_history
+    GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+"""
+
+@app.on_event("startup")
+async def startup():
+    import asyncio
+    # startup은 최소한만 실행 — 인덱스/MV 생성은 락 충돌로 배포 실패 유발 가능
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        await _seed_country_stats(conn)
+
+    asyncio.create_task(_startup_bg())
 
 
 
