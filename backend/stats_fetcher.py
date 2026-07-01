@@ -37,7 +37,6 @@ _HEADERS = {
                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer":           _MAIN_URL,
     "Origin":            _ORIGIN,
-    "Content-Type":      "application/x-www-form-urlencoded; charset=UTF-8",
     "Accept":            "application/json, text/javascript, */*; q=0.01",
     "Accept-Language":   "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     "X-Requested-With":  "XMLHttpRequest",
