@@ -1356,6 +1356,57 @@ function SkuManufacturers({ navigate, state }) {
   );
 }
 
+// ─── 컨택 상태 드롭다운 (커스텀 옵션 추가 가능) ────────────────────────────────
+const DEFAULT_CONTACT_STATUSES = ["컨택이력 없음", "컨택 중", "거래 성사"];
+const LS_KEY_CONTACT_STATUSES = "mfr_contact_statuses_v1";
+
+function ContactStatusSelect({ value, onChange }) {
+  const [options, setOptions] = React.useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_KEY_CONTACT_STATUSES) || "null");
+      if (Array.isArray(saved) && saved.length > 0) return saved;
+    } catch {}
+    return DEFAULT_CONTACT_STATUSES;
+  });
+  const [newOpt, setNewOpt] = React.useState("");
+  const [adding, setAdding] = React.useState(false);
+
+  function addOption() {
+    const trimmed = newOpt.trim();
+    if (!trimmed || options.includes(trimmed)) { setAdding(false); setNewOpt(""); return; }
+    const updated = [...options, trimmed];
+    setOptions(updated);
+    localStorage.setItem(LS_KEY_CONTACT_STATUSES, JSON.stringify(updated));
+    onChange(trimmed);
+    setAdding(false);
+    setNewOpt("");
+  }
+
+  return (
+    <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{flex:1,minWidth:120,padding:"4px 6px",borderRadius:4,border:"1px solid #d1d5db",fontSize:13}}
+      >
+        <option value="">-- 선택 --</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+      {!adding
+        ? <button type="button" onClick={()=>setAdding(true)} title="항목 추가"
+            style={{fontSize:11,padding:"3px 7px",borderRadius:4,border:"1px solid #d1d5db",background:"#f9fafb",cursor:"pointer",whiteSpace:"nowrap"}}>+ 추가</button>
+        : <>
+            <input value={newOpt} onChange={e=>setNewOpt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addOption();if(e.key==="Escape"){setAdding(false);setNewOpt("");}}}
+              placeholder="새 항목" autoFocus
+              style={{width:90,padding:"3px 6px",borderRadius:4,border:"1px solid #6366f1",fontSize:12}}/>
+            <button type="button" onClick={addOption} style={{fontSize:11,padding:"3px 7px",borderRadius:4,border:"none",background:"#6366f1",color:"#fff",cursor:"pointer"}}>확인</button>
+            <button type="button" onClick={()=>{setAdding(false);setNewOpt("");}} style={{fontSize:11,padding:"3px 7px",borderRadius:4,border:"1px solid #d1d5db",background:"#f9fafb",cursor:"pointer"}}>취소</button>
+          </>
+      }
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // PAGE 3: 제조사 상세
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1371,6 +1422,8 @@ function ManufacturerDetail({ navigate, state }) {
     email: "",
     homepage: "",
     certificates: "",
+    contact_status: "",
+    md_name: "",
   });
   const [contactSaving, setContactSaving] = useState(false);
   const [contactMsg, setContactMsg] = useState(null);
@@ -1390,15 +1443,20 @@ function ManufacturerDetail({ navigate, state }) {
 
   const filteredSkus = useMemo(() => {
     let skus = res?.skus || [];
+    const q = skuDebSearch.toLowerCase();
+    if (q) skus = skus.filter(r =>
+      (r.sku_name||"").toLowerCase().includes(q) ||
+      (r.mc||"").toLowerCase().includes(q) ||
+      (r.category||"").toLowerCase().includes(q) ||
+      (r.importers||[]).some(i => i.toLowerCase().includes(q))
+    );
     if (skuColFilters.mc?.length)       skus = skus.filter(r => skuColFilters.mc.includes(r.mc));
     if (skuColFilters.category?.length) skus = skus.filter(r => skuColFilters.category.includes(r.category));
-    if (skuColFilters.importer?.length) skus = skus.filter(r => skuColFilters.importer.includes(r.importer));
     return skus;
-  }, [res, skuColFilters]);
+  }, [res, skuColFilters, skuDebSearch]);
 
   const skuMcVals       = useMemo(() => Array.from(new Set((res?.skus||[]).map(r=>r.mc).filter(Boolean))).sort(), [res]);
   const skuCategoryVals = useMemo(() => Array.from(new Set((res?.skus||[]).map(r=>r.category).filter(Boolean))).sort(), [res]);
-  const skuImporterVals = useMemo(() => Array.from(new Set((res?.skus||[]).map(r=>r.importer).filter(Boolean))).sort(), [res]);
 
   const d = res?.detail;
 
@@ -1409,6 +1467,8 @@ function ManufacturerDetail({ navigate, state }) {
       email: d.emails?.[0] || "",
       homepage: d.homepage || "",
       certificates: Array.isArray(d.certificates) ? d.certificates.join(", ") : "",
+      contact_status: d.contact_status || "",
+      md_name: d.md_name || "",
     });
     setContactMsg(null);
   }, [d]);
@@ -1437,6 +1497,8 @@ function ManufacturerDetail({ navigate, state }) {
         email: contactForm.email,
         homepage: contactForm.homepage,
         certificates: contactForm.certificates,
+        contact_status: contactForm.contact_status || null,
+        md_name: contactForm.md_name || null,
       });
 
       const refreshed = await fetchManufacturerDetail(manufacturer, factory);
@@ -1511,12 +1573,28 @@ function ManufacturerDetail({ navigate, state }) {
                       {d.homepage ? <a href={d.homepage} target="_blank" rel="noopener noreferrer" className="detail-link">{d.homepage}</a> : "-"}
                     </div>
                   </div>
-                  <div className="detail-row">
-                    <div className="dk">연락 상태</div>
-                    <div className="dv">{d.emails?.length ? <span className="badge b-green">연락처 확보</span> : <span className="badge b-gray">미확보</span>}</div>
-                  </div>
-                      <div className="contact-edit-box">
+                  <div className="contact-edit-box">
       <div className="contact-edit-title">연락처 직접 입력</div>
+
+      {/* 컨택 상태 + MD명 */}
+      <div className="contact-edit-grid" style={{marginBottom:0}}>
+        <div className="contact-edit-field">
+          <label>컨택 여부</label>
+          <ContactStatusSelect
+            value={contactForm.contact_status}
+            onChange={v => setContactForm(prev => ({...prev, contact_status: v}))}
+          />
+        </div>
+        <div className="contact-edit-field">
+          <label>MD명</label>
+          <input
+            type="text"
+            value={contactForm.md_name}
+            onChange={e => setContactForm(prev => ({...prev, md_name: e.target.value}))}
+            placeholder="예: 홍길동"
+          />
+        </div>
+      </div>
 
       <div className="contact-edit-grid">
         <div className="contact-edit-field">
@@ -1572,7 +1650,7 @@ function ManufacturerDetail({ navigate, state }) {
         disabled={contactSaving}
         style={{ marginTop: 10 }}
       >
-        {contactSaving ? "저장 중..." : "연락처 저장"}
+        {contactSaving ? "저장 중..." : "저장"}
       </button>
 
       {contactMsg && (
@@ -1581,6 +1659,17 @@ function ManufacturerDetail({ navigate, state }) {
         </div>
       )}
     </div>
+
+    {/* 현재 컨택 상태 표시 */}
+    {(d.contact_status || d.md_name) && (
+      <div className="detail-row" style={{marginTop:8}}>
+        <div className="dk">컨택 현황</div>
+        <div className="dv" style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          {d.contact_status && <span className="badge b-blue">{d.contact_status}</span>}
+          {d.md_name && <span style={{fontSize:12,color:"#374151"}}>담당: {d.md_name}</span>}
+        </div>
+      </div>
+    )}
                 </div>
               </div>
 
@@ -1665,52 +1754,86 @@ function ManufacturerDetail({ navigate, state }) {
                 <span>📦 취급 제품 목록 ({filteredSkus.length}{filteredSkus.length!==res?.skus?.length?`/${res?.skus?.length||0}`:""} 건)</span>
                 <span>{skuOpen?"▲":"▼"}</span>
               </button>
-              {skuOpen&&(
-                <>
-                  <div className="toolbar" style={{borderTop:"1px solid #e8eaed"}}>
-                    <div className="search-wrap">
-                      <span className="search-icon">🔍</span>
-                      <input placeholder="제품명 검색..." value={skuSearch} onChange={e=>setSkuSearch(e.target.value)}/>
+              {skuOpen&&(()=>{
+                const _MAIN5 = ["코스트코","이마트","롯데마트","홈플러스","쿠팡"];
+                const baseYear = res?.skus?.[0]?.base_year || new Date().getFullYear();
+                function renderImporters(importers) {
+                  if (!importers?.length) return <span style={{color:"#9ca3af"}}>-</span>;
+                  const main5present = importers.filter(i => _MAIN5.includes(i));
+                  const others = importers.filter(i => !_MAIN5.includes(i));
+                  const orderedMain5 = _MAIN5.filter(i => main5present.includes(i));
+                  return (
+                    <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+                      {orderedMain5.map((imp,k)=>(
+                        <span key={k} className="badge" style={{background:"#dbeafe",color:"#1d4ed8",fontSize:11,padding:"1px 6px"}}>{imp}</span>
+                      ))}
+                      {others.length>0&&<span className="badge b-gray" style={{fontSize:11}}>외 {others.length}개</span>}
                     </div>
-                    <div className="date-range-wrap">
-                      <input type="date" className="date-range-input" value={skuDateFrom} max={skuDateTo||undefined} onChange={e=>setSkuDateFrom(e.target.value)}/>
-                      <span className="date-range-sep">~</span>
-                      <input type="date" className="date-range-input" value={skuDateTo} min={skuDateFrom||undefined} onChange={e=>setSkuDateTo(e.target.value)}/>
-                      {(skuDateFrom||skuDateTo)&&<button className="date-range-clear" onClick={()=>{setSkuDateFrom("");setSkuDateTo("");}} title="기간 필터 해제">✕</button>}
+                  );
+                }
+                return (
+                  <>
+                    <div className="toolbar" style={{borderTop:"1px solid #e8eaed"}}>
+                      <div className="search-wrap">
+                        <span className="search-icon">🔍</span>
+                        <input placeholder="제품명, MC, 구분, 수입업체 검색..." value={skuSearch} onChange={e=>setSkuSearch(e.target.value)}/>
+                      </div>
+                      <div className="date-range-wrap">
+                        <input type="date" className="date-range-input" value={skuDateFrom} max={skuDateTo||undefined} onChange={e=>setSkuDateFrom(e.target.value)}/>
+                        <span className="date-range-sep">~</span>
+                        <input type="date" className="date-range-input" value={skuDateTo} min={skuDateFrom||undefined} onChange={e=>setSkuDateTo(e.target.value)}/>
+                        {(skuDateFrom||skuDateTo)&&<button className="date-range-clear" onClick={()=>{setSkuDateFrom("");setSkuDateTo("");}} title="기간 필터 해제">✕</button>}
+                      </div>
+                      <button className="icon-btn" onClick={()=>downloadCSV(filteredSkus,"mfr_skus.csv")}>⬇ CSV</button>
                     </div>
-                    <button className="icon-btn" onClick={()=>downloadCSV(filteredSkus,"mfr_skus.csv")}>⬇ CSV</button>
-                  </div>
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th style={{minWidth:240}}>제품명</th>
-                          <th style={{minWidth:120}}><div className="th-inner"><span className="th-label">MC (카테고리)</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.mc||null} activeSortCol={false} activeSortDir="asc" localValues={skuMcVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,mc:vals}))}/></div></th>
-                          <th style={{minWidth:90}}><div className="th-inner"><span className="th-label">구분</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.category||null} activeSortCol={false} activeSortDir="asc" localValues={skuCategoryVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,category:vals}))}/></div></th>
-                          <th style={{minWidth:150}}><div className="th-inner"><span className="th-label">수입업체</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.importer||null} activeSortCol={false} activeSortDir="asc" localValues={skuImporterVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,importer:vals}))}/></div></th>
-                          <th style={{minWidth:70}}>수입횟수</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredSkus.map((r,i)=>(
-                          <tr key={i}>
-                            <td title={r.sku_name}>
-                              <span className="link-cell" onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category,importer:r.importer}})}>
-                                {r.sku_name}
-                              </span>
-                            </td>
-                            <td><span className="badge b-mc">{r.mc||"-"}</span></td>
-                            <td><span className="badge b-cat">{r.category||"-"}</span></td>
-                            <td style={{fontSize:12}} title={r.importer}>{r.importer||"-"}</td>
-                            <td><span className="badge b-count">{r.import_count}</span></td>
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th style={{minWidth:80}}><div className="th-inner"><span className="th-label">구분</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.category||null} activeSortCol={false} activeSortDir="asc" localValues={skuCategoryVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,category:vals}))}/></div></th>
+                            <th style={{minWidth:100}}><div className="th-inner"><span className="th-label">MC</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.mc||null} activeSortCol={false} activeSortDir="asc" localValues={skuMcVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,mc:vals}))}/></div></th>
+                            <th style={{minWidth:220}}>제품명</th>
+                            <th style={{minWidth:80}}>OEM/수입</th>
+                            <th style={{minWidth:180}}>수입업체</th>
+                            <th style={{minWidth:90,textAlign:"right"}}>수입횟수(전체)</th>
+                            <th style={{minWidth:72,textAlign:"right"}}>{yearLabel(3,baseYear)}</th>
+                            <th style={{minWidth:72,textAlign:"right"}}>{yearLabel(2,baseYear)}</th>
+                            <th style={{minWidth:72,textAlign:"right"}}>{yearLabel(1,baseYear)}</th>
+                            <th style={{minWidth:80,textAlign:"right"}}>역량점수</th>
                           </tr>
-                        ))}
-                        {filteredSkus.length===0&&<tr><td colSpan={5}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
+                        </thead>
+                        <tbody>
+                          {filteredSkus.map((r,i)=>(
+                            <tr key={i}>
+                              <td><span className="badge b-cat">{r.category||"-"}</span></td>
+                              <td><span className="badge b-mc">{r.mc||"-"}</span></td>
+                              <td title={r.sku_name}>
+                                <span className="link-cell" onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category}})}>
+                                  {r.sku_name}
+                                </span>
+                              </td>
+                              <td style={{fontSize:12}}>{r.import_type||"-"}</td>
+                              <td>{renderImporters(r.importers)}</td>
+                              <td style={{textAlign:"right"}}><span className="badge b-count">{r.import_count}</span></td>
+                              <td style={{textAlign:"right",color:(r.count_year3||0)>0?"#16a34a":"#9ca3af",fontWeight:500}}>{(r.count_year3||0)>0?r.count_year3:"-"}</td>
+                              <td style={{textAlign:"right",color:(r.count_year2||0)>0?"#16a34a":"#9ca3af",fontWeight:500}}>{(r.count_year2||0)>0?r.count_year2:"-"}</td>
+                              <td style={{textAlign:"right",color:(r.count_year1||0)>0?"#16a34a":"#9ca3af",fontWeight:500}}>{(r.count_year1||0)>0?r.count_year1:"-"}</td>
+                              <td style={{textAlign:"right"}}>
+                                {r.ranking_score!=null
+                                  ? <span className="badge" style={{background: r.ranking_score>=70?"#dcfce7":r.ranking_score>=40?"#fef9c3":"#fee2e2", color: r.ranking_score>=70?"#15803d":r.ranking_score>=40?"#92400e":"#b91c1c", minWidth:36, display:"inline-block", textAlign:"center"}}>
+                                      {Math.round(r.ranking_score)}점
+                                    </span>
+                                  : <span style={{color:"#9ca3af"}}>-</span>}
+                              </td>
+                            </tr>
+                          ))}
+                          {filteredSkus.length===0&&<tr><td colSpan={10}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </>
         )}

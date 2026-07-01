@@ -98,6 +98,8 @@ class ManufacturerDetail(BaseModel):
     country:          Optional[str]
     location:         Optional[str]
     emails:           list[str]   = Field(default_factory=list)
+    contact_status:   Optional[str] = None
+    md_name:          Optional[str] = None
     homepage:         Optional[str]
     oem_status:       Optional[str]
     oem_memo:         Optional[str]
@@ -115,9 +117,15 @@ class ManufacturerSkuRow(BaseModel):
     sku_name:      str
     mc:            Optional[str]
     category:      Optional[str]
-    importer:      Optional[str]
+    import_type:   Optional[str] = None
+    importers:     list[str]     = Field(default_factory=list)
     import_count:  int
     latest_import: Optional[date]
+    base_year:     Optional[int] = None
+    count_year1:   int           = 0
+    count_year2:   int           = 0
+    count_year3:   int           = 0
+    ranking_score: Optional[float] = None
 
 
 class ManufacturerDetailResponse(BaseModel):

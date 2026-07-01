@@ -52,6 +52,10 @@ class ImportHistory(Base):
     product_category = Column(String(500),  nullable=True,  comment="취급 카테고리 (콤마 구분)")
     certificates     = Column(Text,         nullable=True,  comment="인증서 (콤마 구분)")
 
+    # ── MD 컨택 관리 ──────────────────────────────────────────
+    contact_status   = Column(String(100),  nullable=True,  comment="MD 컨택 상태 (컨택이력 없음/컨택 중/거래성사 등)")
+    md_name          = Column(String(100),  nullable=True,  comment="담당 MD명")
+
     # ── 전문 검색용 벡터 (PostgreSQL FTS) ─────────────────
     search_vector    = Column(TSVECTOR,     nullable=True)
 
