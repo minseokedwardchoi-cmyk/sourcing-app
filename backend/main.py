@@ -1046,12 +1046,11 @@ async def upload_excel(
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Excel 파일(.xlsx)만 업로드 가능합니다.")
 
+    import asyncio
     content = await file.read()
     result  = await import_excel(content, db)
-    await refresh_mvs(db)
-    for sql in _MV_INDEXES:
-        await db.execute(text(sql))
     await db.commit()
+    asyncio.create_task(refresh_mvs())
     print("UPLOAD_RESULT:", result)
 
     return UploadResponse(
@@ -1106,12 +1105,10 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
             continue
 
     if records:
+        import asyncio
         await db.execute(ImportHistory.__table__.insert(), records)
         await db.commit()
-        await refresh_mvs(db)
-        for sql in _MV_INDEXES:
-            await db.execute(text(sql))
-        await db.commit()
+        asyncio.create_task(refresh_mvs())
 
     return {"inserted": inserted, "skipped": skipped}
 
@@ -1136,12 +1133,16 @@ async def clear_all_data(
             detail="confirm 필드에 'DELETE'를 정확히 입력해야 삭제가 진행됩니다.",
         )
 
+    import asyncio
+
     count_r = await db.execute(text("SELECT COUNT(*) FROM import_history"))
     deleted_rows = count_r.scalar() or 0
 
     await db.execute(text("TRUNCATE TABLE import_history"))
-    await refresh_mvs(db)
     await db.commit()
+
+    # MV refresh는 오래 걸리므로 백그라운드에서 실행
+    asyncio.create_task(refresh_mvs())
 
     return ClearDataResponse(
         deleted_rows=deleted_rows,
