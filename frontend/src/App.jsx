@@ -1452,6 +1452,9 @@ function ManufacturerDetail({ navigate, state }) {
   const [skuColFilters, setSkuColFilters] = useState({});
   const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
   const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
+  const [monthlyModal, setMonthlyModal] = useState(null);
+  const [modalChartFrom, setModalChartFrom] = useState("");
+  const [modalChartTo,   setModalChartTo]   = useState("");
 
   function cellKey(col, i) { return `${col}:${i}`; }
   function toggleOverflowExpand(col, i) {
@@ -1463,6 +1466,32 @@ function ManufacturerDetail({ navigate, state }) {
     const k = cellKey(col, i);
     const over = el.scrollWidth > el.clientWidth + 1;
     setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
+
+  function getMonthlyContextRow(row) {
+    return {
+      ...row,
+      manufacturer: d?.manufacturer || manufacturer,
+      factory: d?.factory || factory,
+      country: d?.country || row.country,
+    };
+  }
+
+  function openMonthlyModal(row) {
+    const target = getMonthlyContextRow(row);
+    setModalChartFrom("");
+    setModalChartTo("");
+    setMonthlyModal({ row: target, loading: true, error: null, yearly: [], monthly: [] });
+    fetchMonthlyImportCounts(target, null, null)
+      .then(res => setMonthlyModal(m => m ? { ...m, loading: false, yearly: res.yearly || [], monthly: res.data || [] } : null))
+      .catch(e => setMonthlyModal(m => m ? { ...m, loading: false, error: e.message } : null));
+  }
+
+  function refetchModalChart(row, from, to) {
+    setMonthlyModal(m => m ? { ...m, chartLoading: true } : null);
+    fetchMonthlyImportCounts(row, from || null, to || null)
+      .then(res => setMonthlyModal(m => m ? { ...m, chartLoading: false, monthly: res.data || [] } : null))
+      .catch(e => setMonthlyModal(m => m ? { ...m, chartLoading: false, error: e.message } : null));
   }
 
   useEffect(()=>{const t=setTimeout(()=>setSkuDebSearch(skuSearch),400);return()=>clearTimeout(t);},[skuSearch]);
@@ -1868,6 +1897,74 @@ function ManufacturerDetail({ navigate, state }) {
                 );
               })()}
             </div>
+
+            {monthlyModal && (() => {
+              const chartData = (monthlyModal.monthly || [])
+                .filter(mo => {
+                  if (modalChartFrom && mo.month < modalChartFrom.slice(2).replace("-","/")) return false;
+                  if (modalChartTo && mo.month > modalChartTo.slice(2).replace("-","/")) return false;
+                  return true;
+                })
+                .map(mo => ({ month: mo.month, count: mo.count }));
+              const chartTotal = chartData.reduce((sum, item) => sum + item.count, 0);
+              const yearlyMap = {};
+              (monthlyModal.yearly || []).forEach(y => { yearlyMap[y.year] = y.count; });
+              const thisYear = new Date().getFullYear();
+              const allYears = [];
+              for (let yr = 2021; yr <= thisYear; yr++) allYears.push({ year: String(yr), count: yearlyMap[String(yr)] ?? 0 });
+              return (
+                <div className="modal-overlay" onClick={()=>setMonthlyModal(null)}>
+                  <div className="modal-box" style={{maxWidth:"min(1100px, 95vw)"}} onClick={e=>e.stopPropagation()}>
+                    <div className="modal-header">
+                      <span className="modal-title">{monthlyModal.row.sku_name} — 연도별 / 월별 수입횟수</span>
+                      <button className="modal-close" onClick={()=>setMonthlyModal(null)}>✕</button>
+                    </div>
+                    <div className="modal-body">
+                      {monthlyModal.loading ? <div className="empty-state">불러오는 중...</div>
+                      : monthlyModal.error ? <div className="error-box">오류: {monthlyModal.error}</div>
+                      : (
+                        <>
+                          <div className="modal-section-title">연도별 수입횟수</div>
+                          <div style={{overflowX:"auto"}}>
+                            <div style={{display:"grid",gridTemplateColumns:`auto repeat(${allYears.length}, auto)`,gap:1,background:"#e8eaed",fontSize:12,width:"fit-content",border:"1px solid #e8eaed",borderRadius:4,overflow:"hidden"}}>
+                              <div style={{padding:"5px 10px",background:"#f1f3f5",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap"}}>연도</div>
+                              {allYears.map(y => <div key={y.year} style={{padding:"5px 10px",background:"#fff",textAlign:"center"}}>{y.year}</div>)}
+                              <div style={{padding:"5px 10px",background:"#f1f3f5",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap"}}>수입횟수</div>
+                              {allYears.map(y => <div key={y.year} style={{padding:"5px 10px",background:"#fff",textAlign:"center",color:y.count>0?"#15803d":"#9ca3af",fontWeight:y.count>0?600:400}}>{y.count}</div>)}
+                            </div>
+                          </div>
+                          <div style={{marginTop:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                            <div className="modal-section-title" style={{margin:0}}>월별 수입횟수 추이</div>
+                            <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
+                              <input type="month" className="date-range-input" style={{padding:"3px 7px",fontSize:12}} value={modalChartFrom} onChange={e=>{setModalChartFrom(e.target.value);refetchModalChart(monthlyModal.row,e.target.value,modalChartTo);}}/>
+                              <span style={{color:"#9ca3af"}}>~</span>
+                              <input type="month" className="date-range-input" style={{padding:"3px 7px",fontSize:12}} value={modalChartTo} onChange={e=>{setModalChartTo(e.target.value);refetchModalChart(monthlyModal.row,modalChartFrom,e.target.value);}}/>
+                              {(modalChartFrom || modalChartTo) && <button className="icon-btn" style={{fontSize:11}} onClick={()=>{setModalChartFrom("");setModalChartTo("");refetchModalChart(monthlyModal.row,"","");}}>초기화</button>}
+                            </div>
+                          </div>
+                          {!chartData.length ? <div className="empty-state" style={{marginTop:8}}>해당 기간 이력 없음</div> : (
+                            <div style={{position:"relative",marginTop:8}}>
+                              <div style={{position:"absolute",top:4,left:8,zIndex:1,fontSize:12,color:"#374151",fontWeight:600}}>총 수입횟수: <span style={{color:"#15803d"}}>{chartTotal.toLocaleString()}건</span></div>
+                              <ResponsiveContainer width="100%" height={220}>
+                                <LineChart data={chartData} margin={{top:28,right:16,bottom:4,left:0}}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
+                                  <XAxis dataKey="month" tick={{fontSize:10}} interval="preserveStartEnd"/>
+                                  <YAxis tick={{fontSize:10}} allowDecimals={false} width={36}/>
+                                  <Tooltip formatter={(v)=>[v + "건", "수입횟수"]} contentStyle={{fontSize:12,borderRadius:6}}/>
+                                  <Line type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2} dot={{r:2,fill:"#16a34a"}} activeDot={{r:4}}>
+                                    <LabelList dataKey="count" position="top" style={{fontSize:10,fill:"#374151",fontWeight:600}} formatter={v=>v>0?v:""}/>
+                                  </Line>
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </>
         )}
       </div>
