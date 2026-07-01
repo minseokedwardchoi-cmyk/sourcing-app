@@ -1702,6 +1702,41 @@ async def refresh_mv(db: AsyncSession = Depends(get_db)):
     await db.commit()
     return {"status": "ok", "message": "MV 갱신 완료"}
 
+# ─── 대량 적재 전/후: import_history 보조 인덱스 임시 삭제/재생성 ────────────
+# (PK만 남기면 행마다 유지할 인덱스가 줄어 대량 INSERT가 훨씬 빨라짐.
+#  단, 삭제되어 있는 동안에는 import_history를 직접 필터링하는 일부 조회
+#  (제조사 상세, 국가별 조회 등)가 느려질 수 있음 — 메인 대시보드는 구체화
+#  뷰를 읽으므로 영향 없음)
+_IMPORT_HISTORY_INDEXES = [
+    ("ix_agg_key",
+     "CREATE INDEX IF NOT EXISTS ix_agg_key ON import_history "
+     "(category, mc, sku_name, import_type, importer, manufacturer, country)"),
+    ("ix_sku_name",     "CREATE INDEX IF NOT EXISTS ix_sku_name ON import_history (sku_name)"),
+    ("ix_manufacturer", "CREATE INDEX IF NOT EXISTS ix_manufacturer ON import_history (manufacturer)"),
+    ("ix_importer",     "CREATE INDEX IF NOT EXISTS ix_importer ON import_history (importer)"),
+    ("ix_mc",           "CREATE INDEX IF NOT EXISTS ix_mc ON import_history (mc)"),
+    ("ix_country",      "CREATE INDEX IF NOT EXISTS ix_country ON import_history (country)"),
+    ("ix_import_date",  "CREATE INDEX IF NOT EXISTS ix_import_date ON import_history (import_date)"),
+    ("ix_search_vector",
+     "CREATE INDEX IF NOT EXISTS ix_search_vector ON import_history USING gin (search_vector)"),
+]
+
+
+@app.post("/api/admin/drop-import-indexes")
+async def drop_import_indexes(db: AsyncSession = Depends(get_db)):
+    for name, _ in _IMPORT_HISTORY_INDEXES:
+        await db.execute(text(f"DROP INDEX IF EXISTS {name}"))
+    await db.commit()
+    return {"status": "ok", "message": "import_history 보조 인덱스 삭제 완료 (PK만 남음)"}
+
+
+@app.post("/api/admin/rebuild-import-indexes")
+async def rebuild_import_indexes(db: AsyncSession = Depends(get_db)):
+    for _, ddl in _IMPORT_HISTORY_INDEXES:
+        await db.execute(text(ddl))
+    await db.commit()
+    return {"status": "ok", "message": "import_history 인덱스 재생성 완료"}
+
 # ─── 빠른 데이터 확인 ────────────────────────────────────────────────────────
 @app.get("/api/quick-check")
 async def quick_check(db: AsyncSession = Depends(get_db)):
