@@ -1159,12 +1159,10 @@ function SkuManufacturers({ navigate, state }) {
   const [error,        setError]       = useState(null);
   const [search,       setSearch]      = useState("");
   const [debSearch,    setDebSearch]   = useState("");
-  const [countryF,     setCountryF]    = useState("");
-  const [contactF,     setContactF]    = useState("");
-  const [oemF,         setOemF]        = useState("");
   const [page,         setPage]        = useState(1);
-  const [skuSort, setSkuSort] = useState("ranking_score");
-  const [skuDir,  setSkuDir]  = useState("desc");
+  const [skuSort,      setSkuSort]     = useState("ranking_score");
+  const [skuDir,       setSkuDir]      = useState("desc");
+  const [colFilters,   setColFilters]  = useState({});
 
   function handleSkuSort(col) {
     if (skuSort === col) setSkuDir(d => d === "asc" ? "desc" : "asc");
@@ -1191,18 +1189,25 @@ function SkuManufacturers({ navigate, state }) {
     });
   }, [res, skuSort, skuDir]);
 
+  const filteredRows = useMemo(() => {
+    let rows = sortedRows;
+    if (colFilters.country?.length) rows = rows.filter(r => colFilters.country.includes(r.country));
+    if (colFilters.oem?.length)     rows = rows.filter(r => (r.import_types||[]).some(t => colFilters.oem.includes(t)));
+    if (colFilters.email?.length)   rows = rows.filter(r => colFilters.email.includes(r.email||""));
+    return rows;
+  }, [sortedRows, colFilters]);
+
+  const skuCountryVals = useMemo(() => Array.from(new Set((res?.data||[]).map(r=>r.country).filter(Boolean))).sort(), [res]);
+  const skuOemVals     = useMemo(() => Array.from(new Set((res?.data||[]).flatMap(r=>r.import_types||[]).filter(Boolean))).sort(), [res]);
+  const skuEmailVals   = useMemo(() => Array.from(new Set((res?.data||[]).map(r=>r.email).filter(Boolean))).sort(), [res]);
+
   useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
 
   useEffect(()=>{
     setLoading(true); setError(null);
-    fetchSkuFactories(skuName,{
-      search:debSearch,
-      countryFilter:countryF||undefined,
-      hasContact:contactF==="있음"?true:contactF==="없음"?false:undefined,
-      oemPossible:oemF==="가능"?true:undefined,
-      page,pageSize:50,
-    }).then(setRes).catch(e=>setError(e.message)).finally(()=>setLoading(false));
-  },[skuName,debSearch,countryF,contactF,oemF,page]);
+    fetchSkuFactories(skuName,{ search:debSearch, page, pageSize:50 })
+      .then(setRes).catch(e=>setError(e.message)).finally(()=>setLoading(false));
+  },[skuName,debSearch,page]);
 
   const countries = useMemo(()=>{
     if(!res)return[];
@@ -1249,30 +1254,34 @@ function SkuManufacturers({ navigate, state }) {
               <span className="search-icon">🔍</span>
               <input placeholder="해외제조업소, 국가, 수입업체 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
             </div>
-            <span className="count-label">{res?`${res.meta.total}개 제조사`:""}</span>
+            <span className="count-label">{res ? `${filteredRows.length}/${res.meta.total}개 제조사` : ""}</span>
+            <button className="icon-btn" onClick={()=>downloadCSV(filteredRows.map(g=>({
+              제조업체: g.factory, 제조국: g.country, OEM여부: (g.import_types||[]).join("/"),
+              수입업체: (g.importers||[]).join("/"), 종합점수: g.ranking_score, 이메일: g.email||"",
+            })), "sku_factories.csv")}>⬇ CSV</button>
           </div>
           {error&&<div className="error-box">오류: {error}</div>}
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th style={{minWidth:200}} onClick={()=>handleSkuSort("sku_name")}>SKU <SortIcon col="sku_name" sortCol={skuSort} sortDir={skuDir}/></th>
-                  <th style={{minWidth:160}} onClick={()=>handleSkuSort("importers")}>수입업체 <SortIcon col="importers" sortCol={skuSort} sortDir={skuDir}/></th>
-                  <th style={{minWidth:90}}  onClick={()=>handleSkuSort("oem")}>OEM 여부 <SortIcon col="oem" sortCol={skuSort} sortDir={skuDir}/></th>
-                  <th style={{minWidth:220}} onClick={()=>handleSkuSort("factory")}>제조업체 <SortIcon col="factory" sortCol={skuSort} sortDir={skuDir}/></th>
-                  <th style={{minWidth:80}}  onClick={()=>handleSkuSort("country")}>제조국 <SortIcon col="country" sortCol={skuSort} sortDir={skuDir}/></th>
-                  <th style={{minWidth:90}}  onClick={()=>handleSkuSort("ranking_score")}>종합점수 <SortIcon col="ranking_score" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:200}}><div className="th-inner"><span className="th-label" style={{cursor:"pointer"}} onClick={()=>handleSkuSort("sku_name")}>SKU <SortIcon col="sku_name" sortCol={skuSort} sortDir={skuDir}/></span></div></th>
+                  <th style={{minWidth:160}}><div className="th-inner"><span className="th-label" style={{cursor:"pointer"}} onClick={()=>handleSkuSort("importers")}>수입업체 <SortIcon col="importers" sortCol={skuSort} sortDir={skuDir}/></span></div></th>
+                  <th style={{minWidth:90}}><div className="th-inner"><span className="th-label">OEM 여부</span><ColumnFilter colKey={null} isNumeric={false} activeValues={colFilters.oem||null} activeSortCol={skuSort==="oem"} activeSortDir={skuDir} localValues={skuOemVals} onSort={dir=>{setSkuSort("oem");setSkuDir(dir);}} onApply={vals=>setColFilters(p=>({...p,oem:vals}))}/></div></th>
+                  <th style={{minWidth:220}}><div className="th-inner"><span className="th-label" style={{cursor:"pointer"}} onClick={()=>handleSkuSort("factory")}>제조업체 <SortIcon col="factory" sortCol={skuSort} sortDir={skuDir}/></span></div></th>
+                  <th style={{minWidth:80}}><div className="th-inner"><span className="th-label">제조국</span><ColumnFilter colKey={null} isNumeric={false} activeValues={colFilters.country||null} activeSortCol={skuSort==="country"} activeSortDir={skuDir} localValues={skuCountryVals} onSort={dir=>{setSkuSort("country");setSkuDir(dir);}} onApply={vals=>setColFilters(p=>({...p,country:vals}))}/></div></th>
+                  <th style={{minWidth:90}}><div className="th-inner"><span className="th-label" style={{cursor:"pointer"}} onClick={()=>handleSkuSort("ranking_score")}>종합점수 <SortIcon col="ranking_score" sortCol={skuSort} sortDir={skuDir}/></span></div></th>
                   <th style={{minWidth:220}}>탑5 유통사 거래 다양성</th>
                   <th style={{minWidth:120}}>국내 수입횟수</th>
                   <th style={{minWidth:220}}>최근 3개년 성장추세</th>
-                  <th style={{minWidth:160}} onClick={()=>handleSkuSort("email")}>연락처 <SortIcon col="email" sortCol={skuSort} sortDir={skuDir}/></th>
+                  <th style={{minWidth:160}}><div className="th-inner"><span className="th-label">연락처</span><ColumnFilter colKey={null} isNumeric={false} activeValues={colFilters.email||null} activeSortCol={skuSort==="email"} activeSortDir={skuDir} localValues={skuEmailVals} onSort={dir=>{setSkuSort("email");setSkuDir(dir);}} onApply={vals=>setColFilters(p=>({...p,email:vals}))}/></div></th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? <SkeletonRows cols={10}/>
-                : !sortedRows?.length
+                : !filteredRows?.length
                   ? <tr><td colSpan={10}><div className="empty-state">선택한 SKU와 연결된 제조사 정보가 없습니다.</div></td></tr>
-                  : sortedRows.map((g,i)=>(
+                  : filteredRows.map((g,i)=>(
                     <tr key={i}>
                       <td title={g.skus?.[0]}><span style={{fontSize:12}}>{g.skus?.[0]||"-"}</span></td>
                       <td>
@@ -1355,12 +1364,31 @@ function ManufacturerDetail({ navigate, state }) {
   });
   const [contactSaving, setContactSaving] = useState(false);
   const [contactMsg, setContactMsg] = useState(null);
+  const [skuSearch,   setSkuSearch]   = useState("");
+  const [skuDebSearch,setSkuDebSearch] = useState("");
+  const [skuDateFrom, setSkuDateFrom]  = useState("");
+  const [skuDateTo,   setSkuDateTo]    = useState("");
+  const [skuColFilters, setSkuColFilters] = useState({});
+
+  useEffect(()=>{const t=setTimeout(()=>setSkuDebSearch(skuSearch),400);return()=>clearTimeout(t);},[skuSearch]);
 
   useEffect(()=>{
     setLoading(true); setError(null);
-    fetchManufacturerDetail(manufacturer,factory)
+    fetchManufacturerDetail(manufacturer, factory, { skuSearch: skuDebSearch||undefined, dateFrom: skuDateFrom||undefined, dateTo: skuDateTo||undefined })
       .then(setRes).catch(e=>setError(e.message)).finally(()=>setLoading(false));
-  },[manufacturer,factory]);
+  },[manufacturer, factory, skuDebSearch, skuDateFrom, skuDateTo]);
+
+  const filteredSkus = useMemo(() => {
+    let skus = res?.skus || [];
+    if (skuColFilters.mc?.length)       skus = skus.filter(r => skuColFilters.mc.includes(r.mc));
+    if (skuColFilters.category?.length) skus = skus.filter(r => skuColFilters.category.includes(r.category));
+    if (skuColFilters.importer?.length) skus = skus.filter(r => skuColFilters.importer.includes(r.importer));
+    return skus;
+  }, [res, skuColFilters]);
+
+  const skuMcVals       = useMemo(() => Array.from(new Set((res?.skus||[]).map(r=>r.mc).filter(Boolean))).sort(), [res]);
+  const skuCategoryVals = useMemo(() => Array.from(new Set((res?.skus||[]).map(r=>r.category).filter(Boolean))).sort(), [res]);
+  const skuImporterVals = useMemo(() => Array.from(new Set((res?.skus||[]).map(r=>r.importer).filter(Boolean))).sort(), [res]);
 
   const d = res?.detail;
 
@@ -1624,38 +1652,54 @@ function ManufacturerDetail({ navigate, state }) {
             {/* 취급 SKU 목록 */}
             <div className="card" style={{marginTop:12}}>
               <button className="acc-toggle" onClick={()=>setSkuOpen(v=>!v)} aria-expanded={skuOpen}>
-                <span>📦 취급 제품 목록 ({res?.skus?.length||0}건)</span>
+                <span>📦 취급 제품 목록 ({filteredSkus.length}{filteredSkus.length!==res?.skus?.length?`/${res?.skus?.length||0}`:""} 건)</span>
                 <span>{skuOpen?"▲":"▼"}</span>
               </button>
               {skuOpen&&(
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={{minWidth:240}}>제품명</th>
-                        <th style={{minWidth:120}}>MC (카테고리)</th>
-                        <th style={{minWidth:90}}>구분</th>
-                        <th style={{minWidth:150}}>수입업체</th>
-                        <th style={{minWidth:70}}>수입횟수</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {res?.skus?.map((r,i)=>(
-                        <tr key={i}>
-                          <td title={r.sku_name}>
-                            <span className="link-cell" onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category,importer:r.importer}})}>
-                              {r.sku_name}
-                            </span>
-                          </td>
-                          <td><span className="badge b-mc">{r.mc||"-"}</span></td>
-                          <td><span className="badge b-cat">{r.category||"-"}</span></td>
-                          <td style={{fontSize:12}} title={r.importer}>{r.importer||"-"}</td>
-                          <td><span className="badge b-count">{r.import_count}</span></td>
+                <>
+                  <div className="toolbar" style={{borderTop:"1px solid #e8eaed"}}>
+                    <div className="search-wrap">
+                      <span className="search-icon">🔍</span>
+                      <input placeholder="제품명 검색..." value={skuSearch} onChange={e=>setSkuSearch(e.target.value)}/>
+                    </div>
+                    <div className="date-range-wrap">
+                      <input type="date" className="date-range-input" value={skuDateFrom} max={skuDateTo||undefined} onChange={e=>setSkuDateFrom(e.target.value)}/>
+                      <span className="date-range-sep">~</span>
+                      <input type="date" className="date-range-input" value={skuDateTo} min={skuDateFrom||undefined} onChange={e=>setSkuDateTo(e.target.value)}/>
+                      {(skuDateFrom||skuDateTo)&&<button className="date-range-clear" onClick={()=>{setSkuDateFrom("");setSkuDateTo("");}} title="기간 필터 해제">✕</button>}
+                    </div>
+                    <button className="icon-btn" onClick={()=>downloadCSV(filteredSkus,"mfr_skus.csv")}>⬇ CSV</button>
+                  </div>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{minWidth:240}}>제품명</th>
+                          <th style={{minWidth:120}}><div className="th-inner"><span className="th-label">MC (카테고리)</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.mc||null} activeSortCol={false} activeSortDir="asc" localValues={skuMcVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,mc:vals}))}/></div></th>
+                          <th style={{minWidth:90}}><div className="th-inner"><span className="th-label">구분</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.category||null} activeSortCol={false} activeSortDir="asc" localValues={skuCategoryVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,category:vals}))}/></div></th>
+                          <th style={{minWidth:150}}><div className="th-inner"><span className="th-label">수입업체</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.importer||null} activeSortCol={false} activeSortDir="asc" localValues={skuImporterVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,importer:vals}))}/></div></th>
+                          <th style={{minWidth:70}}>수입횟수</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {filteredSkus.map((r,i)=>(
+                          <tr key={i}>
+                            <td title={r.sku_name}>
+                              <span className="link-cell" onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category,importer:r.importer}})}>
+                                {r.sku_name}
+                              </span>
+                            </td>
+                            <td><span className="badge b-mc">{r.mc||"-"}</span></td>
+                            <td><span className="badge b-cat">{r.category||"-"}</span></td>
+                            <td style={{fontSize:12}} title={r.importer}>{r.importer||"-"}</td>
+                            <td><span className="badge b-count">{r.import_count}</span></td>
+                          </tr>
+                        ))}
+                        {filteredSkus.length===0&&<tr><td colSpan={5}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
           </>
@@ -1752,17 +1796,29 @@ function CountryDetail({ navigate, state }) {
   const [topLoading, setTopLoading] = useState(true);
   const [error,     setError]     = useState(null);
 
-  const [search,    setSearch]    = useState("");
-  const [debSearch, setDebSearch] = useState("");
-  const [mcFilter,  setMcFilter]  = useState("");
-  const [page,      setPage]      = useState(1);
-  const [sortBy,    setSortBy]    = useState(null);
-  const [sortDir,   setSortDir]   = useState("desc");
+  const [search,     setSearch]    = useState("");
+  const [debSearch,  setDebSearch] = useState("");
+  const [mcFilter,   setMcFilter]  = useState("");
+  const [page,       setPage]      = useState(1);
+  const [sortBy,     setSortBy]    = useState(null);
+  const [sortDir,    setSortDir]   = useState("desc");
+  const [dateFrom,   setDateFrom]  = useState("");
+  const [dateTo,     setDateTo]    = useState("");
+  const [colFilters, setColFilters]= useState({});
 
   const [mfrRes,     setMfrRes]     = useState(null);
   const [mfrLoading, setMfrLoading] = useState(true);
 
   useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
+  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+
+  const filteredMfr = useMemo(() => {
+    let rows = mfrRes?.data || [];
+    if (colFilters.primary_mc?.length) rows = rows.filter(r => colFilters.primary_mc.includes(r.primary_mc));
+    return rows;
+  }, [mfrRes, colFilters]);
+
+  const mfrMcVals = useMemo(() => Array.from(new Set((mfrRes?.data||[]).map(r=>r.primary_mc).filter(Boolean))).sort(), [mfrRes]);
 
   useEffect(()=>{
     if (!country) return;
@@ -1782,8 +1838,10 @@ function CountryDetail({ navigate, state }) {
       sortBy: sortBy || undefined,
       sortOrder: sortDir,
       page, pageSize: 20,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
     }).then(setMfrRes).catch(e=>setError(e.message)).finally(()=>setMfrLoading(false));
-  },[country,mcFilter,debSearch,sortBy,sortDir,page]);
+  },[country,mcFilter,debSearch,sortBy,sortDir,page,dateFrom,dateTo]);
 
   function handleSort(col) {
     if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -1792,7 +1850,7 @@ function CountryDetail({ navigate, state }) {
   }
 
   function resetFilters() {
-    setSearch(""); setDebSearch(""); setMcFilter(""); setPage(1);
+    setSearch(""); setDebSearch(""); setMcFilter(""); setDateFrom(""); setDateTo(""); setColFilters({}); setPage(1);
   }
 
   const activeFilters = [];
@@ -1900,7 +1958,14 @@ function CountryDetail({ navigate, state }) {
               <span className="search-icon">🔍</span>
               <input placeholder="SKU명 또는 MC명을 검색하세요" value={search} onChange={e=>setSearch(e.target.value)}/>
             </div>
-            <span className="count-label">{mfrRes?`${mfrRes.meta.total}개 제조사`:""}</span>
+            <div className="date-range-wrap">
+              <input type="date" className="date-range-input" value={dateFrom} max={dateTo||undefined} onChange={e=>setDateFrom(e.target.value)}/>
+              <span className="date-range-sep">~</span>
+              <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
+              {(dateFrom||dateTo)&&<button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>}
+            </div>
+            <span className="count-label">{mfrRes ? `${filteredMfr.length}/${mfrRes.meta.total}개 제조사` : ""}</span>
+            <button className="icon-btn" onClick={()=>downloadCSV(filteredMfr,"country_manufacturers.csv")}>⬇ CSV</button>
           </div>
           {activeFilters.length > 0 && (
             <div className="filter-bar">
@@ -1915,7 +1980,7 @@ function CountryDetail({ navigate, state }) {
                   <th style={{minWidth:40}}>순위</th>
                   <th style={{minWidth:200}}>제조사명</th>
                   <th style={{minWidth:80}}>제조국</th>
-                  <th style={{minWidth:160}}>주요 MC</th>
+                  <th style={{minWidth:160}}><div className="th-inner"><span className="th-label">주요 MC</span><ColumnFilter colKey={null} isNumeric={false} activeValues={colFilters.primary_mc||null} activeSortCol={false} activeSortDir="asc" localValues={mfrMcVals} onSort={()=>{}} onApply={vals=>setColFilters(p=>({...p,primary_mc:vals}))}/></div></th>
                   <th style={{minWidth:80}} onClick={()=>handleSort("sku_count")}>취급 SKU 수 <SortIcon col="sku_count" sortCol={sortBy} sortDir={sortDir}/></th>
                   <th style={{minWidth:90}} onClick={()=>handleSort("total_import_count")}>총수입횟수 <SortIcon col="total_import_count" sortCol={sortBy} sortDir={sortDir}/></th>
                   <th style={{minWidth:100}} onClick={()=>handleSort("top5_count")}>탑5 거래 유통사 수 <SortIcon col="top5_count" sortCol={sortBy} sortDir={sortDir}/></th>
@@ -1925,9 +1990,9 @@ function CountryDetail({ navigate, state }) {
               </thead>
               <tbody>
                 {mfrLoading ? <SkeletonRows cols={9}/>
-                : !mfrRes?.data?.length
+                : !filteredMfr.length
                   ? <tr><td colSpan={9}><div className="empty-state">조건에 맞는 제조사가 없습니다.</div></td></tr>
-                  : mfrRes.data.map((m,i)=>(
+                  : filteredMfr.map((m,i)=>(
                     <tr key={i}>
                       <td>{m.rank}</td>
                       <td title={m.manufacturer}>
