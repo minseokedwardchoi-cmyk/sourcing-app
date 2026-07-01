@@ -225,3 +225,57 @@ export function fetchCountryManufacturers(country, { mc, query, sortBy, sortOrde
   });
 }
 
+/** 공장별 보기: SKU 이력 집계 (importer 제외 그룹핑) */
+export async function fetchFactoryView({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {}, dateFrom, dateTo }) {
+  const url = new URL(`${BASE_URL}/api/factory-view`, window.location.origin);
+  const params = { search, competitor, sort_by: sortBy, sort_dir: sortDir, page, page_size: pageSize, date_from: dateFrom, date_to: dateTo };
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== null && v !== undefined && v !== "") url.searchParams.set(k, String(v));
+  });
+  const colMap = {
+    category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
+    importer: "filter_importer", country: "filter_country", factory: "filter_factory",
+    email: "filter_email", sku_name: "filter_sku_name",
+  };
+  Object.entries(colFilters).forEach(([col, values]) => {
+    if (values && values.length > 0 && colMap[col]) {
+      values.forEach(v => url.searchParams.append(colMap[col], v));
+    }
+  });
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "API 오류");
+  }
+  return res.json();
+}
+
+/** 공장별 보기: 행별 월별 수입횟수 (importer 미포함) */
+export async function fetchFactoryViewMonthly(row, dateFrom, dateTo) {
+  const cols = ["category", "mc", "sku_name", "import_type", "manufacturer", "factory", "country"];
+  const url = new URL(`${BASE_URL}/api/factory-view/monthly`, window.location.origin);
+  cols.forEach(col => {
+    const v = row[col];
+    if (v !== null && v !== undefined) {
+      url.searchParams.set(col, String(v));
+    }
+  });
+  if (dateFrom) url.searchParams.set("date_from", dateFrom);
+  if (dateTo)   url.searchParams.set("date_to", dateTo);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(url.toString(), { signal: controller.signal });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || "API 오류");
+    }
+    return res.json();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("서버 응답 시간 초과 (20초). 잠시 후 다시 시도해주세요.");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
