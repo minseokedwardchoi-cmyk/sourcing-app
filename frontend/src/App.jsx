@@ -1163,6 +1163,8 @@ function SkuManufacturers({ navigate, state }) {
   const [skuSort,      setSkuSort]     = useState("ranking_score");
   const [skuDir,       setSkuDir]      = useState("desc");
   const [colFilters,   setColFilters]  = useState({});
+  const [dateFrom,     setDateFrom]    = useState("");
+  const [dateTo,       setDateTo]      = useState("");
 
   function handleSkuSort(col) {
     if (skuSort === col) setSkuDir(d => d === "asc" ? "desc" : "asc");
@@ -1203,11 +1205,13 @@ function SkuManufacturers({ navigate, state }) {
 
   useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
 
+  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+
   useEffect(()=>{
     setLoading(true); setError(null);
-    fetchSkuFactories(skuName,{ search:debSearch, page, pageSize:50 })
+    fetchSkuFactories(skuName,{ search:debSearch, dateFrom:dateFrom||undefined, dateTo:dateTo||undefined, page, pageSize:50 })
       .then(setRes).catch(e=>setError(e.message)).finally(()=>setLoading(false));
-  },[skuName,debSearch,page]);
+  },[skuName,debSearch,dateFrom,dateTo,page]);
 
   const countries = useMemo(()=>{
     if(!res)return[];
@@ -1253,6 +1257,12 @@ function SkuManufacturers({ navigate, state }) {
             <div className="search-wrap">
               <span className="search-icon">🔍</span>
               <input placeholder="해외제조업소, 국가, 수입업체 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+            </div>
+            <div className="date-range-wrap">
+              <input type="date" className="date-range-input" value={dateFrom} max={dateTo||undefined} onChange={e=>setDateFrom(e.target.value)}/>
+              <span className="date-range-sep">~</span>
+              <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
+              {(dateFrom||dateTo)&&<button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>}
             </div>
             <span className="count-label">{res ? `${filteredRows.length}/${res.meta.total}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredRows.map(g=>({
