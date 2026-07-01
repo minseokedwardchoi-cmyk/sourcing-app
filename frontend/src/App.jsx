@@ -1696,6 +1696,7 @@ function ManufacturerDetail({ navigate, state }) {
                           <th style={{minWidth:90}}><div className="th-inner"><span className="th-label">구분</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.category||null} activeSortCol={false} activeSortDir="asc" localValues={skuCategoryVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,category:vals}))}/></div></th>
                           <th style={{minWidth:150}}><div className="th-inner"><span className="th-label">수입업체</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.importer||null} activeSortCol={false} activeSortDir="asc" localValues={skuImporterVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,importer:vals}))}/></div></th>
                           <th style={{minWidth:70}}>수입횟수</th>
+                          <th style={{minWidth:60}}>등급</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1710,9 +1711,10 @@ function ManufacturerDetail({ navigate, state }) {
                             <td><span className="badge b-cat">{r.category||"-"}</span></td>
                             <td style={{fontSize:12}} title={r.importer}>{r.importer||"-"}</td>
                             <td><span className="badge b-count">{r.import_count}</span></td>
+                            <td><GradeBadge grade={r.ranking_grade}/></td>
                           </tr>
                         ))}
-                        {filteredSkus.length===0&&<tr><td colSpan={5}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
+                        {filteredSkus.length===0&&<tr><td colSpan={6}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
                       </tbody>
                     </table>
                   </div>

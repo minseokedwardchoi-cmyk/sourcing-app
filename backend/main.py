@@ -1062,6 +1062,15 @@ async def get_manufacturer_detail(
     )
     sku_rows = sku_agg_r.mappings().all()
 
+    # 제조사 역량 등급: 이 factory가 취급하는 모든 SKU 집단 내 상대 순위로 점수 산출 후 A/B/C 변환
+    unique_skus = list({r["sku_name"] for r in sku_rows})
+    factory_grade: str | None = None
+    if unique_skus:
+        rankings = await compute_factory_rankings(db, unique_skus)
+        score = rankings.get(factory, {}).get("ranking_score")
+        if score is not None:
+            factory_grade = "A" if score >= 80 else ("B" if score >= 50 else "C")
+
     detail = ManufacturerDetail(
         manufacturer     = manufacturer,
         factory          = factory,
@@ -1083,7 +1092,7 @@ async def get_manufacturer_detail(
 
     return ManufacturerDetailResponse(
         detail = detail,
-        skus   = [ManufacturerSkuRow(**dict(r)) for r in sku_rows],
+        skus   = [ManufacturerSkuRow(**dict(r), ranking_grade=factory_grade) for r in sku_rows],
     )
 
 # ─── 3-1. 제조사 연락처 직접 수정 ─────────────────────────────────────────────

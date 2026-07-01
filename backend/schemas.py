@@ -118,6 +118,7 @@ class ManufacturerSkuRow(BaseModel):
     importer:      Optional[str]
     import_count:  int
     latest_import: Optional[date]
+    ranking_grade: Optional[str] = Field(None, description="제조사 역량 등급 (A/B/C)")
 
 
 class ManufacturerDetailResponse(BaseModel):
