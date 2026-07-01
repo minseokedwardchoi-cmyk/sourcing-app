@@ -1,0 +1,30 @@
+name: 국가별 수입통계 자동 갱신
+
+on:
+  schedule:
+    - cron: '0 16 1 * *'   # 매월 1일 01:00 KST (UTC 16:00)
+  workflow_dispatch:
+    inputs:
+      year:
+        description: '기준연도 (YYYY) — 비워두면 올해'
+        required: false
+        default: ''
+
+jobs:
+  refresh-stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: MFDS API → 국가별 통계 갱신
+        run: |
+          YEAR="${{ github.event.inputs.year }}"
+
+          if [ -n "$YEAR" ]; then
+            URL="${{ secrets.BACKEND_URL }}/api/refresh-country-stats?year=${YEAR}"
+          else
+            URL="${{ secrets.BACKEND_URL }}/api/refresh-country-stats"
+          fi
+
+          echo "요청 URL: $URL"
+          curl -sf --max-time 120 -X POST "$URL" | jq .

@@ -7,6 +7,7 @@ main.py — FastAPI 앱 진입점
   GET  /api/manufacturer          제조사 상세 정보
   POST /api/upload                Excel 업로드
   GET  /api/stats                 DB 규모 통계
+  POST /api/refresh-country-stats  MFDS API에서 국가별 통계 자동 갱신
 """
 from __future__ import annotations
 import os
@@ -38,6 +39,7 @@ from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_c
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
 )
+from stats_fetcher import fetch_all_stats, upsert_stats_to_db
 from schemas import (
     CountrySummaryResponse, CountryTopItemRow, CountryTopItemsResponse,
     CountryManufacturerRow, CountryManufacturersResponse,
@@ -219,6 +221,27 @@ async def _seed_country_stats(conn):
                 VALUES (:country, :rank, :name, :pct)
                 ON CONFLICT (country, rank) DO UPDATE SET item_name = EXCLUDED.item_name, pct = EXCLUDED.pct
             """), {"country": country, "rank": idx, "name": name, "pct": pct})
+
+
+class RefreshCountryStatsResponse(BaseModel):
+    year: str
+    countries_updated: int
+    items_updated: int
+    errors: list[str]
+
+
+@app.post("/api/refresh-country-stats", response_model=RefreshCountryStatsResponse)
+async def refresh_country_stats(year: Optional[str] = None):
+    """
+    MFDS 수입식품정보마루 API를 직접 호출해 국가별 통계를 자동 갱신한다.
+    ① 국가별 수입 상위 20개국 금액(천달러)
+    ② 각 국가별 주요 수입품목 TOP10
+    결과를 country_import_stat / country_top_item 테이블에 upsert.
+    """
+    result = await fetch_all_stats(year=year)
+    async with engine.begin() as conn:
+        summary = await upsert_stats_to_db(result, conn)
+    return summary
 
 
 class ContactUpdateRequest(BaseModel):
