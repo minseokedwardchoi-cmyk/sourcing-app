@@ -2048,7 +2048,6 @@ function CountryDetail({ navigate, state }) {
   function handleSort(col) {
     if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortBy(col); setSortDir("desc"); }
-    setPage(1);
   }
 
 
@@ -2181,19 +2180,19 @@ function CountryDetail({ navigate, state }) {
                   <th style={{minWidth:80}}>
                     <div className="th-inner">
                       <span className="th-label">취급 SKU 수 <SortIcon col="sku_count" sortCol={sortBy} sortDir={sortDir}/></span>
-                      <ColumnFilter colKey="_l" isNumeric={true} activeValues={colFilters.sku_count||null} activeSortCol={sortBy==="sku_count"} activeSortDir={sortDir} localValues={mfrSkuCountVals} onSort={dir=>{setSortBy("sku_count");setSortDir(dir);setPage(1);}} onApply={vals=>setColFilters(p=>({...p,sku_count:vals}))}/>
+                      <ColumnFilter colKey="_l" isNumeric={true} activeValues={colFilters.sku_count||null} activeSortCol={sortBy==="sku_count"} activeSortDir={sortDir} localValues={mfrSkuCountVals} onSort={dir=>{setSortBy("sku_count");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,sku_count:vals}))}/>
                     </div>
                   </th>
                   <th style={{minWidth:130}}>
                     <div className="th-inner">
                       <span className="th-label">종합점수 <SortIcon col="ranking_score" sortCol={sortBy} sortDir={sortDir}/></span>
-                      <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="ranking_score"} activeSortDir={sortDir} localValues={null} onSort={dir=>{setSortBy("ranking_score");setSortDir(dir);setPage(1);}} onApply={()=>{}}/>
+                      <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="ranking_score"} activeSortDir={sortDir} localValues={null} onSort={dir=>{setSortBy("ranking_score");setSortDir(dir);}} onApply={()=>{}}/>
                     </div>
                   </th>
                   <th style={{minWidth:220}}>
                     <div className="th-inner">
                       <span className="th-label">탑5 유통사 거래 다양성</span>
-                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.top5_grade||null} activeSortCol={sortBy==="top5_count"} activeSortDir={sortDir} localValues={TOP5_FILTER_VALS} onSort={dir=>{setSortBy("top5_count");setSortDir(dir);setPage(1);}} onApply={vals=>setColFilters(p=>({...p,top5_grade:vals}))}/>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.top5_grade||null} activeSortCol={sortBy==="top5_count"} activeSortDir={sortDir} localValues={TOP5_FILTER_VALS} onSort={dir=>{setSortBy("top5_count");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,top5_grade:vals}))}/>
                     </div>
                   </th>
                   <th style={{minWidth:120}}>
