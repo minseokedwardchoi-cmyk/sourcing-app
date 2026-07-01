@@ -117,29 +117,27 @@ async def _init_session(client: httpx.AsyncClient) -> None:
 
 
 async def _fetch_top20_httpx(client: httpx.AsyncClient, year: str) -> list[CountryStat]:
-    # columnInfo: 응답에 포함할 필드 목록 (브라우저 Network 탭에서 확인된 값)
-    payload = {
-        "dma_Search": f'{{"stdrYear":"{year}","columnInfo":"rank,ccntNtncd,ccntNtnnm,ccnt,ccntRate,wtNtncd,wtNtnnm,wt,wtRate,amtNtncd,amtNtnnm,amt,amtRate","mberNo":"","transferYn":""}}'
-    }
-    resp = await client.post(_TOP20_URL, data=payload, timeout=30)
+    resp = await client.post(
+        _TOP20_URL,
+        json={"dma_Search": {
+            "stdrYear": year,
+            "columnInfo": "rank,ccntNtncd,ccntNtnnm,ccnt,ccntRate,wtNtncd,wtNtnnm,wt,wtRate,amtNtncd,amtNtnnm,amt,amtRate",
+            "mberNo": "", "transferYn": "",
+        }},
+        timeout=30,
+    )
     resp.raise_for_status()
     data = resp.json()
 
-    # 응답: {"dlt_DataList": [...], "dma_Search": {...}, ...}
-    rows = data.get("dlt_DataList") or _first_list(data)
+    # rank=0 은 전체합계 행 — 제외하고 rank>=1 인 행만 사용
+    rows = [r for r in (data.get("dlt_DataList") or []) if int(r.get("rank", 0)) >= 1]
 
     result: list[CountryStat] = []
-    total_amt = sum(_parse_amount(r.get("amt") or "0") for r in rows)
-
     for r in rows:
-        # 금액 기준 국가명: amtNtnnm, 금액: amt, 비중: amtRate
-        ko = (r.get("amtNtnnm") or r.get("ccntNtnnm") or r.get("wtNtnnm") or "").strip()
-        amount = _parse_amount(r.get("amt") or "0")
-        try:
-            pct = float(str(r.get("amtRate") or "").replace("%", "").strip())
-        except (ValueError, TypeError):
-            pct = round(amount / total_amt * 100, 1) if total_amt else 0.0
-
+        # 금액 기준 필드: amtNtnnm(국가명), amt(금액), amtRate(비중%)
+        ko = str(r.get("amtNtnnm") or "").strip()
+        amount = int(r.get("amt") or 0)
+        pct = float(r.get("amtRate") or 0)
         if not ko:
             continue
         result.append(CountryStat(
@@ -156,10 +154,11 @@ async def _fetch_top20_httpx(client: httpx.AsyncClient, year: str) -> list[Count
 async def _fetch_items_httpx(
     client: httpx.AsyncClient, year: str, code: str, top_n: int = 10
 ) -> list[TopItem]:
-    payload = {
-        "dma_Search": f'{{"columnInfo":"","stdrYear":"{year}","ntncd":"{code}","mberNo":"","transferYn":""}}'
-    }
-    resp = await client.post(_ITEMS_URL, data=payload, timeout=30)
+    resp = await client.post(
+        _ITEMS_URL,
+        json={"dma_Search": {"columnInfo": "", "stdrYear": year, "ntncd": code, "mberNo": "", "transferYn": ""}},
+        timeout=30,
+    )
     resp.raise_for_status()
     data = resp.json()
 
