@@ -1098,21 +1098,21 @@ async def get_manufacturer_detail(
         others = sorted(i for i in imps if i not in _MAIN5)
         return main5 + others
 
-    # 취급 SKU별 역량 점수 (공장 기준) — SKU별 peer group 내 상대 랭킹
+    # 취급 SKU별 역량 점수 — 각 SKU의 peer group 안에서 이 factory의 상대 랭킹
+    # SKU 취급 제조사 페이지와 동일한 방식: SKU별로 개별 호출
     unique_skus = list({r["sku_name"] for r in sku_rows_raw})
     sku_score_map: dict[str, float | None] = {}
     if unique_skus:
         from ranking import compute_factory_rankings
-        try:
-            rankings = await compute_factory_rankings(db, unique_skus)
-            fk = factory  # factory is already defined above
-            rk = rankings.get(fk, {})
-            # Same score applied to all SKUs (peer group is all unique_skus for this factory)
-            sku_score = rk.get("ranking_score")
-            for s in unique_skus:
-                sku_score_map[s] = sku_score
-        except Exception:
-            pass
+        import asyncio
+        async def _score_for_sku(sku_name: str) -> tuple[str, float | None]:
+            try:
+                rankings = await compute_factory_rankings(db, [sku_name])
+                return sku_name, rankings.get(factory, {}).get("ranking_score")
+            except Exception:
+                return sku_name, None
+        results = await asyncio.gather(*[_score_for_sku(s) for s in unique_skus])
+        sku_score_map = dict(results)
 
     sku_rows = []
     for r in sku_rows_raw:
