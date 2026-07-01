@@ -1159,12 +1159,25 @@ function SkuManufacturers({ navigate, state }) {
   const [error,        setError]       = useState(null);
   const [search,       setSearch]      = useState("");
   const [debSearch,    setDebSearch]   = useState("");
-  const [page,         setPage]        = useState(1);
   const [skuSort,      setSkuSort]     = useState("ranking_score");
   const [skuDir,       setSkuDir]      = useState("desc");
   const [colFilters,   setColFilters]  = useState({});
   const [dateFrom,     setDateFrom]    = useState("");
   const [dateTo,       setDateTo]      = useState("");
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
+
+  function cellKey(col, i) { return `${col}:${i}`; }
+  function toggleOverflowExpand(col, i) {
+    const k = cellKey(col, i);
+    setExpandedOverflow(prev => { const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n; });
+  }
+  function overflowTextRef(el, col, i) {
+    if (!el) return;
+    const k = cellKey(col, i);
+    const over = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
 
   function handleSkuSort(col) {
     if (skuSort === col) setSkuDir(d => d === "asc" ? "desc" : "asc");
@@ -1203,15 +1216,13 @@ function SkuManufacturers({ navigate, state }) {
   const skuOemVals     = useMemo(() => Array.from(new Set((res?.data||[]).flatMap(r=>r.import_types||[]).filter(Boolean))).sort(), [res]);
   const skuEmailVals   = useMemo(() => Array.from(new Set((res?.data||[]).map(r=>r.email).filter(Boolean))).sort(), [res]);
 
-  useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
-
-  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+  useEffect(()=>{const t=setTimeout(()=>setDebSearch(search),400);return()=>clearTimeout(t);},[search]);
 
   useEffect(()=>{
     setLoading(true); setError(null);
-    fetchSkuFactories(skuName,{ search:debSearch, dateFrom:dateFrom||undefined, dateTo:dateTo||undefined, page, pageSize:50 })
+    fetchSkuFactories(skuName,{ search:debSearch, dateFrom:dateFrom||undefined, dateTo:dateTo||undefined, page:1, pageSize:2000 })
       .then(setRes).catch(e=>setError(e.message)).finally(()=>setLoading(false));
-  },[skuName,debSearch,dateFrom,dateTo,page]);
+  },[skuName,debSearch,dateFrom,dateTo]);
 
   const countries = useMemo(()=>{
     if(!res)return[];
@@ -1264,7 +1275,7 @@ function SkuManufacturers({ navigate, state }) {
               <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
               {(dateFrom||dateTo)&&<button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>}
             </div>
-            <span className="count-label">{res ? `${filteredRows.length}/${res.meta.total}개 제조사` : ""}</span>
+            <span className="count-label">{res ? `${filteredRows.length}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredRows.map(g=>({
               제조업체: g.factory, 제조국: g.country, OEM여부: (g.import_types||[]).join("/"),
               수입업체: (g.importers||[]).join("/"), 종합점수: g.ranking_score, 이메일: g.email||"",
@@ -1293,7 +1304,12 @@ function SkuManufacturers({ navigate, state }) {
                   ? <tr><td colSpan={10}><div className="empty-state">선택한 SKU와 연결된 제조사 정보가 없습니다.</div></td></tr>
                   : filteredRows.map((g,i)=>(
                     <tr key={i}>
-                      <td title={g.skus?.[0]}><span style={{fontSize:12}}>{g.skus?.[0]||"-"}</span></td>
+                      <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("sku_name",i))?"normal":"nowrap"}}>
+                        <div className="sku-cell">
+                          <span ref={el=>overflowTextRef(el,"sku_name",i)} className="sku-cell-text" style={{fontSize:12,...(expandedOverflow.has(cellKey("sku_name",i))?{whiteSpace:"normal",wordBreak:"break-all"}:{})}} title={g.skus?.[0]}>{g.skus?.[0]||"-"}</span>
+                          {(overflowCells.has(cellKey("sku_name",i))||expandedOverflow.has(cellKey("sku_name",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("sku_name",i);}} title={expandedOverflow.has(cellKey("sku_name",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("sku_name",i))?"▲":"▼"}</button>}
+                        </div>
+                      </td>
                       <td>
                         <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                           {(() => {
@@ -1308,10 +1324,11 @@ function SkuManufacturers({ navigate, state }) {
                         </div>
                       </td>
                       <td><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{(g.import_types||[]).length>0?(g.import_types||[]).map((t,j)=><OemBadge key={j} value={t}/>):<span className="badge b-gray">-</span>}</div></td>
-                      <td title={g.factory}>
-                        <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:g.manufacturer,factory:g.factory,...g},from:"sku",skuState:state})}>
-                          {g.factory}
-                        </span>
+                      <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("factory",i))?"normal":"nowrap"}}>
+                        <div className="sku-cell">
+                          <span ref={el=>overflowTextRef(el,"factory",i)} className="link-cell sku-cell-text" style={expandedOverflow.has(cellKey("factory",i))?{whiteSpace:"normal",wordBreak:"break-all"}:undefined} onClick={()=>navigate("mfr",{row:{manufacturer:g.manufacturer,factory:g.factory,...g},from:"sku",skuState:state})} title={g.factory}>{g.factory}</span>
+                          {(overflowCells.has(cellKey("factory",i))||expandedOverflow.has(cellKey("factory",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("factory",i);}} title={expandedOverflow.has(cellKey("factory",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("factory",i))?"▲":"▼"}</button>}
+                        </div>
                       </td>
                       <td>{g.country||"-"}</td>
                       <td><span className="score-cell">{g.ranking_score!=null?`${g.ranking_score.toFixed(1)}점`:"-"}</span></td>
@@ -1349,7 +1366,6 @@ function SkuManufacturers({ navigate, state }) {
               </tbody>
             </table>
           </div>
-          <Pagination meta={res?.meta} page={page} setPage={setPage}/>
         </div>
       </div>
     </div>
@@ -1432,6 +1448,20 @@ function ManufacturerDetail({ navigate, state }) {
   const [skuDateFrom, setSkuDateFrom]  = useState("");
   const [skuDateTo,   setSkuDateTo]    = useState("");
   const [skuColFilters, setSkuColFilters] = useState({});
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
+
+  function cellKey(col, i) { return `${col}:${i}`; }
+  function toggleOverflowExpand(col, i) {
+    const k = cellKey(col, i);
+    setExpandedOverflow(prev => { const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n; });
+  }
+  function overflowTextRef(el, col, i) {
+    if (!el) return;
+    const k = cellKey(col, i);
+    const over = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
 
   useEffect(()=>{const t=setTimeout(()=>setSkuDebSearch(skuSearch),400);return()=>clearTimeout(t);},[skuSearch]);
 
@@ -1807,10 +1837,11 @@ function ManufacturerDetail({ navigate, state }) {
                             <tr key={i}>
                               <td><span className="badge b-cat">{r.category||"-"}</span></td>
                               <td><span className="badge b-mc">{r.mc||"-"}</span></td>
-                              <td title={r.sku_name}>
-                                <span className="link-cell" onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category}})}>
-                                  {r.sku_name}
-                                </span>
+                              <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("sku_name",i))?"normal":"nowrap"}}>
+                                <div className="sku-cell">
+                                  <span ref={el=>overflowTextRef(el,"sku_name",i)} className="link-cell sku-cell-text" style={expandedOverflow.has(cellKey("sku_name",i))?{whiteSpace:"normal",wordBreak:"break-all"}:undefined} onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category}})} title={r.sku_name}>{r.sku_name}</span>
+                                  {(overflowCells.has(cellKey("sku_name",i))||expandedOverflow.has(cellKey("sku_name",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("sku_name",i);}} title={expandedOverflow.has(cellKey("sku_name",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("sku_name",i))?"▲":"▼"}</button>}
+                                </div>
                               </td>
                               <td style={{fontSize:12}}>{r.import_type||"-"}</td>
                               <td>{renderImporters(r.importers)}</td>
@@ -1932,7 +1963,6 @@ function CountryDetail({ navigate, state }) {
   const [search,     setSearch]    = useState("");
   const [debSearch,  setDebSearch] = useState("");
   const [mcFilter,   setMcFilter]  = useState("");
-  const [page,       setPage]      = useState(1);
   const [sortBy,     setSortBy]    = useState(null);
   const [sortDir,    setSortDir]   = useState("desc");
   const [dateFrom,   setDateFrom]  = useState("");
@@ -1941,9 +1971,22 @@ function CountryDetail({ navigate, state }) {
 
   const [mfrRes,     setMfrRes]     = useState(null);
   const [mfrLoading, setMfrLoading] = useState(true);
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
 
-  useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
-  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+  function cellKey(col, i) { return `${col}:${i}`; }
+  function toggleOverflowExpand(col, i) {
+    const k = cellKey(col, i);
+    setExpandedOverflow(prev => { const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n; });
+  }
+  function overflowTextRef(el, col, i) {
+    if (!el) return;
+    const k = cellKey(col, i);
+    const over = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
+
+  useEffect(()=>{const t=setTimeout(()=>setDebSearch(search),400);return()=>clearTimeout(t);},[search]);
 
   const TOP5_FILTER_VALS = ["A", "B", "C", "이마트", "홈플러스", "롯데마트", "쿠팡", "코스트코"];
   const GRADE_VALS = ["A", "B", "C"];
@@ -1995,11 +2038,11 @@ function CountryDetail({ navigate, state }) {
       query: debSearch || undefined,
       sortBy: sortBy || undefined,
       sortOrder: sortDir,
-      page, pageSize: 20,
+      page: 1, pageSize: 10000,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
     }).then(setMfrRes).catch(e=>setError(e.message)).finally(()=>setMfrLoading(false));
-  },[country,mcFilter,debSearch,sortBy,sortDir,page,dateFrom,dateTo]);
+  },[country,mcFilter,debSearch,sortBy,sortDir,dateFrom,dateTo]);
 
   function handleSort(col) {
     if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
@@ -2008,7 +2051,7 @@ function CountryDetail({ navigate, state }) {
   }
 
   function resetFilters() {
-    setSearch(""); setDebSearch(""); setMcFilter(""); setDateFrom(""); setDateTo(""); setColFilters({}); setPage(1);
+    setSearch(""); setDebSearch(""); setMcFilter(""); setDateFrom(""); setDateTo(""); setColFilters({});
   }
 
   const activeFilters = [];
@@ -2127,7 +2170,7 @@ function CountryDetail({ navigate, state }) {
               <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
               {(dateFrom||dateTo)&&<button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>}
             </div>
-            <span className="count-label">{mfrRes ? `${filteredMfr.length}/${mfrRes.meta.total}개 제조사` : ""}</span>
+            <span className="count-label">{mfrRes ? `${filteredMfr.length}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredMfr,"country_manufacturers.csv")}>⬇ CSV</button>
           </div>
           {activeFilters.length > 0 && (
@@ -2190,10 +2233,11 @@ function CountryDetail({ navigate, state }) {
                   ? <tr><td colSpan={7}><div className="empty-state">조건에 맞는 제조사가 없습니다.</div></td></tr>
                   : filteredMfr.map((m,i)=>(
                     <tr key={i}>
-                      <td title={m.manufacturer}>
-                        <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:m.manufacturer,factory:m.factory||m.manufacturer},from:"country",countryState:state})}>
-                          {m.manufacturer}
-                        </span>
+                      <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("manufacturer",i))?"normal":"nowrap"}}>
+                        <div className="sku-cell">
+                          <span ref={el=>overflowTextRef(el,"manufacturer",i)} className="link-cell sku-cell-text" style={expandedOverflow.has(cellKey("manufacturer",i))?{whiteSpace:"normal",wordBreak:"break-all"}:undefined} onClick={()=>navigate("mfr",{row:{manufacturer:m.manufacturer,factory:m.factory||m.manufacturer},from:"country",countryState:state})} title={m.manufacturer}>{m.manufacturer}</span>
+                          {(overflowCells.has(cellKey("manufacturer",i))||expandedOverflow.has(cellKey("manufacturer",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("manufacturer",i);}} title={expandedOverflow.has(cellKey("manufacturer",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("manufacturer",i))?"▲":"▼"}</button>}
+                        </div>
                       </td>
                       <td>
                         <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
@@ -2239,7 +2283,6 @@ function CountryDetail({ navigate, state }) {
               </tbody>
             </table>
           </div>
-          <Pagination meta={mfrRes?.meta} page={page} setPage={setPage}/>
         </div>
       </div>
     </div>

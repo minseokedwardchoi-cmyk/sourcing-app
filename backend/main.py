@@ -630,7 +630,7 @@ async def get_sku_factories(
     date_from:      Optional[str]  = Query(None),
     date_to:        Optional[str]  = Query(None),
     page:           int           = Query(1,  ge=1),
-    page_size:      int           = Query(50, ge=1, le=200),
+    page_size:      int           = Query(50, ge=1, le=2000),
     db: AsyncSession = Depends(get_db),
 ):
     similar_skus = [sku_name]
