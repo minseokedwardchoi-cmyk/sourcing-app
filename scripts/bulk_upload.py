@@ -13,7 +13,12 @@ scripts/bulk_upload.py
 
 사용법:
   python3 scripts/bulk_upload.py 파일경로.xlsx
+  python3 scripts/bulk_upload.py 파일1.xlsx 파일2.xlsx 파일3.xlsx
   python3 scripts/bulk_upload.py 파일경로.xlsx --chunk-size 20000 --url https://sourcing-backend-ucp5.onrender.com
+
+여러 파일을 동시에 넘기면 순서대로 이어붙여서 업로드하고, 전체 업로드가 끝난
+마지막 청크에서만 뷰 리프레시를 트리거한다 (파일마다 따로 실행하면 파일당
+한 번씩 리프레시됨).
 """
 
 import argparse
@@ -62,13 +67,17 @@ def post_chunk(url: str, chunk: list[dict], refresh: bool, timeout: int) -> dict
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("file", help="업로드할 Excel(.xlsx/.xls) 또는 CSV 파일 경로")
+    parser.add_argument("files", nargs="+", help="업로드할 Excel(.xlsx/.xls) 또는 CSV 파일 경로 (여러 개 가능)")
     parser.add_argument("--url", default=DEFAULT_URL, help="백엔드 주소")
     parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK, help="청크당 행 수")
     args = parser.parse_args()
 
-    print(f"[1/3] 파일 읽는 중: {args.file}")
-    rows = load_rows(args.file)
+    print(f"[1/3] 파일 {len(args.files)}개 읽는 중")
+    rows: list[dict] = []
+    for path in args.files:
+        file_rows = load_rows(path)
+        print(f"      {path}: {len(file_rows):,}행")
+        rows.extend(file_rows)
     total = len(rows)
     print(f"      총 {total:,}행 로드 완료")
     if total == 0:
