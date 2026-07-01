@@ -301,7 +301,7 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
     setSelected(prev => { const s = new Set(prev); s.has(v) ? s.delete(v) : s.add(v); return s; });
   }
 
-  function handleSort(dir) { onSort(dir); setOpen(false); }
+  function handleSort(dir) { try { onSort(dir); } catch(e) { console.error(e); } setOpen(false); }
 
   function handleOk() {
     const sel = [...selected];
