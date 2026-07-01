@@ -1301,6 +1301,7 @@ async def upload_excel(
 # ─── 4-2. JSON 업로드 ────────────────────────────────────────────────────────
 class JsonUploadRequest(BaseModel):
     rows: list[dict]
+    refresh: bool = True
 
 @app.post("/api/upload-json")
 async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get_db)):
@@ -1343,9 +1344,11 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
             continue
 
     if records:
-        import asyncio
         await db.execute(ImportHistory.__table__.insert(), records)
         await db.commit()
+
+    if payload.refresh:
+        import asyncio
         asyncio.create_task(refresh_mvs())
 
     return {"inserted": inserted, "skipped": skipped}
