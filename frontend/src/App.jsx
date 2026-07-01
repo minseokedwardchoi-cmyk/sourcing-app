@@ -10,6 +10,7 @@ import {
   updateManufacturerContact, uploadContacts, clearAllData,
   fetchColumnValues, fetchMonthlyImportCounts,
   fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers, fetchCountryAmountShare,
+  fetchFactoryView, fetchFactoryViewMonthly,
 } from "./api.js";
 import { getKoreanName } from "./countryGeo.js";
 import worldGeoData from "world-atlas/countries-110m.json";
@@ -703,6 +704,12 @@ function MainDashboard({ navigate }) {
                 onClick={()=>navigate("country-map")}
               >
                 🌍 국가별로 보기
+              </button>
+              <button
+                className="icon-btn"
+                onClick={()=>navigate("factory-view")}
+              >
+                🏭 공장별로 보기
               </button>
             </div>
             <div style={{display:"flex",gap:8}}>
@@ -2168,6 +2175,586 @@ function CountryMapPage({ navigate }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// PAGE: 공장별 보기 대시보드
+// ═══════════════════════════════════════════════════════════════════════════════
+const BIG5_ORDER = ["코스트코", "이마트", "롯데마트", "홈플러스", "쿠팡"];
+
+function formatImporters(importers) {
+  const arr = importers || [];
+  const big5 = BIG5_ORDER.filter(b => arr.some(imp => imp && imp.includes(b)));
+  const otherCount = arr.filter(imp => !BIG5_ORDER.some(b => imp && imp.includes(b))).length;
+  return { big5, otherCount };
+}
+
+function FactoryViewDashboard({ navigate }) {
+  const [data,        setData]        = useState([]);
+  const [meta,        setMeta]        = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState(null);
+  const [search,      setSearch]      = useState("");
+  const [debSearch,   setDebSearch]   = useState("");
+  const [dateFrom,    setDateFrom]    = useState("");
+  const [dateTo,      setDateTo]      = useState("");
+  const [competitor,  setCompetitor]  = useState("전체");
+  const [sortBy,      setSortBy]      = useState("import_count");
+  const [sortDir,     setSortDir]     = useState("desc");
+  const [page,        setPage]        = useState(1);
+  const [visibleCols, setVisibleCols] = useState(ALL_COLS.map(c=>c.key));
+  const [showColMenu, setShowColMenu] = useState(false);
+  const [uploading,   setUploading]   = useState(false);
+  const [uploadMsg,   setUploadMsg]   = useState(null);
+  const [colFilters,  setColFilters]  = useState({});
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
+  const [expandedCells,    setExpandedCells]    = useState(()=>new Set());
+  const [monthlyModal, setMonthlyModal] = useState(null);
+  const [modalChartFrom, setModalChartFrom] = useState("");
+  const [modalChartTo,   setModalChartTo]   = useState("");
+  const colMenuRef = useRef(null);
+  const fileRef    = useRef(null);
+
+  function cellKey(colKey, i) { return `${colKey}:${i}`; }
+
+  function toggleOverflowExpand(colKey, i) {
+    const key = cellKey(colKey, i);
+    setExpandedOverflow(prev => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
+  }
+
+  function overflowTextRef(el, colKey, i) {
+    if (!el) return;
+    const key = cellKey(colKey, i);
+    const isOverflowing = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => {
+      const has = prev.has(key);
+      if (isOverflowing === has) return prev;
+      const next = new Set(prev);
+      isOverflowing ? next.add(key) : next.delete(key);
+      return next;
+    });
+  }
+
+  function toggleCell(colKey, i) {
+    setExpandedCells(prev => {
+      const k = cellKey(colKey, i);
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+  }
+
+  function renderTrunc(colKey, value, limit, i, { badgeClass, navTo } = {}) {
+    if (!value) return badgeClass ? <span className={`badge ${badgeClass}`}>-</span> : "-";
+    const key = cellKey(colKey, i);
+    const expanded = expandedCells.has(key);
+    const over = value.length > limit;
+    const text = expanded || !over ? value : value.slice(0, limit) + "…";
+    const textStyle = expanded ? { whiteSpace:"normal", wordBreak:"break-all" } : undefined;
+    const inner = badgeClass
+      ? <span className={`badge ${badgeClass}`} style={textStyle}>{text}</span>
+      : navTo
+      ? <span className="link-cell" style={textStyle} onClick={navTo}>{text}</span>
+      : <span style={textStyle}>{text}</span>;
+    return (
+      <div className="sku-cell">
+        {inner}
+        {over && (
+          <button className="sku-expand-btn" onClick={(e)=>{e.stopPropagation();toggleCell(colKey,i);}} title={expanded?"접기":"펼치기"}>
+            {expanded?"▲":"▼"}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  function openMonthlyModal(row) {
+    setModalChartFrom(""); setModalChartTo("");
+    setMonthlyModal({ row, loading: true, error: null, yearly: [], monthly: [] });
+    fetchFactoryViewMonthly(row, null, null)
+      .then(res => setMonthlyModal(m => m ? { ...m, loading: false, yearly: res.yearly || [], monthly: res.data || [] } : null))
+      .catch(e => setMonthlyModal(m => m ? { ...m, loading: false, error: e.message || "조회 실패" } : null));
+  }
+
+  function refetchModalChart(row, from, to) {
+    setMonthlyModal(m => m ? { ...m, chartLoading: true } : m);
+    fetchFactoryViewMonthly(row, from || null, to || null)
+      .then(res => setMonthlyModal(m => m ? { ...m, chartLoading: false, monthly: res.data || [] } : null))
+      .catch(() => setMonthlyModal(m => m ? { ...m, chartLoading: false } : null));
+  }
+
+  const stickyHeaderRef = useRef(null);
+  const paginationRef   = useRef(null);
+  const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  const [tableMaxHeight,     setTableMaxHeight]     = useState(null);
+  useLayoutEffect(() => {
+    const headerEl = stickyHeaderRef.current;
+    if (!headerEl) return;
+    const update = () => {
+      const headerHeight = headerEl.offsetHeight;
+      const paginationHeight = paginationRef.current ? paginationRef.current.offsetHeight : 0;
+      setStickyHeaderHeight(headerHeight);
+      setTableMaxHeight(Math.max(200, window.innerHeight - headerHeight - paginationHeight - 16));
+    };
+    update();
+    window.addEventListener("resize", update);
+    const ro = new ResizeObserver(update);
+    ro.observe(headerEl);
+    if (paginationRef.current) ro.observe(paginationRef.current);
+    return () => { window.removeEventListener("resize", update); ro.disconnect(); };
+  }, [showColMenu]);
+
+  useEffect(()=>{ const t=setTimeout(()=>{setDebSearch(search);setPage(1);},500); return()=>clearTimeout(t); },[search]);
+  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+
+  useEffect(()=>{
+    setLoading(true); setError(null);
+    fetchFactoryView({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50,colFilters,dateFrom,dateTo})
+      .then(r=>{setData(r.data);setMeta(r.meta);})
+      .catch(e=>setError(e.message))
+      .finally(()=>setLoading(false));
+  },[debSearch,competitor,sortBy,sortDir,page,colFilters,dateFrom,dateTo]);
+
+  useEffect(()=>{
+    const h=e=>{if(colMenuRef.current&&!colMenuRef.current.contains(e.target))setShowColMenu(false);};
+    document.addEventListener("mousedown",h); return()=>document.removeEventListener("mousedown",h);
+  },[]);
+
+  function handleSort(col){
+    if(sortBy===col) setSortDir(d=>d==="asc"?"desc":"asc");
+    else{setSortBy(col);setSortDir("asc");}
+    setPage(1);
+  }
+
+  async function handleUpload(e){
+    const file=e.target.files?.[0]; if(!file)return;
+    setUploading(true); setUploadMsg(null);
+    try{
+      const res=await uploadExcel(file);
+      setUploadMsg({ok:true,text:res.message});
+      const r2=await fetchFactoryView({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50});
+      setData(r2.data); setMeta(r2.meta);
+    }catch(err){setUploadMsg({ok:false,text:err.message});}
+    finally{setUploading(false); e.target.value="";}
+  }
+
+  async function handleClearAllData(){
+    if(!window.confirm("정말 모든 데이터를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다."))return;
+    if(window.prompt("삭제를 진행하려면 'DELETE'를 입력하세요.") !== "DELETE")return;
+    setUploading(true); setUploadMsg(null);
+    try{
+      const res=await clearAllData();
+      setUploadMsg({ok:true,text:res.message});
+      const r2=await fetchFactoryView({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50});
+      setData(r2.data); setMeta(r2.meta);
+    }catch(err){setUploadMsg({ok:false,text:err.message});}
+    finally{setUploading(false);}
+  }
+
+  async function handleContactExcelUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true); setUploadMsg(null);
+    try {
+      const res = await uploadContacts(file, true);
+      setUploadMsg({ ok: true, text: res.message });
+      const refreshed = await fetchFactoryView({ search: debSearch, competitor, sortBy, sortDir, page, pageSize: 50 });
+      setData(refreshed.data); setMeta(refreshed.meta); setError(null);
+    } catch (err) {
+      setUploadMsg({ ok: false, text: err.message || "연락처 보강 업로드 실패" });
+    } finally {
+      setUploading(false); e.target.value = "";
+    }
+  }
+
+  const baseYear = data[0]?.base_year || new Date().getFullYear();
+  const cols = ALL_COLS
+    .filter(c=>visibleCols.includes(c.key))
+    .map(c => c.isYearCount ? { ...c, label: yearLabel(c.isYearCount, baseYear) } : c);
+
+  return (
+    <div className="app">
+      <style>{styles}</style>
+      <div className="hero">
+        <div className="hero-inner">
+          <div className="hero-title">해외 제조업체 발굴 대시보드</div>
+          <div className="hero-desc">국내 식품 수입 이력을 기반으로 해외 제조업체와 관련 상품 정보를 한눈에 확인하는 대시보드입니다.</div>
+          <div className="hero-kpi">
+            {[
+              { label: "해외 제조업체", val: 40658,    unit: "개" },
+              { label: "OEM 업체",      val: 2249,     unit: "개" },
+              { label: "제조국",         val: 162,      unit: "개" },
+              { label: "식품 SKU",       val: 172178,   unit: "개" },
+              { label: "식품 수입 이력", val: 1045692,  unit: "건" },
+            ].map(({ label, val, unit }) => (
+              <div key={label} className="hero-kpi-item">
+                <div className="hero-kpi-label">{label}</div>
+                <div className="hero-kpi-num">
+                  {Number(val).toLocaleString()}
+                  <span className="hero-kpi-unit">{unit}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="page">
+        {uploadMsg && (
+          <div className={uploadMsg.ok?"notice":"error-box"} style={{marginBottom:10}}>
+            {uploadMsg.text}
+          </div>
+        )}
+
+        <div className="card">
+          <div className="sticky-panel-header" ref={stickyHeaderRef}>
+          <div className="card-header">
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span className="card-title">수입/OEM SKU 이력 (공장별 보기)</span>
+              <button
+                className="icon-btn"
+                onClick={()=>navigate("main")}
+              >
+                📋 수입이력 별로 보기
+              </button>
+              <button
+                className="icon-btn"
+                onClick={()=>navigate("country-map")}
+              >
+                🌍 국가별로 보기
+              </button>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <input type="file" accept=".xlsx,.xls" ref={fileRef} style={{display:"none"}} onChange={handleUpload}/>
+              <button className="upload-btn" disabled={uploading} onClick={()=>fileRef.current?.click()}>
+                {uploading ? "업로드 중..." : "📤 Excel 업로드"}
+              </button>
+              <label className="upload-btn" style={{ background: "#0f766e", cursor: uploading ? "not-allowed" : "pointer", opacity: uploading ? 0.5 : 1 }}>
+                {uploading ? "업로드 중..." : "📇 연락처 보강 업로드"}
+                <input type="file" accept=".xlsx,.xls" onChange={handleContactExcelUpload} disabled={uploading} style={{display:"none"}}/>
+              </label>
+              <button className="upload-btn" style={{ background: "#dc2626" }} disabled={uploading} onClick={handleClearAllData}>
+                🗑️ 전체 데이터 삭제
+              </button>
+            </div>
+          </div>
+
+          {/* 경쟁사 카드 */}
+          <div style={{padding:"12px 14px 0"}}>
+            <div className="competitor-cards">
+              {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡"].map(name => {
+                const theme = CARD_THEMES[name];
+                const isActive = competitor === name;
+                const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375 };
+                const count = FIXED_COUNTS[name];
+                return (
+                  <button key={name} className={`comp-card${isActive ? " active" : ""}`}
+                    style={{ background: isActive ? theme.active : theme.bg, borderColor: isActive ? theme.active : "#e2e8f0" }}
+                    onClick={() => { setCompetitor(name); setPage(1); }}>
+                    <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151", fontSize:"15px"}}>{name}</span>
+                    <span className="comp-card-num"  style={{color: isActive ? "#fff" : "#1a1a2e"}}>{typeof count === "number" ? count.toLocaleString() : count}</span>
+                    <span className="comp-card-label">해외제조업체</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 검색 툴바 */}
+          <div className="toolbar">
+            <div className="search-wrap">
+              <span className="search-icon">🔍</span>
+              <input placeholder="제품명, 해외제조업소, MC, 수입업체, 제조국 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+            </div>
+            <div className="date-range-wrap">
+              <input type="date" className="date-range-input" value={dateFrom} max={dateTo||undefined} onChange={e=>setDateFrom(e.target.value)}/>
+              <span className="date-range-sep">~</span>
+              <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
+              {(dateFrom||dateTo) && (
+                <button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>
+              )}
+            </div>
+            <span className="count-label">{meta?`총 ${meta.total.toLocaleString()}건 중 표시`:""}</span>
+            <button className="icon-btn" onClick={()=>downloadCSV(data,"factory_view.csv")}>⬇ CSV</button>
+            <div className="col-wrap" ref={colMenuRef}>
+              <button className="icon-btn" onClick={()=>setShowColMenu(v=>!v)}>⚙ 열 설정</button>
+              {showColMenu&&(
+                <div className="col-dropdown">
+                  {ALL_COLS.map(c=>(
+                    <label key={c.key} className="col-item">
+                      <input type="checkbox" checked={visibleCols.includes(c.key)}
+                        onChange={e=>setVisibleCols(prev=>e.target.checked?[...prev,c.key]:prev.filter(k=>k!==c.key))}/>
+                      {c.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          </div>
+
+          {error&&<div className="error-box">오류: {error}</div>}
+
+          <div className="table-wrap" style={{overflow:"auto", maxHeight: tableMaxHeight ? `${tableMaxHeight}px` : undefined}}>
+            <table>
+              <colgroup>
+                {cols.map(c=><col key={c.key} style={c.key==="email" ? undefined : {width:c.w}}/>)}
+              </colgroup>
+              <thead>
+                <tr>
+                  {cols.map(c=>(
+                    <th key={c.key} className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"sticky", top:0, zIndex:30}}>
+                      <div className="th-inner">
+                        <span className="th-label">{c.label}</span>
+                        <ColumnFilter
+                          colKey={c.filterKey || null}
+                          isNumeric={!!c.isNumeric}
+                          activeValues={c.filterKey ? (colFilters[c.filterKey] || null) : null}
+                          activeSortCol={sortBy === c.key}
+                          activeSortDir={sortDir}
+                          onSort={dir => { setSortBy(c.key); setSortDir(dir); setPage(1); }}
+                          onApply={vals => {
+                            if (c.filterKey) {
+                              setColFilters(prev => ({ ...prev, [c.filterKey]: vals }));
+                              setPage(1);
+                            }
+                          }}
+                        />
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? <SkeletonRows cols={cols.length}/>
+                : data.length===0
+                  ? <tr><td colSpan={cols.length}><div className="empty-state">조건에 맞는 SKU 이력이 없습니다.</div></td></tr>
+                  : data.map((row,i)=>(
+                    <tr key={i}>
+                      {cols.map(c=>(
+                        <td key={c.key} title={c.key==="factory"?undefined:undefined}
+                          className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined}
+                          style={
+                            c.key==="factory" ? {maxWidth:"none", overflow:"visible"}
+                            : c.key==="import_type" ? {padding:"8px 4px", textAlign:"center"}
+                            : c.key==="email" ? {maxWidth:"none"}
+                            : c.key==="sku_name"
+                            ? {maxWidth:"none", overflow:"visible", whiteSpace: expandedOverflow.has(cellKey("sku_name",i)) ? "normal" : "nowrap"}
+                            : c.key==="importer"
+                            ? {maxWidth:"none", overflow:"visible"}
+                            : ["category","mc","country"].includes(c.key)
+                            ? {maxWidth:"none", overflow:"visible", whiteSpace: expandedCells.has(cellKey(c.key,i)) ? "normal" : "nowrap"}
+                            : undefined
+                          }>
+
+                          {c.clickable==="sku"
+                            ? (
+                              <div className="sku-cell">
+                                <span
+                                  ref={el=>overflowTextRef(el,"sku_name",i)}
+                                  className="link-cell sku-cell-text"
+                                  style={expandedOverflow.has(cellKey("sku_name",i)) ? {whiteSpace:"normal",wordBreak:"break-all"} : undefined}
+                                  onClick={()=>navigate("sku",{row})}
+                                  title={row[c.key]}
+                                >
+                                  {row[c.key]}
+                                </span>
+                                {(overflowCells.has(cellKey("sku_name",i)) || expandedOverflow.has(cellKey("sku_name",i))) && (
+                                  <button className="sku-expand-btn" onClick={(e)=>{e.stopPropagation();toggleOverflowExpand("sku_name",i);}} title={expandedOverflow.has(cellKey("sku_name",i))?"접기":"펼치기"}>
+                                    {expandedOverflow.has(cellKey("sku_name",i))?"▲":"▼"}
+                                  </button>
+                                )}
+                              </div>
+                            )
+                            : c.clickable==="mfr"
+                            ? (
+                              <div className="sku-cell">
+                                <span
+                                  ref={el=>overflowTextRef(el,"factory",i)}
+                                  className="link-cell sku-cell-text"
+                                  style={expandedOverflow.has(cellKey("factory",i)) ? {whiteSpace:"normal",wordBreak:"break-all"} : undefined}
+                                  onClick={()=>navigate("mfr",{row,from:"main"})}
+                                  title={row[c.key]}
+                                >
+                                  {row[c.key]}
+                                </span>
+                                {(overflowCells.has(cellKey("factory",i)) || expandedOverflow.has(cellKey("factory",i))) && (
+                                  <button className="sku-expand-btn" onClick={(e)=>{e.stopPropagation();toggleOverflowExpand("factory",i);}} title={expandedOverflow.has(cellKey("factory",i))?"접기":"펼치기"}>
+                                    {expandedOverflow.has(cellKey("factory",i))?"▲":"▼"}
+                                  </button>
+                                )}
+                              </div>
+                            )
+                            : c.clickable==="country"
+                            ? renderTrunc("country", row[c.key], 5, i, { navTo: ()=>navigate("country",{country:row[c.key]}) })
+                            : c.key==="import_count"
+                            ? <span className="badge b-count">{row[c.key]}</span>
+                            : c.isTrend
+                            ? (
+                              <button className="trend-btn" onClick={(e)=>{e.stopPropagation();openMonthlyModal(row);}}>📈 추이 보기</button>
+                            )
+                            : c.isYearCount
+                            ? <span style={{color: row[c.key]>0?"#15803d":"#9ca3af", fontWeight: row[c.key]>0?600:400}}>
+                                {row[c.key]>0 ? row[c.key] : "-"}
+                              </span>
+                            : c.isMc
+                            ? renderTrunc("mc", row[c.key], 5, i, { badgeClass:"b-mc" })
+                            : c.key==="email"
+                            ? <span className="email-cell">{row[c.key]||"-"}</span>
+                            : c.key==="import_type"
+                            ? <OemBadge value={row[c.key]}/>
+                            : c.key==="category"
+                            ? renderTrunc("category", row[c.key], 6, i, { badgeClass:"b-cat" })
+                            : c.key==="importer"
+                            ? (() => {
+                                const { big5, otherCount } = formatImporters(row.importers);
+                                if (big5.length === 0 && otherCount === 0) return <span style={{color:"#9ca3af"}}>-</span>;
+                                return (
+                                  <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                                    {big5.map((b,j)=><span key={j} className="badge b-gray">{b}</span>)}
+                                    {otherCount>0&&<span className="badge b-gray">외 {otherCount}개</span>}
+                                  </div>
+                                );
+                              })()
+                            : row[c.key]||"-"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+          <div ref={paginationRef}>
+            <Pagination meta={meta} page={page} setPage={setPage}/>
+          </div>
+        </div>
+      </div>
+
+      {monthlyModal && (() => {
+        const today = new Date();
+        const thisYear = today.getFullYear();
+        const thisMonth = today.getMonth() + 1;
+
+        const yearlyMap = {};
+        (monthlyModal.yearly || []).forEach(y => { yearlyMap[y.year] = y.count; });
+        const allYears = [];
+        for (let yr = 2021; yr <= thisYear; yr++) {
+          allYears.push({ year: String(yr), count: yearlyMap[String(yr)] ?? 0 });
+        }
+        const firstDataYear = allYears.find(y => y.count > 0)?.year;
+
+        function getYearChangeRate(y) {
+          if (y.year === firstDataYear) return null;
+          const prevIdx = allYears.findIndex(a => a.year === String(Number(y.year) - 1));
+          if (prevIdx < 0) return null;
+          const prev = allYears[prevIdx].count;
+          if (prev === 0) return null;
+          const isCurrent = Number(y.year) === thisYear;
+          if (isCurrent) {
+            const currSlice = (monthlyModal.monthly || []).filter(mo => {
+              const [yy, mm] = mo.month.split("/");
+              return Number("20"+yy) === thisYear && Number(mm) <= thisMonth;
+            }).reduce((s, mo) => s + mo.count, 0);
+            const prevSlice = (monthlyModal.monthly || []).filter(mo => {
+              const [yy, mm] = mo.month.split("/");
+              return Number("20"+yy) === thisYear - 1 && Number(mm) <= thisMonth;
+            }).reduce((s, mo) => s + mo.count, 0);
+            if (prevSlice === 0) return null;
+            const pct = Math.round((currSlice - prevSlice) / prevSlice * 100);
+            return { pct, isCurrent: true };
+          } else {
+            const pct = Math.round((y.count - prev) / prev * 100);
+            return { pct, isCurrent: false };
+          }
+        }
+
+        const chartData = (monthlyModal.monthly || [])
+          .filter(mo => {
+            if (modalChartFrom && mo.month < modalChartFrom.slice(2).replace("-","/")) return false;
+            if (modalChartTo   && mo.month > modalChartTo.slice(2).replace("-","/"))   return false;
+            return true;
+          })
+          .map(mo => ({ month: mo.month, count: mo.count }));
+        const chartTotal = chartData.reduce((s, d) => s + d.count, 0);
+
+        return (
+          <div className="modal-overlay" onClick={()=>setMonthlyModal(null)}>
+            <div className="modal-box" style={{maxWidth:"min(1100px, 95vw)"}} onClick={e=>e.stopPropagation()}>
+              <div className="modal-header">
+                <span className="modal-title">{monthlyModal.row.sku_name} — 연도별 / 월별 수입횟수 (공장 전체)</span>
+                <button className="modal-close" onClick={()=>setMonthlyModal(null)}>✕</button>
+              </div>
+              <div className="modal-body">
+                {monthlyModal.loading ? <div className="empty-state">불러오는 중...</div>
+                : monthlyModal.error ? (
+                  <div className="error-box" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
+                    <span>오류: {monthlyModal.error}</span>
+                    <button className="trend-btn" onClick={()=>openMonthlyModal(monthlyModal.row)}>다시 시도</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="modal-section-title">연도별 수입횟수</div>
+                    {!allYears.some(y => y.count > 0) ? <div className="empty-state">이력 없음</div> : (
+                      <div style={{overflowX:"auto"}}>
+                        <div style={{display:"grid",gridTemplateColumns:`auto repeat(${allYears.length}, auto)`,gap:1,background:"#e8eaed",fontSize:12,width:"fit-content",border:"1px solid #e8eaed",borderRadius:4,overflow:"hidden"}}>
+                          <div style={{padding:"5px 10px", background:"#f1f3f5", fontWeight:600, color:"#6b7280", whiteSpace:"nowrap"}}>연도</div>
+                          {allYears.map(y => <div key={y.year} style={{padding:"5px 10px", background:"#fff", textAlign:"center"}}>{y.year}</div>)}
+                          <div style={{padding:"5px 10px", background:"#f1f3f5", fontWeight:600, color:"#6b7280", whiteSpace:"nowrap"}}>수입횟수</div>
+                          {allYears.map((y) => {
+                            const rate = getYearChangeRate(y);
+                            const isCurrent = Number(y.year) === thisYear;
+                            return (
+                              <div key={y.year} style={{padding:"5px 10px", background:"#fff", textAlign:"center", color: y.count>0?"#15803d":"#9ca3af", fontWeight: y.count>0?600:400}}>
+                                {y.count}
+                                {rate !== null && (
+                                  <span style={{display:"block", fontSize:10, color: rate.pct >= 0 ? "#dc2626" : "#2563eb", fontWeight:500}}>
+                                    {isCurrent ? `(전년 동기比 ${rate.pct >= 0 ? "+" : ""}${rate.pct}%)` : `(${rate.pct >= 0 ? "+" : ""}${rate.pct}%)`}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    <div style={{marginTop:16, display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8}}>
+                      <div className="modal-section-title" style={{margin:0}}>월별 수입횟수 추이</div>
+                      <div style={{display:"flex", alignItems:"center", gap:6, fontSize:12}}>
+                        <input type="month" className="date-range-input" style={{padding:"3px 7px", fontSize:12}} value={modalChartFrom} onChange={e => { setModalChartFrom(e.target.value); refetchModalChart(monthlyModal.row, e.target.value, modalChartTo); }}/>
+                        <span style={{color:"#9ca3af"}}>~</span>
+                        <input type="month" className="date-range-input" style={{padding:"3px 7px", fontSize:12}} value={modalChartTo} onChange={e => { setModalChartTo(e.target.value); refetchModalChart(monthlyModal.row, modalChartFrom, e.target.value); }}/>
+                        {(modalChartFrom || modalChartTo) && (
+                          <button className="icon-btn" style={{fontSize:11}} onClick={() => { setModalChartFrom(""); setModalChartTo(""); refetchModalChart(monthlyModal.row, "", ""); }}>초기화</button>
+                        )}
+                      </div>
+                    </div>
+                    {!chartData.length ? <div className="empty-state" style={{marginTop:8}}>해당 기간 이력 없음</div> : (
+                      <div style={{position:"relative", marginTop:8}}>
+                        <div style={{position:"absolute", top:4, left:8, zIndex:1, fontSize:12, color:"#374151", fontWeight:600}}>
+                          총 수입횟수: <span style={{color:"#15803d"}}>{chartTotal.toLocaleString()}건</span>
+                        </div>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <LineChart data={chartData} margin={{top:28, right:16, bottom:4, left:0}}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
+                            <XAxis dataKey="month" tick={{fontSize:10}} interval="preserveStartEnd"/>
+                            <YAxis tick={{fontSize:10}} allowDecimals={false} width={36}/>
+                            <Tooltip formatter={(v) => [v + "건", "수입횟수"]} contentStyle={{fontSize:12, borderRadius:6}}/>
+                            <Line type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2} dot={{ r: 2, fill: "#16a34a" }} activeDot={{ r: 4 }}>
+                              <LabelList dataKey="count" position="top" style={{fontSize:10, fill:"#374151", fontWeight:600}} formatter={v => v > 0 ? v : ""}/>
+                            </Line>
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ROOT
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
@@ -2177,5 +2764,6 @@ export default function App() {
   if (page.name==="mfr") return <ManufacturerDetail navigate={navigate} state={page.state}/>;
   if (page.name==="country") return <CountryDetail navigate={navigate} state={page.state}/>;
   if (page.name==="country-map") return <CountryMapPage navigate={navigate}/>;
+  if (page.name==="factory-view") return <FactoryViewDashboard navigate={navigate}/>;
   return <MainDashboard navigate={navigate}/>;
 }

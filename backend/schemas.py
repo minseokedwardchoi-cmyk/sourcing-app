@@ -183,6 +183,30 @@ class CountryAmountShareResponse(BaseModel):
     items: list[CountryAmountShareRow]
 
 
+# ─── 공장별 보기 페이지 ───────────────────────────────────────────────────────
+class FactoryViewRow(BaseModel):
+    category:      Optional[str]  = Field(None)
+    mc:            Optional[str]  = Field(None)
+    sku_name:      str
+    import_type:   Optional[str]  = Field(None)
+    importers:     list[str]      = Field(default_factory=list, description="수입업체 목록")
+    import_count:  int
+    manufacturer:  Optional[str]  = Field(None)
+    factory:       Optional[str]  = Field(None)
+    country:       Optional[str]  = Field(None)
+    email:         Optional[str]  = Field(None)
+    latest_import: Optional[date] = Field(None)
+    base_year:     Optional[int]  = Field(None)
+    count_year1:   int            = Field(0)
+    count_year2:   int            = Field(0)
+    count_year3:   int            = Field(0)
+
+
+class FactoryViewResponse(BaseModel):
+    data: list[FactoryViewRow]
+    meta: PaginationMeta
+
+
 # ─── Excel 업로드 응답 ────────────────────────────────────────────────────────
 class UploadResponse(BaseModel):
     inserted:  int = Field(..., description="신규 삽입 건수")

@@ -32,6 +32,7 @@ from schemas import (
     ManufacturerDetailResponse, ManufacturerDetail, ManufacturerSkuRow,
     UploadResponse,
     MonthlyImportCountResponse, MonthlyImportCount, YearlyImportCount,
+    FactoryViewRow, FactoryViewResponse,
 )
 from importer import import_excel, COMPETITOR_MAP
 from contact_importer import import_contacts
@@ -279,6 +280,15 @@ class DateBulkUploadResponse(BaseModel):
     message: str
 
 # ─── 경쟁사 필터 SQL 헬퍼 ────────────────────────────────────────────────────
+def _competitor_having_condition(competitor: str | None) -> str:
+    """공장별 보기용: GROUP 내 any importer가 경쟁사 조건을 만족하는지 HAVING 절"""
+    if not competitor or competitor == "전체":
+        return ""
+    aliases = COMPETITOR_MAP.get(competitor, [competitor])
+    inner = " OR ".join(f"importer ILIKE '%{a}%'" for a in aliases)
+    return f"AND bool_or({inner})"
+
+
 def _competitor_condition(competitor: str | None) -> str:
     """경쟁사 필터 → SQL WHERE 절 (파라미터 바인딩은 호출부에서)"""
     if not competitor or competitor == "전체":
@@ -1226,6 +1236,263 @@ async def get_competitor_stats(db: AsyncSession = Depends(get_db)):
         """))
         result[comp] = r.scalar() or 0
     return result
+
+# ─── 공장별 보기: 집계 (importer 제외 그룹핑) ────────────────────────────────
+@app.get("/api/factory-view", response_model=FactoryViewResponse)
+async def get_factory_view(
+    search:             Optional[str]       = Query(None),
+    competitor:         Optional[str]       = Query("전체"),
+    sort_by:            str                 = Query("import_count"),
+    sort_dir:           str                 = Query("desc"),
+    page:               int                 = Query(1,   ge=1),
+    page_size:          int                 = Query(50,  ge=1, le=200),
+    date_from:          Optional[str]       = Query(None),
+    date_to:            Optional[str]       = Query(None),
+    filter_category:    Optional[List[str]] = Query(None),
+    filter_mc:          Optional[List[str]] = Query(None),
+    filter_import_type: Optional[List[str]] = Query(None),
+    filter_importer:    Optional[List[str]] = Query(None),
+    filter_country:     Optional[List[str]] = Query(None),
+    filter_factory:     Optional[List[str]] = Query(None),
+    filter_email:       Optional[List[str]] = Query(None),
+    filter_sku_name:    Optional[List[str]] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    allowed_sort = {
+        "import_count", "latest_import", "sku_name",
+        "manufacturer", "country", "mc", "category", "import_type",
+    }
+    if sort_by not in allowed_sort:
+        sort_by = "import_count"
+    sort_dir_sql = "DESC" if sort_dir.lower() == "desc" else "ASC"
+
+    search_cond = ""
+    params: dict = {"limit": page_size, "offset": (page - 1) * page_size}
+    if search and search.strip():
+        search_cond = """AND (
+            sku_name     ILIKE :search OR
+            factory      ILIKE :search OR
+            manufacturer ILIKE :search OR
+            importer     ILIKE :search OR
+            country      ILIKE :search OR
+            mc           ILIKE :search
+        )"""
+        params["search"] = f"%{search.strip()}%"
+
+    # date 조건 — MV의 latest_import / earliest_import 활용
+    date_cond = ""
+    if date_from or date_to:
+        params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
+        params["date_to"]   = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
+        date_cond = """AND MAX(latest_import) >= CAST(:date_from AS date)
+                       AND MIN(earliest_import) <= CAST(:date_to AS date)"""
+
+    # importer를 제외한 컬럼 필터 (WHERE 절)
+    col_filter_map = {
+        "category":    filter_category,
+        "mc":          filter_mc,
+        "import_type": filter_import_type,
+        "country":     filter_country,
+        "factory":     filter_factory,
+        "email":       filter_email,
+        "sku_name":    filter_sku_name,
+    }
+    where_col_conds = ""
+    for col, values in col_filter_map.items():
+        if values:
+            in_keys = {f"cf_{col}_{i}": v for i, v in enumerate(values)}
+            in_clause = ", ".join(f":cf_{col}_{i}" for i in range(len(values)))
+            where_col_conds += f" AND {col} IN ({in_clause})"
+            params.update(in_keys)
+
+    # HAVING 절: 경쟁사 + importer 필터
+    having_conds = _competitor_having_condition(competitor)
+    if filter_importer:
+        in_keys = {f"cf_importer_{i}": v for i, v in enumerate(filter_importer)}
+        in_clause = ", ".join(f":cf_importer_{i}" for i in range(len(filter_importer)))
+        having_conds += f" AND bool_or(importer IN ({in_clause}))"
+        params.update(in_keys)
+
+    having_clause = f"HAVING 1=1 {having_conds}" if having_conds else ""
+
+    # date_cond는 GROUP 후 HAVING에 넣어야 함
+    having_full = f"HAVING 1=1 {having_conds} {date_cond}" if (having_conds or date_cond) else ""
+
+    sort_expr = sort_by if sort_by != "import_type" else "import_type"
+
+    data_sql = f"""
+        SELECT
+            category, mc, sku_name, import_type,
+            SUM(import_count)::int                                                AS import_count,
+            manufacturer, factory, country,
+            MIN(email)                                                             AS email,
+            MAX(latest_import)                                                     AS latest_import,
+            MAX(base_year)                                                         AS base_year,
+            SUM(count_year1)::int                                                  AS count_year1,
+            SUM(count_year2)::int                                                  AS count_year2,
+            SUM(count_year3)::int                                                  AS count_year3,
+            array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)       AS importers
+        FROM sku_history_mv
+        WHERE 1=1
+            {search_cond}
+            {where_col_conds}
+        GROUP BY category, mc, sku_name, import_type, manufacturer, factory, country
+        {having_full}
+        ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
+        LIMIT :limit OFFSET :offset
+    """
+
+    count_sql = f"""
+        SELECT COUNT(*) FROM (
+            SELECT 1
+            FROM sku_history_mv
+            WHERE 1=1
+                {search_cond}
+                {where_col_conds}
+            GROUP BY category, mc, sku_name, import_type, manufacturer, factory, country
+            {having_full}
+        ) AS _grouped
+    """
+
+    rows_r  = await db.execute(text(data_sql),  params)
+    count_r = await db.execute(text(count_sql), params)
+
+    rows  = rows_r.mappings().all()
+    total = count_r.scalar() or 0
+
+    return FactoryViewResponse(
+        data=[
+            FactoryViewRow(
+                category      = r["category"],
+                mc            = r["mc"],
+                sku_name      = r["sku_name"],
+                import_type   = r["import_type"],
+                importers     = list(r["importers"] or []),
+                import_count  = r["import_count"],
+                manufacturer  = r["manufacturer"],
+                factory       = r["factory"],
+                country       = r["country"],
+                email         = r["email"],
+                latest_import = r["latest_import"],
+                base_year     = r["base_year"],
+                count_year1   = r["count_year1"] or 0,
+                count_year2   = r["count_year2"] or 0,
+                count_year3   = r["count_year3"] or 0,
+            )
+            for r in rows
+        ],
+        meta=PaginationMeta(
+            total       = total,
+            page        = page,
+            page_size   = page_size,
+            total_pages = max(1, math.ceil(total / page_size)),
+        ),
+    )
+
+
+# ─── 공장별 보기: 월별 수입횟수 (importer 미포함) ─────────────────────────────
+_FACTORY_VIEW_MONTHLY_COLS = [
+    "category", "mc", "sku_name", "import_type",
+    "manufacturer", "factory", "country",
+]
+
+@app.get("/api/factory-view/monthly", response_model=MonthlyImportCountResponse)
+async def get_factory_view_monthly(
+    category:     Optional[str] = Query(None),
+    mc:           Optional[str] = Query(None),
+    sku_name:     Optional[str] = Query(None),
+    import_type:  Optional[str] = Query(None),
+    manufacturer: Optional[str] = Query(None),
+    factory:      Optional[str] = Query(None),
+    country:      Optional[str] = Query(None),
+    date_from:    Optional[str] = Query(None),
+    date_to:      Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    values = {
+        "category": category, "mc": mc, "sku_name": sku_name,
+        "import_type": import_type, "manufacturer": manufacturer,
+        "factory": factory, "country": country,
+    }
+    match_conds = []
+    params: dict = {}
+    for col in _FACTORY_VIEW_MONTHLY_COLS:
+        v = values[col]
+        if v is None:
+            match_conds.append(f"{col} IS NULL")
+        else:
+            match_conds.append(f"{col} = :{col}")
+            params[col] = v
+    match_sql = " AND ".join(match_conds)
+
+    if date_from or date_to:
+        range_from = date.fromisoformat(date_from) if date_from else None
+        range_to   = date.fromisoformat(date_to)   if date_to   else None
+        if range_from is None:
+            bounds_r = await db.execute(text(f"""
+                SELECT MIN(COALESCE(import_date, process_date)) FROM import_history WHERE {match_sql}
+            """), params)
+            range_from = bounds_r.scalar()
+        if range_to is None:
+            range_to = date.today()
+        if range_from is None:
+            return MonthlyImportCountResponse(data=[], yearly=[])
+        match_sql_dated = match_sql + " AND COALESCE(import_date, process_date) BETWEEN :range_from AND :range_to"
+        params = {**params, "range_from": range_from, "range_to": range_to}
+        min_date, max_date = range_from, range_to
+    else:
+        bounds_r = await db.execute(text(f"""
+            SELECT MIN(COALESCE(import_date, process_date)) FROM import_history WHERE {match_sql}
+        """), params)
+        min_date = bounds_r.scalar()
+        if min_date is None:
+            return MonthlyImportCountResponse(data=[], yearly=[])
+        max_date = date.today()
+        match_sql_dated = match_sql
+
+    rows_r = await db.execute(text(f"""
+        WITH months AS (
+            SELECT generate_series(
+                date_trunc('month', CAST(:min_date AS date)),
+                date_trunc('month', CAST(:max_date AS date)),
+                interval '1 month'
+            ) AS m
+        ),
+        counts AS (
+            SELECT date_trunc('month', COALESCE(import_date, process_date)) AS m, COUNT(*) AS cnt
+            FROM import_history
+            WHERE {match_sql_dated}
+            GROUP BY 1
+        )
+        SELECT to_char(months.m, 'YY/MM') AS ym, COALESCE(counts.cnt, 0)::int AS cnt
+        FROM months LEFT JOIN counts ON months.m = counts.m
+        ORDER BY months.m
+    """), {**params, "min_date": min_date, "max_date": max_date})
+
+    years_r = await db.execute(text(f"""
+        WITH years AS (
+            SELECT generate_series(
+                date_trunc('year', CAST(:min_date AS date)),
+                date_trunc('year', CAST(:max_date AS date)),
+                interval '1 year'
+            ) AS y
+        ),
+        counts AS (
+            SELECT date_trunc('year', COALESCE(import_date, process_date)) AS y, COUNT(*) AS cnt
+            FROM import_history
+            WHERE {match_sql_dated}
+            GROUP BY 1
+        )
+        SELECT to_char(years.y, 'YYYY') AS yr, COALESCE(counts.cnt, 0)::int AS cnt
+        FROM years LEFT JOIN counts ON years.y = counts.y
+        ORDER BY years.y
+    """), {**params, "min_date": min_date, "max_date": max_date})
+
+    return MonthlyImportCountResponse(
+        data=[MonthlyImportCount(month=r[0], count=r[1]) for r in rows_r.fetchall()],
+        yearly=[YearlyImportCount(year=r[0], count=r[1]) for r in years_r.fetchall()],
+    )
+
 
 # ─── MV 수동 갱신 ────────────────────────────────────────────────────────────
 @app.post("/api/refresh-mv")
