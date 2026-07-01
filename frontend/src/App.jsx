@@ -130,6 +130,7 @@ const styles = `
   .contact-edit-box { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f3f5; }
   .contact-edit-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: #374151; }
   .contact-edit-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .contact-edit-inline { grid-template-columns: minmax(180px, 260px) minmax(160px, 240px); align-items: end; column-gap: 12px; }
   .contact-edit-field label { display: block; font-size: 11px; color: #6b7280; margin-bottom: 4px; }
   .contact-edit-field input { width: 100%; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; outline: none; background: #f9fafb; color: #1a1a2e; }
   .contact-edit-field input:focus { border-color: #16a34a; background: #fff; }
@@ -264,11 +265,12 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
       if (dropRef.current?.contains(e.target)) return;
       setOpen(false);
     };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
+    document.addEventListener("mousedown", h, true);
+    return () => document.removeEventListener("mousedown", h, true);
   }, [open]);
 
   function handleToggle(e) {
+    e.preventDefault();
     e.stopPropagation();
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
@@ -316,7 +318,7 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
   const sortDescIcon  = isNumeric ? "9→1" : "ㅎ→ㄱ";
 
   const dropdown = (
-    <div ref={dropRef} className="filter-dropdown" style={dropStyle} onClick={e => e.stopPropagation()}>
+    <div ref={dropRef} className="filter-dropdown" style={dropStyle} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
       <div className="filter-sort-section">
         <button className="filter-sort-btn" onClick={() => handleSort("asc")}>
           <span className="filter-sort-icon">{sortAscIcon}</span>
@@ -329,7 +331,7 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
           {activeSortCol && activeSortDir === "desc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
         </button>
       </div>
-      {colKey ? (
+      {(colKey || localValues) ? (
         <>
           <div className="filter-search-section">
             <input className="filter-search" placeholder="검색..." value={search} onChange={e => setSearch(e.target.value)}/>
@@ -366,8 +368,8 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
   );
 
   return (
-    <div style={{position:"relative",display:"inline-block"}} onClick={e => e.stopPropagation()}>
-      <button ref={btnRef} className={`filter-icon-btn${isActive ? " active" : ""}`} onClick={handleToggle} title="필터">▾</button>
+    <div style={{position:"relative",display:"inline-block"}} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+      <button type="button" ref={btnRef} className={`filter-icon-btn${isActive ? " active" : ""}`} onMouseDown={handleToggle} onClick={e => { e.preventDefault(); e.stopPropagation(); }} title="필터">▾</button>
       {open && createPortal(dropdown, document.body)}
     </div>
   );
@@ -1166,12 +1168,25 @@ function SkuManufacturers({ navigate, state }) {
   const [error,        setError]       = useState(null);
   const [search,       setSearch]      = useState("");
   const [debSearch,    setDebSearch]   = useState("");
-  const [page,         setPage]        = useState(1);
   const [skuSort,      setSkuSort]     = useState("ranking_score");
   const [skuDir,       setSkuDir]      = useState("desc");
   const [colFilters,   setColFilters]  = useState({});
   const [dateFrom,     setDateFrom]    = useState("");
   const [dateTo,       setDateTo]      = useState("");
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
+
+  function cellKey(col, i) { return `${col}:${i}`; }
+  function toggleOverflowExpand(col, i) {
+    const k = cellKey(col, i);
+    setExpandedOverflow(prev => { const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n; });
+  }
+  function overflowTextRef(el, col, i) {
+    if (!el) return;
+    const k = cellKey(col, i);
+    const over = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
 
   function handleSkuSort(col) {
     if (skuSort === col) setSkuDir(d => d === "asc" ? "desc" : "asc");
@@ -1210,15 +1225,13 @@ function SkuManufacturers({ navigate, state }) {
   const skuOemVals     = useMemo(() => Array.from(new Set((res?.data||[]).flatMap(r=>r.import_types||[]).filter(Boolean))).sort(), [res]);
   const skuEmailVals   = useMemo(() => Array.from(new Set((res?.data||[]).map(r=>r.email).filter(Boolean))).sort(), [res]);
 
-  useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
-
-  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+  useEffect(()=>{const t=setTimeout(()=>setDebSearch(search),400);return()=>clearTimeout(t);},[search]);
 
   useEffect(()=>{
     setLoading(true); setError(null);
-    fetchSkuFactories(skuName,{ search:debSearch, dateFrom:dateFrom||undefined, dateTo:dateTo||undefined, page, pageSize:50 })
+    fetchSkuFactories(skuName,{ search:debSearch, dateFrom:dateFrom||undefined, dateTo:dateTo||undefined, page:1, pageSize:2000 })
       .then(setRes).catch(e=>setError(e.message)).finally(()=>setLoading(false));
-  },[skuName,debSearch,dateFrom,dateTo,page]);
+  },[skuName,debSearch,dateFrom,dateTo]);
 
   const countries = useMemo(()=>{
     if(!res)return[];
@@ -1271,7 +1284,7 @@ function SkuManufacturers({ navigate, state }) {
               <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
               {(dateFrom||dateTo)&&<button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>}
             </div>
-            <span className="count-label">{res ? `${filteredRows.length}/${res.meta.total}개 제조사` : ""}</span>
+            <span className="count-label">{res ? `${filteredRows.length}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredRows.map(g=>({
               제조업체: g.factory, 제조국: g.country, OEM여부: (g.import_types||[]).join("/"),
               수입업체: (g.importers||[]).join("/"), 종합점수: scoreToGrade(g.ranking_score)??"-", 이메일: g.email||"",
@@ -1300,7 +1313,12 @@ function SkuManufacturers({ navigate, state }) {
                   ? <tr><td colSpan={10}><div className="empty-state">선택한 SKU와 연결된 제조사 정보가 없습니다.</div></td></tr>
                   : filteredRows.map((g,i)=>(
                     <tr key={i}>
-                      <td title={g.skus?.[0]}><span style={{fontSize:12}}>{g.skus?.[0]||"-"}</span></td>
+                      <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("sku_name",i))?"normal":"nowrap"}}>
+                        <div className="sku-cell">
+                          <span ref={el=>overflowTextRef(el,"sku_name",i)} className="sku-cell-text" style={{fontSize:12,...(expandedOverflow.has(cellKey("sku_name",i))?{whiteSpace:"normal",wordBreak:"break-all"}:{})}} title={g.skus?.[0]}>{g.skus?.[0]||"-"}</span>
+                          {(overflowCells.has(cellKey("sku_name",i))||expandedOverflow.has(cellKey("sku_name",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("sku_name",i);}} title={expandedOverflow.has(cellKey("sku_name",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("sku_name",i))?"▲":"▼"}</button>}
+                        </div>
+                      </td>
                       <td>
                         <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                           {(() => {
@@ -1315,10 +1333,11 @@ function SkuManufacturers({ navigate, state }) {
                         </div>
                       </td>
                       <td><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{(g.import_types||[]).length>0?(g.import_types||[]).map((t,j)=><OemBadge key={j} value={t}/>):<span className="badge b-gray">-</span>}</div></td>
-                      <td title={g.factory}>
-                        <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:g.manufacturer,factory:g.factory,...g},from:"sku",skuState:state})}>
-                          {g.factory}
-                        </span>
+                      <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("factory",i))?"normal":"nowrap"}}>
+                        <div className="sku-cell">
+                          <span ref={el=>overflowTextRef(el,"factory",i)} className="link-cell sku-cell-text" style={expandedOverflow.has(cellKey("factory",i))?{whiteSpace:"normal",wordBreak:"break-all"}:undefined} onClick={()=>navigate("mfr",{row:{manufacturer:g.manufacturer,factory:g.factory,...g},from:"sku",skuState:state})} title={g.factory}>{g.factory}</span>
+                          {(overflowCells.has(cellKey("factory",i))||expandedOverflow.has(cellKey("factory",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("factory",i);}} title={expandedOverflow.has(cellKey("factory",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("factory",i))?"▲":"▼"}</button>}
+                        </div>
                       </td>
                       <td>{g.country||"-"}</td>
                       <td><GradeBadge grade={scoreToGrade(g.ranking_score)}/></td>
@@ -1356,9 +1375,59 @@ function SkuManufacturers({ navigate, state }) {
               </tbody>
             </table>
           </div>
-          <Pagination meta={res?.meta} page={page} setPage={setPage}/>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── 컨택 상태 드롭다운 (커스텀 옵션 추가 가능) ────────────────────────────────
+const DEFAULT_CONTACT_STATUSES = ["컨택이력 없음", "컨택 중", "거래 성사"];
+const LS_KEY_CONTACT_STATUSES = "mfr_contact_statuses_v1";
+
+function ContactStatusSelect({ value, onChange }) {
+  const [options, setOptions] = React.useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LS_KEY_CONTACT_STATUSES) || "null");
+      if (Array.isArray(saved) && saved.length > 0) return saved;
+    } catch {}
+    return DEFAULT_CONTACT_STATUSES;
+  });
+  const [newOpt, setNewOpt] = React.useState("");
+  const [adding, setAdding] = React.useState(false);
+
+  function addOption() {
+    const trimmed = newOpt.trim();
+    if (!trimmed || options.includes(trimmed)) { setAdding(false); setNewOpt(""); return; }
+    const updated = [...options, trimmed];
+    setOptions(updated);
+    localStorage.setItem(LS_KEY_CONTACT_STATUSES, JSON.stringify(updated));
+    onChange(trimmed);
+    setAdding(false);
+    setNewOpt("");
+  }
+
+  return (
+    <div style={{display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        style={{flex:1,minWidth:120,padding:"4px 6px",borderRadius:4,border:"1px solid #d1d5db",fontSize:13}}
+      >
+        <option value="">-- 선택 --</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+      {!adding
+        ? <button type="button" onClick={()=>setAdding(true)} title="항목 추가"
+            style={{fontSize:11,padding:"3px 7px",borderRadius:4,border:"1px solid #d1d5db",background:"#f9fafb",cursor:"pointer",whiteSpace:"nowrap"}}>+ 추가</button>
+        : <>
+            <input value={newOpt} onChange={e=>setNewOpt(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addOption();if(e.key==="Escape"){setAdding(false);setNewOpt("");}}}
+              placeholder="새 항목" autoFocus
+              style={{width:90,padding:"3px 6px",borderRadius:4,border:"1px solid #6366f1",fontSize:12}}/>
+            <button type="button" onClick={addOption} style={{fontSize:11,padding:"3px 7px",borderRadius:4,border:"none",background:"#6366f1",color:"#fff",cursor:"pointer"}}>확인</button>
+            <button type="button" onClick={()=>{setAdding(false);setNewOpt("");}} style={{fontSize:11,padding:"3px 7px",borderRadius:4,border:"1px solid #d1d5db",background:"#f9fafb",cursor:"pointer"}}>취소</button>
+          </>
+      }
     </div>
   );
 }
@@ -1378,6 +1447,8 @@ function ManufacturerDetail({ navigate, state }) {
     email: "",
     homepage: "",
     certificates: "",
+    contact_status: "",
+    md_name: "",
   });
   const [contactSaving, setContactSaving] = useState(false);
   const [contactMsg, setContactMsg] = useState(null);
@@ -1386,6 +1457,49 @@ function ManufacturerDetail({ navigate, state }) {
   const [skuDateFrom, setSkuDateFrom]  = useState("");
   const [skuDateTo,   setSkuDateTo]    = useState("");
   const [skuColFilters, setSkuColFilters] = useState({});
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
+  const [monthlyModal, setMonthlyModal] = useState(null);
+  const [modalChartFrom, setModalChartFrom] = useState("");
+  const [modalChartTo,   setModalChartTo]   = useState("");
+
+  function cellKey(col, i) { return `${col}:${i}`; }
+  function toggleOverflowExpand(col, i) {
+    const k = cellKey(col, i);
+    setExpandedOverflow(prev => { const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n; });
+  }
+  function overflowTextRef(el, col, i) {
+    if (!el) return;
+    const k = cellKey(col, i);
+    const over = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
+
+  function getMonthlyContextRow(row) {
+    return {
+      ...row,
+      manufacturer: d?.manufacturer || manufacturer,
+      factory: d?.factory || factory,
+      country: d?.country || row.country,
+    };
+  }
+
+  function openMonthlyModal(row) {
+    const target = getMonthlyContextRow(row);
+    setModalChartFrom("");
+    setModalChartTo("");
+    setMonthlyModal({ row: target, loading: true, error: null, yearly: [], monthly: [] });
+    fetchMonthlyImportCounts(target, null, null)
+      .then(res => setMonthlyModal(m => m ? { ...m, loading: false, yearly: res.yearly || [], monthly: res.data || [] } : null))
+      .catch(e => setMonthlyModal(m => m ? { ...m, loading: false, error: e.message } : null));
+  }
+
+  function refetchModalChart(row, from, to) {
+    setMonthlyModal(m => m ? { ...m, chartLoading: true } : null);
+    fetchMonthlyImportCounts(row, from || null, to || null)
+      .then(res => setMonthlyModal(m => m ? { ...m, chartLoading: false, monthly: res.data || [] } : null))
+      .catch(e => setMonthlyModal(m => m ? { ...m, chartLoading: false, error: e.message } : null));
+  }
 
   useEffect(()=>{const t=setTimeout(()=>setSkuDebSearch(skuSearch),400);return()=>clearTimeout(t);},[skuSearch]);
 
@@ -1397,15 +1511,20 @@ function ManufacturerDetail({ navigate, state }) {
 
   const filteredSkus = useMemo(() => {
     let skus = res?.skus || [];
+    const q = skuDebSearch.toLowerCase();
+    if (q) skus = skus.filter(r =>
+      (r.sku_name||"").toLowerCase().includes(q) ||
+      (r.mc||"").toLowerCase().includes(q) ||
+      (r.category||"").toLowerCase().includes(q) ||
+      (r.importers||[]).some(i => i.toLowerCase().includes(q))
+    );
     if (skuColFilters.mc?.length)       skus = skus.filter(r => skuColFilters.mc.includes(r.mc));
     if (skuColFilters.category?.length) skus = skus.filter(r => skuColFilters.category.includes(r.category));
-    if (skuColFilters.importer?.length) skus = skus.filter(r => skuColFilters.importer.includes(r.importer));
     return skus;
-  }, [res, skuColFilters]);
+  }, [res, skuColFilters, skuDebSearch]);
 
   const skuMcVals       = useMemo(() => Array.from(new Set((res?.skus||[]).map(r=>r.mc).filter(Boolean))).sort(), [res]);
   const skuCategoryVals = useMemo(() => Array.from(new Set((res?.skus||[]).map(r=>r.category).filter(Boolean))).sort(), [res]);
-  const skuImporterVals = useMemo(() => Array.from(new Set((res?.skus||[]).map(r=>r.importer).filter(Boolean))).sort(), [res]);
 
   const d = res?.detail;
 
@@ -1416,6 +1535,8 @@ function ManufacturerDetail({ navigate, state }) {
       email: d.emails?.[0] || "",
       homepage: d.homepage || "",
       certificates: Array.isArray(d.certificates) ? d.certificates.join(", ") : "",
+      contact_status: d.contact_status || "",
+      md_name: d.md_name || "",
     });
     setContactMsg(null);
   }, [d]);
@@ -1444,6 +1565,8 @@ function ManufacturerDetail({ navigate, state }) {
         email: contactForm.email,
         homepage: contactForm.homepage,
         certificates: contactForm.certificates,
+        contact_status: contactForm.contact_status || null,
+        md_name: contactForm.md_name || null,
       });
 
       const refreshed = await fetchManufacturerDetail(manufacturer, factory);
@@ -1518,12 +1641,28 @@ function ManufacturerDetail({ navigate, state }) {
                       {d.homepage ? <a href={d.homepage} target="_blank" rel="noopener noreferrer" className="detail-link">{d.homepage}</a> : "-"}
                     </div>
                   </div>
-                  <div className="detail-row">
-                    <div className="dk">연락 상태</div>
-                    <div className="dv">{d.emails?.length ? <span className="badge b-green">연락처 확보</span> : <span className="badge b-gray">미확보</span>}</div>
-                  </div>
-                      <div className="contact-edit-box">
+                  <div className="contact-edit-box">
       <div className="contact-edit-title">연락처 직접 입력</div>
+
+      {/* 컨택 상태 + MD명 */}
+      <div className="contact-edit-grid contact-edit-inline" style={{marginBottom:0}}>
+        <div className="contact-edit-field">
+          <label>컨택 여부</label>
+          <ContactStatusSelect
+            value={contactForm.contact_status}
+            onChange={v => setContactForm(prev => ({...prev, contact_status: v}))}
+          />
+        </div>
+        <div className="contact-edit-field">
+          <label>MD명</label>
+          <input
+            type="text"
+            value={contactForm.md_name}
+            onChange={e => setContactForm(prev => ({...prev, md_name: e.target.value}))}
+            placeholder="예: 홍길동"
+          />
+        </div>
+      </div>
 
       <div className="contact-edit-grid">
         <div className="contact-edit-field">
@@ -1579,7 +1718,7 @@ function ManufacturerDetail({ navigate, state }) {
         disabled={contactSaving}
         style={{ marginTop: 10 }}
       >
-        {contactSaving ? "저장 중..." : "연락처 저장"}
+        {contactSaving ? "저장 중..." : "저장"}
       </button>
 
       {contactMsg && (
@@ -1588,6 +1727,17 @@ function ManufacturerDetail({ navigate, state }) {
         </div>
       )}
     </div>
+
+    {/* 현재 컨택 상태 표시 */}
+    {(d.contact_status || d.md_name) && (
+      <div className="detail-row" style={{marginTop:8}}>
+        <div className="dk">컨택 현황</div>
+        <div className="dv" style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          {d.contact_status && <span className="badge b-blue">{d.contact_status}</span>}
+          {d.md_name && <span style={{fontSize:12,color:"#374151"}}>담당: {d.md_name}</span>}
+        </div>
+      </div>
+    )}
                 </div>
               </div>
 
@@ -1672,55 +1822,183 @@ function ManufacturerDetail({ navigate, state }) {
                 <span>📦 취급 제품 목록 ({filteredSkus.length}{filteredSkus.length!==res?.skus?.length?`/${res?.skus?.length||0}`:""} 건)</span>
                 <span>{skuOpen?"▲":"▼"}</span>
               </button>
-              {skuOpen&&(
-                <>
-                  <div className="toolbar" style={{borderTop:"1px solid #e8eaed"}}>
-                    <div className="search-wrap">
-                      <span className="search-icon">🔍</span>
-                      <input placeholder="제품명 검색..." value={skuSearch} onChange={e=>setSkuSearch(e.target.value)}/>
+              {skuOpen&&(()=>{
+                const _MAIN5 = ["코스트코","이마트","롯데마트","홈플러스","쿠팡"];
+                const baseYear = res?.skus?.[0]?.base_year || new Date().getFullYear();
+                function renderImporters(importers) {
+                  if (!importers?.length) return <span style={{color:"#9ca3af"}}>-</span>;
+                  const main5present = importers.filter(i => _MAIN5.includes(i));
+                  const others = importers.filter(i => !_MAIN5.includes(i));
+                  const orderedMain5 = _MAIN5.filter(i => main5present.includes(i));
+                  return (
+                    <div style={{display:"flex",gap:3,flexWrap:"wrap",alignItems:"center"}}>
+                      {orderedMain5.map((imp,k)=>(
+                        <span key={k} className="badge" style={{background:"#dbeafe",color:"#1d4ed8",fontSize:11,padding:"1px 6px"}}>{imp}</span>
+                      ))}
+                      {others.length>0&&<span className="badge b-gray" style={{fontSize:11}}>외 {others.length}개</span>}
                     </div>
-                    <div className="date-range-wrap">
-                      <input type="date" className="date-range-input" value={skuDateFrom} max={skuDateTo||undefined} onChange={e=>setSkuDateFrom(e.target.value)}/>
-                      <span className="date-range-sep">~</span>
-                      <input type="date" className="date-range-input" value={skuDateTo} min={skuDateFrom||undefined} onChange={e=>setSkuDateTo(e.target.value)}/>
-                      {(skuDateFrom||skuDateTo)&&<button className="date-range-clear" onClick={()=>{setSkuDateFrom("");setSkuDateTo("");}} title="기간 필터 해제">✕</button>}
+                  );
+                }
+                return (
+                  <>
+                    <div className="toolbar" style={{borderTop:"1px solid #e8eaed"}}>
+                      <div className="search-wrap">
+                        <span className="search-icon">🔍</span>
+                        <input placeholder="제품명, MC, 구분, 수입업체 검색..." value={skuSearch} onChange={e=>setSkuSearch(e.target.value)}/>
+                      </div>
+                      <div className="date-range-wrap">
+                        <input type="date" className="date-range-input" value={skuDateFrom} max={skuDateTo||undefined} onChange={e=>setSkuDateFrom(e.target.value)}/>
+                        <span className="date-range-sep">~</span>
+                        <input type="date" className="date-range-input" value={skuDateTo} min={skuDateFrom||undefined} onChange={e=>setSkuDateTo(e.target.value)}/>
+                        {(skuDateFrom||skuDateTo)&&<button className="date-range-clear" onClick={()=>{setSkuDateFrom("");setSkuDateTo("");}} title="기간 필터 해제">✕</button>}
+                      </div>
+                      <button className="icon-btn" onClick={()=>downloadCSV(filteredSkus,"mfr_skus.csv")}>⬇ CSV</button>
                     </div>
-                    <button className="icon-btn" onClick={()=>downloadCSV(filteredSkus,"mfr_skus.csv")}>⬇ CSV</button>
-                  </div>
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th style={{minWidth:240}}>제품명</th>
-                          <th style={{minWidth:120}}><div className="th-inner"><span className="th-label">MC (카테고리)</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.mc||null} activeSortCol={false} activeSortDir="asc" localValues={skuMcVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,mc:vals}))}/></div></th>
-                          <th style={{minWidth:90}}><div className="th-inner"><span className="th-label">구분</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.category||null} activeSortCol={false} activeSortDir="asc" localValues={skuCategoryVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,category:vals}))}/></div></th>
-                          <th style={{minWidth:150}}><div className="th-inner"><span className="th-label">수입업체</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.importer||null} activeSortCol={false} activeSortDir="asc" localValues={skuImporterVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,importer:vals}))}/></div></th>
-                          <th style={{minWidth:70}}>수입횟수</th>
-                          <th style={{minWidth:60}}>등급</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredSkus.map((r,i)=>(
-                          <tr key={i}>
-                            <td title={r.sku_name}>
-                              <span className="link-cell" onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category,importer:r.importer}})}>
-                                {r.sku_name}
-                              </span>
-                            </td>
-                            <td><span className="badge b-mc">{r.mc||"-"}</span></td>
-                            <td><span className="badge b-cat">{r.category||"-"}</span></td>
-                            <td style={{fontSize:12}} title={r.importer}>{r.importer||"-"}</td>
-                            <td><span className="badge b-count">{r.import_count}</span></td>
-                            <td><GradeBadge grade={r.ranking_grade}/></td>
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th style={{minWidth:80}}><div className="th-inner"><span className="th-label">구분</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.category||null} activeSortCol={false} activeSortDir="asc" localValues={skuCategoryVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,category:vals}))}/></div></th>
+                            <th style={{minWidth:100}}><div className="th-inner"><span className="th-label">MC</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.mc||null} activeSortCol={false} activeSortDir="asc" localValues={skuMcVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,mc:vals}))}/></div></th>
+                            <th style={{minWidth:220}}>제품명</th>
+                            <th style={{minWidth:80}}>OEM/수입</th>
+                            <th style={{minWidth:180}}>수입업체</th>
+                            <th className="col-highlight" style={{minWidth:90,textAlign:"right"}}>수입횟수(전체)</th>
+                            <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(3,baseYear)}</th>
+                            <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(2,baseYear)}</th>
+                            <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(1,baseYear)}</th>
+                            <th style={{minWidth:90,textAlign:"center"}}>수입횟수 추이</th>
+                            <th style={{minWidth:60,textAlign:"center"}}>등급</th>
                           </tr>
-                        ))}
-                        {filteredSkus.length===0&&<tr><td colSpan={6}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
+                        </thead>
+                        <tbody>
+                          {filteredSkus.map((r,i)=>(
+                            <tr key={i}>
+                              <td><span className="badge b-cat">{r.category||"-"}</span></td>
+                              <td><span className="badge b-mc">{r.mc||"-"}</span></td>
+                              <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("sku_name",i))?"normal":"nowrap"}}>
+                                <div className="sku-cell">
+                                  <span ref={el=>overflowTextRef(el,"sku_name",i)} className="link-cell sku-cell-text" style={expandedOverflow.has(cellKey("sku_name",i))?{whiteSpace:"normal",wordBreak:"break-all"}:undefined} onClick={()=>navigate("sku",{row:{sku_name:r.sku_name,mc:r.mc,category:r.category}})} title={r.sku_name}>{r.sku_name}</span>
+                                  {(overflowCells.has(cellKey("sku_name",i))||expandedOverflow.has(cellKey("sku_name",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("sku_name",i);}} title={expandedOverflow.has(cellKey("sku_name",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("sku_name",i))?"▲":"▼"}</button>}
+                                </div>
+                              </td>
+                              <td style={{padding:"8px 4px",textAlign:"center"}}><OemBadge value={r.import_type}/></td>
+                              <td>{renderImporters(r.importers)}</td>
+                              <td className="col-highlight"><span className="badge b-count">{r.import_count}</span></td>
+                              <td className="col-highlight"><span style={{color:(r.count_year3||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year3||0)>0?600:400}}>{(r.count_year3||0)>0?r.count_year3:"-"}</span></td>
+                              <td className="col-highlight"><span style={{color:(r.count_year2||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year2||0)>0?600:400}}>{(r.count_year2||0)>0?r.count_year2:"-"}</span></td>
+                              <td className="col-highlight"><span style={{color:(r.count_year1||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year1||0)>0?600:400}}>{(r.count_year1||0)>0?r.count_year1:"-"}</span></td>
+                              <td style={{textAlign:"center"}}>
+                                <button className="trend-btn" onClick={e=>{e.stopPropagation();openMonthlyModal(r);}}>📈 추이 보기</button>
+                              </td>
+                              <td style={{textAlign:"center"}}><GradeBadge grade={r.ranking_grade}/></td>
+                            </tr>
+                          ))}
+                          {filteredSkus.length===0&&<tr><td colSpan={11}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
+
+            {monthlyModal && (() => {
+              const today = new Date();
+              const thisYear = today.getFullYear();
+              const thisMonth = today.getMonth() + 1;
+              const chartData = (monthlyModal.monthly || [])
+                .filter(mo => {
+                  if (modalChartFrom && mo.month < modalChartFrom.slice(2).replace("-","/")) return false;
+                  if (modalChartTo && mo.month > modalChartTo.slice(2).replace("-","/")) return false;
+                  return true;
+                })
+                .map(mo => ({ month: mo.month, count: mo.count }));
+              const chartTotal = chartData.reduce((sum, item) => sum + item.count, 0);
+              const yearlyMap = {};
+              (monthlyModal.yearly || []).forEach(y => { yearlyMap[y.year] = y.count; });
+              const allYears = [];
+              for (let yr = 2021; yr <= thisYear; yr++) allYears.push({ year: String(yr), count: yearlyMap[String(yr)] ?? 0 });
+              const firstDataYear = allYears.find(y => y.count > 0)?.year;
+              function getYearChangeRate(y) {
+                if (y.year === firstDataYear) return null;
+                const prevIdx = allYears.findIndex(a => a.year === String(Number(y.year) - 1));
+                if (prevIdx < 0) return null;
+                const prev = allYears[prevIdx].count;
+                if (prev === 0) return null;
+                const isCurrent = Number(y.year) === thisYear;
+                if (isCurrent) {
+                  const currSlice = (monthlyModal.monthly||[]).filter(mo=>{const[yy,mm]=mo.month.split("/");return Number("20"+yy)===thisYear&&Number(mm)<=thisMonth;}).reduce((s,mo)=>s+mo.count,0);
+                  const prevSlice = (monthlyModal.monthly||[]).filter(mo=>{const[yy,mm]=mo.month.split("/");return Number("20"+yy)===thisYear-1&&Number(mm)<=thisMonth;}).reduce((s,mo)=>s+mo.count,0);
+                  if (prevSlice===0) return null;
+                  return {pct:Math.round((currSlice-prevSlice)/prevSlice*100),isCurrent:true};
+                } else {
+                  return {pct:Math.round((y.count-prev)/prev*100),isCurrent:false};
+                }
+              }
+              return (
+                <div className="modal-overlay" onClick={()=>setMonthlyModal(null)}>
+                  <div className="modal-box" style={{maxWidth:"min(1100px, 95vw)"}} onClick={e=>e.stopPropagation()}>
+                    <div className="modal-header">
+                      <span className="modal-title">{monthlyModal.row.sku_name} — 연도별 / 월별 수입횟수</span>
+                      <button className="modal-close" onClick={()=>setMonthlyModal(null)}>✕</button>
+                    </div>
+                    <div className="modal-body">
+                      {monthlyModal.loading ? <div className="empty-state">불러오는 중...</div>
+                      : monthlyModal.error ? <div className="error-box">오류: {monthlyModal.error}</div>
+                      : (
+                        <>
+                          <div className="modal-section-title">연도별 수입횟수</div>
+                          {!allYears.some(y=>y.count>0) ? <div className="empty-state">이력 없음</div> : (
+                          <div style={{overflowX:"auto"}}>
+                            <div style={{display:"grid",gridTemplateColumns:`auto repeat(${allYears.length}, auto)`,gap:1,background:"#e8eaed",fontSize:12,width:"fit-content",border:"1px solid #e8eaed",borderRadius:4,overflow:"hidden"}}>
+                              <div style={{padding:"5px 10px",background:"#f1f3f5",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap"}}>연도</div>
+                              {allYears.map(y => <div key={y.year} style={{padding:"5px 10px",background:"#fff",textAlign:"center"}}>{y.year}</div>)}
+                              <div style={{padding:"5px 10px",background:"#f1f3f5",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap"}}>수입횟수</div>
+                              {allYears.map(y => {
+                                const rate = getYearChangeRate(y);
+                                return (
+                                  <div key={y.year} style={{padding:"5px 10px",background:"#fff",textAlign:"center",color:y.count>0?"#15803d":"#9ca3af",fontWeight:y.count>0?600:400}}>
+                                    {y.count}
+                                    {rate!==null&&<span style={{display:"block",fontSize:10,color:rate.pct>=0?"#dc2626":"#2563eb",fontWeight:500}}>{Number(y.year)===thisYear?`(전년 동기比 ${rate.pct>=0?"+":""}${rate.pct}%)`:`(${rate.pct>=0?"+":""}${rate.pct}%)`}</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          )}
+                          <div style={{marginTop:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                            <div className="modal-section-title" style={{margin:0}}>월별 수입횟수 추이</div>
+                            <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
+                              <input type="month" className="date-range-input" style={{padding:"3px 7px",fontSize:12}} value={modalChartFrom} onChange={e=>{setModalChartFrom(e.target.value);refetchModalChart(monthlyModal.row,e.target.value,modalChartTo);}}/>
+                              <span style={{color:"#9ca3af"}}>~</span>
+                              <input type="month" className="date-range-input" style={{padding:"3px 7px",fontSize:12}} value={modalChartTo} onChange={e=>{setModalChartTo(e.target.value);refetchModalChart(monthlyModal.row,modalChartFrom,e.target.value);}}/>
+                              {(modalChartFrom || modalChartTo) && <button className="icon-btn" style={{fontSize:11}} onClick={()=>{setModalChartFrom("");setModalChartTo("");refetchModalChart(monthlyModal.row,"","");}}>초기화</button>}
+                            </div>
+                          </div>
+                          {!chartData.length ? <div className="empty-state" style={{marginTop:8}}>해당 기간 이력 없음</div> : (
+                            <div style={{position:"relative",marginTop:8}}>
+                              <div style={{position:"absolute",top:4,left:8,zIndex:1,fontSize:12,color:"#374151",fontWeight:600}}>총 수입횟수: <span style={{color:"#15803d"}}>{chartTotal.toLocaleString()}건</span></div>
+                              <ResponsiveContainer width="100%" height={220}>
+                                <LineChart data={chartData} margin={{top:28,right:16,bottom:4,left:0}}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
+                                  <XAxis dataKey="month" tick={{fontSize:10}} interval="preserveStartEnd"/>
+                                  <YAxis tick={{fontSize:10}} allowDecimals={false} width={36}/>
+                                  <Tooltip formatter={(v)=>[v + "건", "수입횟수"]} contentStyle={{fontSize:12,borderRadius:6}}/>
+                                  <Line type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2} dot={{r:2,fill:"#16a34a"}} activeDot={{r:4}}>
+                                    <LabelList dataKey="count" position="top" style={{fontSize:10,fill:"#374151",fontWeight:600}} formatter={v=>v>0?v:""}/>
+                                  </Line>
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </>
         )}
       </div>
@@ -1818,7 +2096,6 @@ function CountryDetail({ navigate, state }) {
   const [search,     setSearch]    = useState("");
   const [debSearch,  setDebSearch] = useState("");
   const [mcFilter,   setMcFilter]  = useState("");
-  const [page,       setPage]      = useState(1);
   const [sortBy,     setSortBy]    = useState(null);
   const [sortDir,    setSortDir]   = useState("desc");
   const [dateFrom,   setDateFrom]  = useState("");
@@ -1827,17 +2104,55 @@ function CountryDetail({ navigate, state }) {
 
   const [mfrRes,     setMfrRes]     = useState(null);
   const [mfrLoading, setMfrLoading] = useState(true);
+  const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
+  const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
 
-  useEffect(()=>{const t=setTimeout(()=>{setDebSearch(search);setPage(1);},400);return()=>clearTimeout(t);},[search]);
-  useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
+  function cellKey(col, i) { return `${col}:${i}`; }
+  function toggleOverflowExpand(col, i) {
+    const k = cellKey(col, i);
+    setExpandedOverflow(prev => { const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n; });
+  }
+  function overflowTextRef(el, col, i) {
+    if (!el) return;
+    const k = cellKey(col, i);
+    const over = el.scrollWidth > el.clientWidth + 1;
+    setOverflowCells(prev => { if (over===prev.has(k)) return prev; const n=new Set(prev); over?n.add(k):n.delete(k); return n; });
+  }
+
+  useEffect(()=>{const t=setTimeout(()=>setDebSearch(search),400);return()=>clearTimeout(t);},[search]);
+
+  const TOP5_FILTER_VALS = ["A", "B", "C", "이마트", "홈플러스", "롯데마트", "쿠팡", "코스트코"];
+  const GRADE_VALS = ["A", "B", "C"];
 
   const filteredMfr = useMemo(() => {
     let rows = mfrRes?.data || [];
-    if (colFilters.primary_mc?.length) rows = rows.filter(r => (r.all_mcs||[]).some(mc => colFilters.primary_mc.includes(mc)));
-    return rows;
-  }, [mfrRes, colFilters]);
+    if (colFilters.primary_mc?.length)        rows = rows.filter(r => (r.all_mcs||[]).some(mc => colFilters.primary_mc.includes(mc)));
+    if (colFilters.mfr_name?.length)          rows = rows.filter(r => colFilters.mfr_name.includes(r.manufacturer));
+    if (colFilters.sku_count?.length)         rows = rows.filter(r => colFilters.sku_count.includes(String(r.sku_count)));
+    if (colFilters.top5_grade?.length)        rows = rows.filter(r =>
+      colFilters.top5_grade.some(v =>
+        ["A","B","C"].includes(v) ? r.top5_retailer_grade === v : (r.top5_retailers_matched||[]).includes(v)
+      )
+    );
+    if (colFilters.import_count_grade?.length) rows = rows.filter(r => colFilters.import_count_grade.includes(r.import_count_grade));
+    if (colFilters.growth_grade?.length)      rows = rows.filter(r => colFilters.growth_grade.includes(r.growth_trend_grade));
 
-  const mfrMcVals = useMemo(() => Array.from(new Set((mfrRes?.data||[]).flatMap(r=>r.all_mcs||[]).filter(Boolean))).sort(), [mfrRes]);
+    // 클라이언트 사이드 정렬 (등급/제조사명)
+    if (sortBy === "manufacturer") {
+      const dir = sortDir === "asc" ? 1 : -1;
+      rows = [...rows].sort((a,b) => (a.manufacturer||"").localeCompare(b.manufacturer||"","ko") * dir);
+    } else if (["top5_retailer_grade","import_count_grade","growth_trend_grade"].includes(sortBy)) {
+      const g = {"A":0,"B":1,"C":2};
+      const dir = sortDir === "asc" ? 1 : -1;
+      rows = [...rows].sort((a,b) => ((g[a[sortBy]]??3) - (g[b[sortBy]]??3)) * dir);
+    }
+
+    return rows;
+  }, [mfrRes, colFilters, sortBy, sortDir]);
+
+  const mfrMcVals    = useMemo(() => Array.from(new Set((mfrRes?.data||[]).flatMap(r=>r.all_mcs||[]).filter(Boolean))).sort(), [mfrRes]);
+  const mfrNameVals  = useMemo(() => Array.from(new Set((mfrRes?.data||[]).map(r=>r.manufacturer).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ko")), [mfrRes]);
+  const mfrSkuCountVals = useMemo(() => [...new Set((mfrRes?.data||[]).map(r=>String(r.sku_count)))].sort((a,b)=>Number(a)-Number(b)), [mfrRes]);
 
   useEffect(()=>{
     if (!country) return;
@@ -1856,25 +2171,17 @@ function CountryDetail({ navigate, state }) {
       query: debSearch || undefined,
       sortBy: sortBy || undefined,
       sortOrder: sortDir,
-      page, pageSize: 20,
+      page: 1, pageSize: 10000,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
     }).then(setMfrRes).catch(e=>setError(e.message)).finally(()=>setMfrLoading(false));
-  },[country,mcFilter,debSearch,sortBy,sortDir,page,dateFrom,dateTo]);
+  },[country,mcFilter,debSearch,sortBy,sortDir,dateFrom,dateTo]);
 
   function handleSort(col) {
     if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortBy(col); setSortDir("desc"); }
-    setPage(1);
   }
 
-  function resetFilters() {
-    setSearch(""); setDebSearch(""); setMcFilter(""); setDateFrom(""); setDateTo(""); setColFilters({}); setPage(1);
-  }
-
-  const activeFilters = [];
-  if (debSearch) activeFilters.push(`검색: "${debSearch}"`);
-  if (mcFilter)  activeFilters.push(`MC: ${mcFilter}`);
 
   if (!country) {
     return (
@@ -1983,26 +2290,55 @@ function CountryDetail({ navigate, state }) {
               <input type="date" className="date-range-input" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/>
               {(dateFrom||dateTo)&&<button className="date-range-clear" onClick={()=>{setDateFrom("");setDateTo("");}} title="기간 필터 해제">✕</button>}
             </div>
-            <span className="count-label">{mfrRes ? `${filteredMfr.length}/${mfrRes.meta.total}개 제조사` : ""}</span>
+            <span className="count-label">{mfrRes ? `${filteredMfr.length}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredMfr,"country_manufacturers.csv")}>⬇ CSV</button>
           </div>
-          {activeFilters.length > 0 && (
-            <div className="filter-bar">
-              <span className="filter-label">적용된 필터: {activeFilters.join(" / ")}</span>
-              <button className="icon-btn" onClick={resetFilters}>필터 초기화</button>
-            </div>
-          )}
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th style={{minWidth:200}}>제조사명</th>
-                  <th style={{minWidth:160}}><div className="th-inner"><span className="th-label">주요 MC</span><ColumnFilter colKey={null} isNumeric={false} activeValues={colFilters.primary_mc||null} activeSortCol={false} activeSortDir="asc" localValues={mfrMcVals} onSort={()=>{}} onApply={vals=>setColFilters(p=>({...p,primary_mc:vals}))}/></div></th>
-                  <th style={{minWidth:80}} onClick={()=>handleSort("sku_count")}>취급 SKU 수 <SortIcon col="sku_count" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:130}} onClick={()=>handleSort("ranking_score")}>종합점수 <SortIcon col="ranking_score" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:220}}>탑5 유통사 거래 다양성</th>
-                  <th style={{minWidth:120}} onClick={()=>handleSort("total_import_count")}>국내 수입횟수 <SortIcon col="total_import_count" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:220}}>최근 3개년 성장추세</th>
+                  <th style={{minWidth:200}}>
+                    <div className="th-inner">
+                      <span className="th-label">제조사명</span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.mfr_name||null} activeSortCol={sortBy==="manufacturer"} activeSortDir={sortDir} localValues={mfrNameVals} onSort={dir=>{setSortBy("manufacturer");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,mfr_name:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:160}}>
+                    <div className="th-inner">
+                      <span className="th-label">주요 MC</span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.primary_mc||null} activeSortCol={false} activeSortDir="asc" localValues={mfrMcVals} onSort={()=>{}} onApply={vals=>setColFilters(p=>({...p,primary_mc:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:80}}>
+                    <div className="th-inner">
+                      <span className="th-label">취급 SKU 수 <SortIcon col="sku_count" sortCol={sortBy} sortDir={sortDir}/></span>
+                      <ColumnFilter colKey="_l" isNumeric={true} activeValues={colFilters.sku_count||null} activeSortCol={sortBy==="sku_count"} activeSortDir={sortDir} localValues={mfrSkuCountVals} onSort={dir=>{setSortBy("sku_count");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,sku_count:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:130}}>
+                    <div className="th-inner">
+                      <span className="th-label">종합점수 <SortIcon col="ranking_score" sortCol={sortBy} sortDir={sortDir}/></span>
+                      <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="ranking_score"} activeSortDir={sortDir} localValues={null} onSort={dir=>{setSortBy("ranking_score");setSortDir(dir);}} onApply={()=>{}}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:220}}>
+                    <div className="th-inner">
+                      <span className="th-label">탑5 유통사 거래 다양성</span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.top5_grade||null} activeSortCol={sortBy==="top5_count"} activeSortDir={sortDir} localValues={TOP5_FILTER_VALS} onSort={dir=>{setSortBy("top5_count");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,top5_grade:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:120}}>
+                    <div className="th-inner">
+                      <span className="th-label">국내 수입횟수 <SortIcon col="total_import_count" sortCol={sortBy} sortDir={sortDir}/></span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.import_count_grade||null} activeSortCol={sortBy==="import_count_grade"} activeSortDir={sortDir} localValues={GRADE_VALS} onSort={dir=>{setSortBy("import_count_grade");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,import_count_grade:vals}))}/>
+                    </div>
+                  </th>
+                  <th style={{minWidth:220}}>
+                    <div className="th-inner">
+                      <span className="th-label">최근 3개년 성장추세</span>
+                      <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.growth_grade||null} activeSortCol={sortBy==="growth_trend_grade"} activeSortDir={sortDir} localValues={GRADE_VALS} onSort={dir=>{setSortBy("growth_trend_grade");setSortDir(dir);}} onApply={vals=>setColFilters(p=>({...p,growth_grade:vals}))}/>
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -2011,10 +2347,11 @@ function CountryDetail({ navigate, state }) {
                   ? <tr><td colSpan={7}><div className="empty-state">조건에 맞는 제조사가 없습니다.</div></td></tr>
                   : filteredMfr.map((m,i)=>(
                     <tr key={i}>
-                      <td title={m.manufacturer}>
-                        <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:m.manufacturer,factory:m.factory||m.manufacturer},from:"country",countryState:state})}>
-                          {m.manufacturer}
-                        </span>
+                      <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("manufacturer",i))?"normal":"nowrap"}}>
+                        <div className="sku-cell">
+                          <span ref={el=>overflowTextRef(el,"manufacturer",i)} className="link-cell sku-cell-text" style={expandedOverflow.has(cellKey("manufacturer",i))?{whiteSpace:"normal",wordBreak:"break-all"}:undefined} onClick={()=>navigate("mfr",{row:{manufacturer:m.manufacturer,factory:m.factory||m.manufacturer},from:"country",countryState:state})} title={m.manufacturer}>{m.manufacturer}</span>
+                          {(overflowCells.has(cellKey("manufacturer",i))||expandedOverflow.has(cellKey("manufacturer",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("manufacturer",i);}} title={expandedOverflow.has(cellKey("manufacturer",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("manufacturer",i))?"▲":"▼"}</button>}
+                        </div>
                       </td>
                       <td>
                         <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
@@ -2060,7 +2397,6 @@ function CountryDetail({ navigate, state }) {
               </tbody>
             </table>
           </div>
-          <Pagination meta={mfrRes?.meta} page={page} setPage={setPage}/>
         </div>
       </div>
     </div>
