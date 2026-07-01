@@ -129,35 +129,20 @@ export function fetchStats() {
   return request("/api/stats");
 }
 
-/** Excel 업로드 (프론트에서 JSON 변환 후 전송) */
+/** Excel 업로드 (파일을 그대로 서버에 전송, 서버에서 파싱/적재) */
 export async function uploadExcel(file) {
-  const XLSX = await import("xlsx");
-  const buffer = await file.arrayBuffer();
-  const wb = XLSX.read(buffer, { type: "array", cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: null, cellDates: true });
+  const form = new FormData();
+  form.append("file", file);
 
-  const CHUNK = 2000;
-  let totalInserted = 0;
-  let totalSkipped = 0;
-
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const chunk = rows.slice(i, i + CHUNK);
-    const res = await fetch(`${BASE_URL}/api/upload-json`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows: chunk }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || "업로드 오류");
-    }
-    const data = await res.json();
-    totalInserted += data.inserted || 0;
-    totalSkipped += data.skipped || 0;
+  const res = await fetch(`${BASE_URL}/api/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "업로드 오류");
   }
-
-  return { message: `${totalInserted}건 업로드 완료, ${totalSkipped}건 스킵`, inserted: totalInserted, skipped: totalSkipped };
+  return res.json();
 }
 /** 제조사 연락처 직접 수정 */
 export async function updateManufacturerContact(payload) {
