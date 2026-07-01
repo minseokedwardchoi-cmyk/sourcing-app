@@ -172,3 +172,113 @@ async def compute_manufacturer_rankings_by_country(
     return await _compute_rankings_for_scope(
         db, "country = :country", {"country": country}, key_col="manufacturer"
     )
+
+
+async def compute_best_sku_rankings_for_country(
+    db: AsyncSession, country: str
+) -> dict[str, dict]:
+    """
+    국가 페이지: 각 제조사(manufacturer)에 대해 SKU별로 평가한 점수 중 가장 높은 점수와
+    해당 SKU명을 반환한다. import_count_grade는 해당 SKU를 취급하는 제조사 집단 내
+    상대 순위로, top5/growth grade는 제조사 전체 이력 기준으로 산출한다.
+
+    반환: {manufacturer: {ranking_score, best_sku_name, top5_retailer_grade,
+                          top5_retailers_matched, import_count_grade, total_import_count,
+                          growth_trend_grade, growth_yearly}}
+    """
+    # 1. Per (manufacturer, sku_name) import counts
+    count_r = await db.execute(text("""
+        SELECT manufacturer, sku_name, SUM(import_count) AS cnt
+        FROM sku_factory_mv
+        WHERE country = :country AND manufacturer IS NOT NULL
+        GROUP BY manufacturer, sku_name
+    """), {"country": country})
+
+    mfr_sku_counts: dict[str, dict[str, int]] = {}
+    sku_all_counts: dict[str, dict[str, int]] = {}
+    for mfr_key, sku_name, cnt in count_r.fetchall():
+        c = int(cnt or 0)
+        mfr_sku_counts.setdefault(mfr_key, {})[sku_name] = c
+        sku_all_counts.setdefault(sku_name, {})[mfr_key] = c
+
+    if not mfr_sku_counts:
+        return {}
+
+    # 2. import_count_grades per SKU peer group
+    sku_import_grades: dict[str, dict[str, str]] = {
+        sku_name: _import_count_grades(counts)
+        for sku_name, counts in sku_all_counts.items()
+    }
+
+    # 3. Top5 importers per manufacturer (country scope)
+    importers_r = await db.execute(text("""
+        SELECT manufacturer, array_agg(DISTINCT imp) AS all_importers
+        FROM sku_factory_mv
+        LEFT JOIN LATERAL unnest(importers) AS imp ON true
+        WHERE country = :country AND manufacturer IS NOT NULL
+        GROUP BY manufacturer
+    """), {"country": country})
+    importers_by_mfr: dict[str, set[str]] = {
+        r[0]: {imp for imp in (r[1] or []) if imp}
+        for r in importers_r.fetchall()
+    }
+
+    # 4. Growth per manufacturer (country scope)
+    cur_year = date.today().year
+    y1, y2, y3 = cur_year - 3, cur_year - 2, cur_year - 1
+    growth_r = await db.execute(text("""
+        SELECT manufacturer,
+               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y1 THEN 1 END)::int,
+               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y2 THEN 1 END)::int,
+               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y3 THEN 1 END)::int
+        FROM import_history
+        WHERE country = :country AND manufacturer IS NOT NULL
+        GROUP BY manufacturer
+    """), {"country": country, "y1": y1, "y2": y2, "y3": y3})
+    growth_by_mfr = {r[0]: (r[1], r[2], r[3]) for r in growth_r.fetchall()}
+
+    # 5. For each manufacturer, find the best-scoring SKU
+    results: dict[str, dict] = {}
+    for mfr_key, sku_counts_map in mfr_sku_counts.items():
+        matched_top5 = sorted(
+            importers_by_mfr.get(mfr_key, set()) & set(TOP5_RETAILERS),
+            key=TOP5_RETAILERS.index,
+        )
+        top5_grade = _top5_grade(len(matched_top5))
+        gy1, gy2, gy3 = growth_by_mfr.get(mfr_key, (0, 0, 0))
+        growth_grade = _growth_grade(gy1, gy2, gy3)
+
+        best_score: float | None = None
+        best_sku: str | None = None
+        best_import_grade = "C"
+        total_count = sum(sku_counts_map.values())
+
+        for sku_name in sku_counts_map:
+            import_grade = sku_import_grades.get(sku_name, {}).get(mfr_key, "C")
+            weighted = (
+                _GRADE_SCORE[top5_grade] * 0.5
+                + _GRADE_SCORE[import_grade] * 0.3
+                + _GRADE_SCORE[growth_grade] * 0.2
+            )
+            score = round(weighted / 3 * 100, 1)
+            if best_score is None or score > best_score:
+                best_score = score
+                best_sku = sku_name
+                best_import_grade = import_grade
+
+        results[mfr_key] = {
+            "ranking_score":          best_score,
+            "best_sku_name":          best_sku,
+            "top5_retailer_grade":    top5_grade,
+            "top5_retailers_matched": matched_top5,
+            "import_count_grade":     best_import_grade,
+            "total_import_count":     total_count,
+            "growth_trend_grade":     growth_grade,
+            "growth_yearly": [
+                {"year": str(y1), "count": gy1},
+                {"year": str(y2), "count": gy2},
+                {"year": str(y3), "count": gy3},
+            ],
+        }
+
+    return results

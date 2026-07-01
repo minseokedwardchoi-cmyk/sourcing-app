@@ -1824,11 +1824,11 @@ function CountryDetail({ navigate, state }) {
 
   const filteredMfr = useMemo(() => {
     let rows = mfrRes?.data || [];
-    if (colFilters.primary_mc?.length) rows = rows.filter(r => colFilters.primary_mc.includes(r.primary_mc));
+    if (colFilters.primary_mc?.length) rows = rows.filter(r => (r.all_mcs||[]).some(mc => colFilters.primary_mc.includes(mc)));
     return rows;
   }, [mfrRes, colFilters]);
 
-  const mfrMcVals = useMemo(() => Array.from(new Set((mfrRes?.data||[]).map(r=>r.primary_mc).filter(Boolean))).sort(), [mfrRes]);
+  const mfrMcVals = useMemo(() => Array.from(new Set((mfrRes?.data||[]).flatMap(r=>r.all_mcs||[]).filter(Boolean))).sort(), [mfrRes]);
 
   useEffect(()=>{
     if (!country) return;
@@ -1966,7 +1966,7 @@ function CountryDetail({ navigate, state }) {
           <div className="toolbar">
             <div className="search-wrap">
               <span className="search-icon">🔍</span>
-              <input placeholder="SKU명 또는 MC명을 검색하세요" value={search} onChange={e=>setSearch(e.target.value)}/>
+              <input placeholder="제조사명, SKU명 또는 MC명을 검색하세요" value={search} onChange={e=>setSearch(e.target.value)}/>
             </div>
             <div className="date-range-wrap">
               <input type="date" className="date-range-input" value={dateFrom} max={dateTo||undefined} onChange={e=>setDateFrom(e.target.value)}/>
@@ -1987,36 +1987,65 @@ function CountryDetail({ navigate, state }) {
             <table>
               <thead>
                 <tr>
-                  <th style={{minWidth:40}}>순위</th>
                   <th style={{minWidth:200}}>제조사명</th>
-                  <th style={{minWidth:80}}>제조국</th>
                   <th style={{minWidth:160}}><div className="th-inner"><span className="th-label">주요 MC</span><ColumnFilter colKey={null} isNumeric={false} activeValues={colFilters.primary_mc||null} activeSortCol={false} activeSortDir="asc" localValues={mfrMcVals} onSort={()=>{}} onApply={vals=>setColFilters(p=>({...p,primary_mc:vals}))}/></div></th>
                   <th style={{minWidth:80}} onClick={()=>handleSort("sku_count")}>취급 SKU 수 <SortIcon col="sku_count" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:90}} onClick={()=>handleSort("total_import_count")}>총수입횟수 <SortIcon col="total_import_count" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:100}} onClick={()=>handleSort("top5_count")}>탑5 거래 유통사 수 <SortIcon col="top5_count" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:90}} onClick={()=>handleSort("latest_import")}>최근 수입일 <SortIcon col="latest_import" sortCol={sortBy} sortDir={sortDir}/></th>
-                  <th style={{minWidth:90}} onClick={()=>handleSort("ranking_score")}>제조사 점수 <SortIcon col="ranking_score" sortCol={sortBy} sortDir={sortDir}/></th>
+                  <th style={{minWidth:130}} onClick={()=>handleSort("ranking_score")}>종합점수 <SortIcon col="ranking_score" sortCol={sortBy} sortDir={sortDir}/></th>
+                  <th style={{minWidth:220}}>탑5 유통사 거래 다양성</th>
+                  <th style={{minWidth:120}} onClick={()=>handleSort("total_import_count")}>국내 수입횟수 <SortIcon col="total_import_count" sortCol={sortBy} sortDir={sortDir}/></th>
+                  <th style={{minWidth:220}}>최근 3개년 성장추세</th>
                 </tr>
               </thead>
               <tbody>
-                {mfrLoading ? <SkeletonRows cols={9}/>
+                {mfrLoading ? <SkeletonRows cols={7}/>
                 : !filteredMfr.length
-                  ? <tr><td colSpan={9}><div className="empty-state">조건에 맞는 제조사가 없습니다.</div></td></tr>
+                  ? <tr><td colSpan={7}><div className="empty-state">조건에 맞는 제조사가 없습니다.</div></td></tr>
                   : filteredMfr.map((m,i)=>(
                     <tr key={i}>
-                      <td>{m.rank}</td>
                       <td title={m.manufacturer}>
                         <span className="link-cell" onClick={()=>navigate("mfr",{row:{manufacturer:m.manufacturer,factory:m.factory||m.manufacturer},from:"country",countryState:state})}>
                           {m.manufacturer}
                         </span>
                       </td>
-                      <td>{m.country||"-"}</td>
-                      <td>{m.primary_mc ? <span className="badge b-mc">{m.primary_mc}</span> : "-"}</td>
+                      <td>
+                        <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                          {(m.all_mcs||[]).length>0
+                            ? (m.all_mcs||[]).map((mc,j)=><span key={j} className="badge b-mc">{mc}</span>)
+                            : "-"}
+                        </div>
+                      </td>
                       <td>{m.sku_count}</td>
-                      <td>{m.total_import_count}</td>
-                      <td>{m.top5_count}</td>
-                      <td>{m.latest_import||"-"}</td>
-                      <td><span className="score-cell">{m.ranking_score!=null?`${m.ranking_score.toFixed(1)}점`:"-"}</span></td>
+                      <td>
+                        <span className="score-cell">
+                          {m.ranking_score!=null
+                            ? `${m.ranking_score.toFixed(1)}점${m.best_sku_name ? ` (${m.best_sku_name})` : ""}`
+                            : "-"}
+                        </span>
+                      </td>
+                      <td style={{maxWidth:"none",overflow:"visible"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <GradeBadge grade={m.top5_retailer_grade}/>
+                          <span className="grade-evidence">
+                            {m.top5_retailers_matched?.length ? m.top5_retailers_matched.join(", ") : "거래 없음"}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{maxWidth:"none",overflow:"visible"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <GradeBadge grade={m.import_count_grade}/>
+                          <span className="grade-evidence">{m.total_import_count ?? 0}건</span>
+                        </div>
+                      </td>
+                      <td style={{maxWidth:"none",overflow:"visible"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <GradeBadge grade={m.growth_trend_grade}/>
+                          <span className="grade-evidence">
+                            {m.growth_yearly?.length
+                              ? m.growth_yearly.map(y=>y.count).join(" → ")
+                              : "-"}
+                          </span>
+                        </div>
+                      </td>
                     </tr>
                   ))}
               </tbody>

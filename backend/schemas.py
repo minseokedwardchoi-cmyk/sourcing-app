@@ -154,13 +154,19 @@ class CountryManufacturerRow(BaseModel):
     manufacturer:           str
     factory:                Optional[str]   = Field(None, description="제조사 상세 링크용 원본 factory 값")
     country:                Optional[str]
-    primary_mc:             Optional[str]   = Field(None, description="주요 MC (\"X 외 N개\" 형식)")
+    all_mcs:                list[str]       = Field(default_factory=list, description="모든 MC 목록 (빈도순)")
+    primary_mc:             Optional[str]   = Field(None, description="주요 MC (하위호환)")
     sku_count:              int             = Field(0, description="취급 SKU 수")
     total_import_count:     int             = Field(0, description="총수입횟수")
     top5_count:             int             = Field(0, description="탑5 거래 유통사 수")
     top5_retailers_matched: list[str]       = Field(default_factory=list)
     latest_import:          Optional[date]  = Field(None, description="최근 수입일")
-    ranking_score:          Optional[float] = Field(None, description="제조사 점수 (기존 랭킹 로직 재사용)")
+    ranking_score:          Optional[float] = Field(None, description="제조사 점수")
+    best_sku_name:          Optional[str]   = Field(None, description="최고 점수 SKU명")
+    top5_retailer_grade:    Optional[str]   = Field(None, description="탑5 유통사 거래 다양성 등급")
+    import_count_grade:     Optional[str]   = Field(None, description="국내 수입횟수 등급")
+    growth_trend_grade:     Optional[str]   = Field(None, description="최근 3개년 성장추세 등급")
+    growth_yearly:          list[dict]      = Field(default_factory=list, description="연도별 수입횟수")
     matched_sku:            Optional[str]   = Field(None, description="SKU 검색 시 매칭된 대표 SKU명")
 
 
