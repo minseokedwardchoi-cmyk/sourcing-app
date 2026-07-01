@@ -13,7 +13,7 @@ import {
   fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers, fetchCountryAmountShare,
   fetchFactoryView, fetchFactoryViewMonthly,
 } from "./api.js";
-import { getKoreanName } from "./countryGeo.js";
+import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
 import worldGeoData from "world-atlas/countries-110m.json";
 
 // ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
@@ -2522,7 +2522,7 @@ function CountryMapPage({ navigate }) {
                   {({ geographies }) => (
                     <>
                       {geographies.map(geo => {
-                        const koreanName = getKoreanName(geo.properties.name);
+                        const koreanName = resolveKoreanName(geo.properties.name, dbCountries);
                         const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
                         return (
                           <Geography
@@ -2560,7 +2560,7 @@ function CountryMapPage({ navigate }) {
                         );
                       })}
                       {geographies.map(geo => {
-                        const koreanName = getKoreanName(geo.properties.name);
+                        const koreanName = resolveKoreanName(geo.properties.name, dbCountries);
                         const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
                         if (!inDb) return null;
                         const showLabel = MAP_ALWAYS_LABEL.has(koreanName);
