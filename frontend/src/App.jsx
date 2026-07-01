@@ -1856,10 +1856,11 @@ function ManufacturerDetail({ navigate, state }) {
                             <th style={{minWidth:220}}>제품명</th>
                             <th style={{minWidth:80}}>OEM/수입</th>
                             <th style={{minWidth:180}}>수입업체</th>
-                            <th style={{minWidth:90,textAlign:"right"}}>수입횟수(전체)</th>
-                            <th style={{minWidth:72,textAlign:"right"}}>{yearLabel(3,baseYear)}</th>
-                            <th style={{minWidth:72,textAlign:"right"}}>{yearLabel(2,baseYear)}</th>
-                            <th style={{minWidth:72,textAlign:"right"}}>{yearLabel(1,baseYear)}</th>
+                            <th className="col-highlight" style={{minWidth:90,textAlign:"right"}}>수입횟수(전체)</th>
+                            <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(3,baseYear)}</th>
+                            <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(2,baseYear)}</th>
+                            <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(1,baseYear)}</th>
+                            <th style={{minWidth:90,textAlign:"center"}}>수입횟수 추이</th>
                             <th style={{minWidth:80,textAlign:"right"}}>역량점수</th>
                           </tr>
                         </thead>
@@ -1874,12 +1875,15 @@ function ManufacturerDetail({ navigate, state }) {
                                   {(overflowCells.has(cellKey("sku_name",i))||expandedOverflow.has(cellKey("sku_name",i)))&&<button className="sku-expand-btn" onClick={e=>{e.stopPropagation();toggleOverflowExpand("sku_name",i);}} title={expandedOverflow.has(cellKey("sku_name",i))?"접기":"펼치기"}>{expandedOverflow.has(cellKey("sku_name",i))?"▲":"▼"}</button>}
                                 </div>
                               </td>
-                              <td style={{fontSize:12}}>{r.import_type||"-"}</td>
+                              <td style={{padding:"8px 4px",textAlign:"center"}}><OemBadge value={r.import_type}/></td>
                               <td>{renderImporters(r.importers)}</td>
-                              <td style={{textAlign:"right"}}><span className="badge b-count">{r.import_count}</span></td>
-                              <td style={{textAlign:"right",color:(r.count_year3||0)>0?"#16a34a":"#9ca3af",fontWeight:500}}>{(r.count_year3||0)>0?r.count_year3:"-"}</td>
-                              <td style={{textAlign:"right",color:(r.count_year2||0)>0?"#16a34a":"#9ca3af",fontWeight:500}}>{(r.count_year2||0)>0?r.count_year2:"-"}</td>
-                              <td style={{textAlign:"right",color:(r.count_year1||0)>0?"#16a34a":"#9ca3af",fontWeight:500}}>{(r.count_year1||0)>0?r.count_year1:"-"}</td>
+                              <td className="col-highlight"><span className="badge b-count">{r.import_count}</span></td>
+                              <td className="col-highlight"><span style={{color:(r.count_year3||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year3||0)>0?600:400}}>{(r.count_year3||0)>0?r.count_year3:"-"}</span></td>
+                              <td className="col-highlight"><span style={{color:(r.count_year2||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year2||0)>0?600:400}}>{(r.count_year2||0)>0?r.count_year2:"-"}</span></td>
+                              <td className="col-highlight"><span style={{color:(r.count_year1||0)>0?"#15803d":"#9ca3af",fontWeight:(r.count_year1||0)>0?600:400}}>{(r.count_year1||0)>0?r.count_year1:"-"}</span></td>
+                              <td style={{textAlign:"center"}}>
+                                <button className="trend-btn" onClick={e=>{e.stopPropagation();openMonthlyModal(r);}}>📈 추이 보기</button>
+                              </td>
                               <td style={{textAlign:"right"}}>
                                 {r.ranking_score!=null
                                   ? <span className="badge" style={{background: r.ranking_score>=70?"#dcfce7":r.ranking_score>=40?"#fef9c3":"#fee2e2", color: r.ranking_score>=70?"#15803d":r.ranking_score>=40?"#92400e":"#b91c1c", minWidth:36, display:"inline-block", textAlign:"center"}}>
@@ -1889,7 +1893,7 @@ function ManufacturerDetail({ navigate, state }) {
                               </td>
                             </tr>
                           ))}
-                          {filteredSkus.length===0&&<tr><td colSpan={10}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
+                          {filteredSkus.length===0&&<tr><td colSpan={11}><div className="empty-state">조건에 맞는 제품이 없습니다.</div></td></tr>}
                         </tbody>
                       </table>
                     </div>
@@ -1899,6 +1903,9 @@ function ManufacturerDetail({ navigate, state }) {
             </div>
 
             {monthlyModal && (() => {
+              const today = new Date();
+              const thisYear = today.getFullYear();
+              const thisMonth = today.getMonth() + 1;
               const chartData = (monthlyModal.monthly || [])
                 .filter(mo => {
                   if (modalChartFrom && mo.month < modalChartFrom.slice(2).replace("-","/")) return false;
@@ -1909,9 +1916,25 @@ function ManufacturerDetail({ navigate, state }) {
               const chartTotal = chartData.reduce((sum, item) => sum + item.count, 0);
               const yearlyMap = {};
               (monthlyModal.yearly || []).forEach(y => { yearlyMap[y.year] = y.count; });
-              const thisYear = new Date().getFullYear();
               const allYears = [];
               for (let yr = 2021; yr <= thisYear; yr++) allYears.push({ year: String(yr), count: yearlyMap[String(yr)] ?? 0 });
+              const firstDataYear = allYears.find(y => y.count > 0)?.year;
+              function getYearChangeRate(y) {
+                if (y.year === firstDataYear) return null;
+                const prevIdx = allYears.findIndex(a => a.year === String(Number(y.year) - 1));
+                if (prevIdx < 0) return null;
+                const prev = allYears[prevIdx].count;
+                if (prev === 0) return null;
+                const isCurrent = Number(y.year) === thisYear;
+                if (isCurrent) {
+                  const currSlice = (monthlyModal.monthly||[]).filter(mo=>{const[yy,mm]=mo.month.split("/");return Number("20"+yy)===thisYear&&Number(mm)<=thisMonth;}).reduce((s,mo)=>s+mo.count,0);
+                  const prevSlice = (monthlyModal.monthly||[]).filter(mo=>{const[yy,mm]=mo.month.split("/");return Number("20"+yy)===thisYear-1&&Number(mm)<=thisMonth;}).reduce((s,mo)=>s+mo.count,0);
+                  if (prevSlice===0) return null;
+                  return {pct:Math.round((currSlice-prevSlice)/prevSlice*100),isCurrent:true};
+                } else {
+                  return {pct:Math.round((y.count-prev)/prev*100),isCurrent:false};
+                }
+              }
               return (
                 <div className="modal-overlay" onClick={()=>setMonthlyModal(null)}>
                   <div className="modal-box" style={{maxWidth:"min(1100px, 95vw)"}} onClick={e=>e.stopPropagation()}>
@@ -1925,14 +1948,24 @@ function ManufacturerDetail({ navigate, state }) {
                       : (
                         <>
                           <div className="modal-section-title">연도별 수입횟수</div>
+                          {!allYears.some(y=>y.count>0) ? <div className="empty-state">이력 없음</div> : (
                           <div style={{overflowX:"auto"}}>
                             <div style={{display:"grid",gridTemplateColumns:`auto repeat(${allYears.length}, auto)`,gap:1,background:"#e8eaed",fontSize:12,width:"fit-content",border:"1px solid #e8eaed",borderRadius:4,overflow:"hidden"}}>
                               <div style={{padding:"5px 10px",background:"#f1f3f5",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap"}}>연도</div>
                               {allYears.map(y => <div key={y.year} style={{padding:"5px 10px",background:"#fff",textAlign:"center"}}>{y.year}</div>)}
                               <div style={{padding:"5px 10px",background:"#f1f3f5",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap"}}>수입횟수</div>
-                              {allYears.map(y => <div key={y.year} style={{padding:"5px 10px",background:"#fff",textAlign:"center",color:y.count>0?"#15803d":"#9ca3af",fontWeight:y.count>0?600:400}}>{y.count}</div>)}
+                              {allYears.map(y => {
+                                const rate = getYearChangeRate(y);
+                                return (
+                                  <div key={y.year} style={{padding:"5px 10px",background:"#fff",textAlign:"center",color:y.count>0?"#15803d":"#9ca3af",fontWeight:y.count>0?600:400}}>
+                                    {y.count}
+                                    {rate!==null&&<span style={{display:"block",fontSize:10,color:rate.pct>=0?"#dc2626":"#2563eb",fontWeight:500}}>{Number(y.year)===thisYear?`(전년 동기比 ${rate.pct>=0?"+":""}${rate.pct}%)`:`(${rate.pct>=0?"+":""}${rate.pct}%)`}</span>}
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
+                          )}
                           <div style={{marginTop:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
                             <div className="modal-section-title" style={{margin:0}}>월별 수입횟수 추이</div>
                             <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
