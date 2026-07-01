@@ -65,9 +65,12 @@ def fetch_total_count(base_url: str, timeout: int = 30) -> int | None:
         return None
 
 
-def post_chunk(endpoint: str, base_url: str, chunk: list[dict], refresh: bool, timeout: int) -> dict:
+def post_chunk(endpoint: str, base_url: str, chunk: list[dict], refresh: bool, timeout: int,
+               expected_before: int | None) -> dict:
+    """expected_before: 이 청크를 보내기 직전, import_history에 있어야 할 것으로 예상되는 총 행 수
+    (스크립트가 지금까지 성공시킨 것만 누적한 값 — /api/stats를 매번 부르지 않기 위함).
+    타임아웃이 실제로 발생했을 때만 /api/stats를 호출해서 서버 반영 여부를 확인한다."""
     body = json.dumps({"rows": chunk, "refresh": refresh}, default=str).encode("utf-8")
-    before_count = fetch_total_count(base_url)
 
     last_err = None
     for attempt in range(1, MAX_RETRIES + 1):
@@ -84,11 +87,11 @@ def post_chunk(endpoint: str, base_url: str, chunk: list[dict], refresh: bool, t
 
             # 타임아웃 = 응답을 못 받은 것일 뿐, 서버에는 이미 반영됐을 수 있음.
             # 무조건 재전송하면 같은 행이 중복 삽입될 위험이 있어서 먼저 확인한다.
-            if before_count is not None:
+            if expected_before is not None:
                 time.sleep(VERIFY_WAIT)
                 after_count = fetch_total_count(base_url)
                 if after_count is not None:
-                    landed = after_count - before_count
+                    landed = after_count - expected_before
                     if landed >= len(chunk) * 0.5:
                         print(f"      → 타임아웃났지만 서버에는 이미 반영된 것으로 보임 "
                               f"({landed:,}건 증가) — 재전송하지 않고 통과 처리")
@@ -139,13 +142,23 @@ def main():
     total_skipped = 0
     start = time.time()
 
+    # 매 청크마다 /api/stats를 부르면 느려지니, 시작 시점에 한 번만 기준값을 받아오고
+    # 이후로는 스크립트가 누적한 inserted 값으로 예상치를 직접 계산한다.
+    expected_count = fetch_total_count(base_url)
+    if expected_count is None:
+        print("      경고: /api/stats 조회 실패 — 타임아웃 시 중복 삽입 방지 확인이 비활성화됩니다.")
+
     for i, chunk in enumerate(chunks, 1):
         if i < args.start_chunk:
             continue
         is_last = (i == len(chunks))
-        data = post_chunk(endpoint, base_url, chunk, refresh=is_last, timeout=args.timeout)
-        total_inserted += data.get("inserted", 0)
+        data = post_chunk(endpoint, base_url, chunk, refresh=is_last, timeout=args.timeout,
+                           expected_before=expected_count)
+        inserted = data.get("inserted", 0)
+        total_inserted += inserted
         total_skipped += data.get("skipped", 0)
+        if expected_count is not None:
+            expected_count += inserted
         elapsed = time.time() - start
         print(f"      청크 {i}/{len(chunks)} 완료 — 누적 {total_inserted:,}건 적재, "
               f"{total_skipped:,}건 스킵 ({elapsed:.0f}초 경과)")
