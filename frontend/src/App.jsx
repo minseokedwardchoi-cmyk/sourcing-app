@@ -382,6 +382,13 @@ function OemBadge({ value }) {
   return <span className="badge b-gray">{value}</span>;
 }
 
+function scoreToGrade(score) {
+  if (score == null) return null;
+  if (score >= 80) return "A";
+  if (score >= 50) return "B";
+  return "C";
+}
+
 function GradeBadge({ grade }) {
   if (!grade) return <span style={{color:"#9ca3af",fontSize:12}}>-</span>;
   const cls = grade === "A" ? "b-grade-a" : grade === "B" ? "b-grade-b" : "b-grade-c";
@@ -1267,7 +1274,7 @@ function SkuManufacturers({ navigate, state }) {
             <span className="count-label">{res ? `${filteredRows.length}/${res.meta.total}개 제조사` : ""}</span>
             <button className="icon-btn" onClick={()=>downloadCSV(filteredRows.map(g=>({
               제조업체: g.factory, 제조국: g.country, OEM여부: (g.import_types||[]).join("/"),
-              수입업체: (g.importers||[]).join("/"), 종합점수: g.ranking_score, 이메일: g.email||"",
+              수입업체: (g.importers||[]).join("/"), 종합점수: scoreToGrade(g.ranking_score)??"-", 이메일: g.email||"",
             })), "sku_factories.csv")}>⬇ CSV</button>
           </div>
           {error&&<div className="error-box">오류: {error}</div>}
@@ -1314,7 +1321,7 @@ function SkuManufacturers({ navigate, state }) {
                         </span>
                       </td>
                       <td>{g.country||"-"}</td>
-                      <td><span className="score-cell">{g.ranking_score!=null?`${g.ranking_score.toFixed(1)}점`:"-"}</span></td>
+                      <td><GradeBadge grade={scoreToGrade(g.ranking_score)}/></td>
                       <td style={{maxWidth:"none",overflow:"visible"}}>
                         <div style={{display:"flex",alignItems:"center",gap:5}}>
                           <GradeBadge grade={g.top5_retailer_grade}/>
@@ -2018,7 +2025,7 @@ function CountryDetail({ navigate, state }) {
                       <td>
                         <span className="score-cell">
                           {m.ranking_score!=null
-                            ? `${m.ranking_score.toFixed(1)}점${m.best_sku_name ? ` (${m.best_sku_name})` : ""}`
+                            ? <><GradeBadge grade={scoreToGrade(m.ranking_score)}/>{m.best_sku_name ? <span style={{marginLeft:4,fontSize:11,color:"#6b7280"}}>({m.best_sku_name})</span> : null}</>
                             : "-"}
                         </span>
                       </td>
