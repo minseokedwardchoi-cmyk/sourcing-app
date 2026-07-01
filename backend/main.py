@@ -113,6 +113,15 @@ async def _startup_bg():
     await asyncio.sleep(3)
     # MV 생성/마이그레이션
     async with engine.begin() as conn:
+        # 새 컬럼 마이그레이션 (이미 존재하면 무시)
+        for col_sql in [
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS contact_status VARCHAR(100)",
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS md_name VARCHAR(100)",
+        ]:
+            try:
+                await conn.execute(text(col_sql))
+            except Exception:
+                pass
         col_check = await conn.execute(text("""
             SELECT column_name FROM information_schema.columns
             WHERE table_name = 'sku_history_mv' AND column_name = 'earliest_import'
@@ -271,6 +280,8 @@ class ContactUpdateRequest(BaseModel):
     email: Optional[str] = None
     homepage: Optional[str] = None
     certificates: Optional[str] = None
+    contact_status: Optional[str] = None
+    md_name: Optional[str] = None
 
 
 class ContactUpdateResponse(BaseModel):
@@ -1015,7 +1026,7 @@ async def get_manufacturer_detail(
         text("""
             SELECT * FROM import_history
             WHERE manufacturer = :m AND factory = :f
-            ORDER BY import_date DESC
+            ORDER BY COALESCE(import_date, process_date) DESC NULLS LAST
         """),
         {"m": manufacturer, "f": factory},
     )
@@ -1027,8 +1038,14 @@ async def get_manufacturer_detail(
     first = rows[0]
 
     emails    = list({r["email"] for r in rows if r["email"]})
-    importers = list({r["importer"] for r in rows if r["importer"]})
     mc_list   = list({r["mc"] for r in rows if r["mc"]})
+
+    # 거래 수입업체: 주요 5개 유통사 먼저 (코스트코, 이마트, 롯데마트, 홈플러스, 쿠팡), 나머지는 알파벳순
+    _MAIN5_ORDER = ["코스트코", "이마트", "롯데마트", "홈플러스", "쿠팡"]
+    raw_importers = list({r["importer"] for r in rows if r["importer"]})
+    main5 = [imp for imp in _MAIN5_ORDER if imp in raw_importers]
+    others = sorted(imp for imp in raw_importers if imp not in _MAIN5_ORDER)
+    importers = main5 + others
 
     certs_raw = first["certificates"] or ""
     certs = [c.strip() for c in certs_raw.split(",") if c.strip()]
@@ -1047,20 +1064,79 @@ async def get_manufacturer_detail(
         sku_params["dt"] = dt
     sku_where = " AND ".join(sku_conds)
 
+    cur_year = date.today().year
     sku_agg_r = await db.execute(
         text(f"""
             SELECT
-                sku_name, mc, category, importer,
-                COUNT(*)         AS import_count,
-                MAX(import_date) AS latest_import
+                sku_name, mc, category, import_type,
+                COUNT(*)                                                             AS import_count,
+                MAX(COALESCE(import_date, process_date))                            AS latest_import,
+                EXTRACT(YEAR FROM CURRENT_DATE)::int                                AS base_year,
+                COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
+                      THEN 1 END)::int                                              AS count_year1,
+                COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
+                      THEN 1 END)::int                                              AS count_year2,
+                COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
+                      THEN 1 END)::int                                              AS count_year3,
+                array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)    AS importers_raw
             FROM import_history
             WHERE {sku_where}
-            GROUP BY sku_name, mc, category, importer
+            GROUP BY sku_name, mc, category, import_type
             ORDER BY import_count DESC
         """),
         sku_params,
     )
-    sku_rows = sku_agg_r.mappings().all()
+    sku_rows_raw = sku_agg_r.mappings().all()
+
+    # 유통사 순서 정렬: 코스트코, 이마트, 롯데마트, 홈플러스, 쿠팡 먼저
+    _MAIN5 = ["코스트코", "이마트", "롯데마트", "홈플러스", "쿠팡"]
+
+    def _sort_importers(imps):
+        if not imps:
+            return []
+        main5 = [i for i in _MAIN5 if i in imps]
+        others = sorted(i for i in imps if i not in _MAIN5)
+        return main5 + others
+
+    # 취급 SKU별 역량 점수 (공장 기준) — SKU별 peer group 내 상대 랭킹
+    unique_skus = list({r["sku_name"] for r in sku_rows_raw})
+    sku_score_map: dict[str, float | None] = {}
+    if unique_skus:
+        from ranking import compute_factory_rankings
+        try:
+            rankings = await compute_factory_rankings(db, unique_skus)
+            fk = factory  # factory is already defined above
+            rk = rankings.get(fk, {})
+            # Same score applied to all SKUs (peer group is all unique_skus for this factory)
+            sku_score = rk.get("ranking_score")
+            for s in unique_skus:
+                sku_score_map[s] = sku_score
+        except Exception:
+            pass
+
+    sku_rows = []
+    for r in sku_rows_raw:
+        imp_list = _sort_importers(list(r["importers_raw"] or []))
+        sku_rows.append(ManufacturerSkuRow(
+            sku_name      = r["sku_name"],
+            mc            = r["mc"],
+            category      = r["category"],
+            import_type   = r["import_type"],
+            importers     = imp_list,
+            import_count  = r["import_count"],
+            latest_import = r["latest_import"],
+            base_year     = r["base_year"],
+            count_year1   = r["count_year1"] or 0,
+            count_year2   = r["count_year2"] or 0,
+            count_year3   = r["count_year3"] or 0,
+            ranking_score = sku_score_map.get(r["sku_name"]),
+        ))
+
+    # 최근 수입일: 모든 행 중 최대값
+    latest_import_val = max(
+        (r["import_date"] or r["process_date"] for r in rows if (r["import_date"] or r["process_date"])),
+        default=None,
+    )
 
     detail = ManufacturerDetail(
         manufacturer     = manufacturer,
@@ -1077,13 +1153,15 @@ async def get_manufacturer_detail(
         certificates     = certs,
         importers        = importers,
         export_count     = len(rows),
-        latest_import    = first["import_date"],
+        latest_import    = latest_import_val,
         mc_list          = mc_list,
+        contact_status   = first["contact_status"],
+        md_name          = first["md_name"],
     )
 
     return ManufacturerDetailResponse(
         detail = detail,
-        skus   = [ManufacturerSkuRow(**dict(r)) for r in sku_rows],
+        skus   = sku_rows,
     )
 
 # ─── 3-1. 제조사 연락처 직접 수정 ─────────────────────────────────────────────
@@ -1107,6 +1185,8 @@ async def update_manufacturer_contact(
         "email": payload.email,
         "homepage": payload.homepage,
         "certificates": payload.certificates,
+        "contact_status": payload.contact_status,
+        "md_name": payload.md_name,
     }
 
     # 직접 입력은 사용자가 의도한 수정이므로 기존 값을 덮어씀
@@ -1116,11 +1196,15 @@ async def update_manufacturer_contact(
         set_parts.append("homepage = :homepage")
     if payload.certificates is not None:
         set_parts.append("certificates = :certificates")
+    if payload.contact_status is not None:
+        set_parts.append("contact_status = :contact_status")
+    if payload.md_name is not None:
+        set_parts.append("md_name = :md_name")
 
     if not set_parts:
         raise HTTPException(
             status_code=400,
-            detail="업데이트할 이메일, 홈페이지, 인증서 값이 없습니다.",
+            detail="업데이트할 값이 없습니다.",
         )
 
     country_cond = ""
