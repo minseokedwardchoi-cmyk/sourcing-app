@@ -1489,14 +1489,14 @@ function ManufacturerDetail({ navigate, state }) {
     setModalChartFrom("");
     setModalChartTo("");
     setMonthlyModal({ row: target, loading: true, error: null, yearly: [], monthly: [] });
-    fetchMonthlyImportCounts(target, null, null)
+    fetchFactoryViewMonthly(target, null, null)
       .then(res => setMonthlyModal(m => m ? { ...m, loading: false, yearly: res.yearly || [], monthly: res.data || [] } : null))
       .catch(e => setMonthlyModal(m => m ? { ...m, loading: false, error: e.message } : null));
   }
 
   function refetchModalChart(row, from, to) {
     setMonthlyModal(m => m ? { ...m, chartLoading: true } : null);
-    fetchMonthlyImportCounts(row, from || null, to || null)
+    fetchFactoryViewMonthly(row, from || null, to || null)
       .then(res => setMonthlyModal(m => m ? { ...m, chartLoading: false, monthly: res.data || [] } : null))
       .catch(e => setMonthlyModal(m => m ? { ...m, chartLoading: false, error: e.message } : null));
   }
@@ -1860,14 +1860,14 @@ function ManufacturerDetail({ navigate, state }) {
                           <tr>
                             <th style={{minWidth:80}}><div className="th-inner"><span className="th-label">구분</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.category||null} activeSortCol={false} activeSortDir="asc" localValues={skuCategoryVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,category:vals}))}/></div></th>
                             <th style={{minWidth:100}}><div className="th-inner"><span className="th-label">MC</span><ColumnFilter colKey={null} isNumeric={false} activeValues={skuColFilters.mc||null} activeSortCol={false} activeSortDir="asc" localValues={skuMcVals} onSort={()=>{}} onApply={vals=>setSkuColFilters(p=>({...p,mc:vals}))}/></div></th>
-                            <th style={{minWidth:220}}>제품명</th>
-                            <th style={{minWidth:80}}>OEM/수입</th>
+                            <th style={{minWidth:260}}>제품명</th>
+                            <th style={{minWidth:70}}>OEM/수입</th>
                             <th style={{minWidth:180}}>수입업체</th>
-                            <th className="col-highlight" style={{minWidth:90,textAlign:"right"}}>수입횟수(전체)</th>
-                            <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(3,baseYear)}</th>
-                            <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(2,baseYear)}</th>
-                            <th className="col-highlight" style={{minWidth:72,textAlign:"right"}}>{yearLabel(1,baseYear)}</th>
-                            <th style={{minWidth:90,textAlign:"center"}}>수입횟수 추이</th>
+                            <th className="col-highlight" style={{minWidth:60,textAlign:"right"}}>수입횟수(전체)</th>
+                            <th className="col-highlight" style={{minWidth:54,textAlign:"right"}}>{yearLabel(3,baseYear)}</th>
+                            <th className="col-highlight" style={{minWidth:54,textAlign:"right"}}>{yearLabel(2,baseYear)}</th>
+                            <th className="col-highlight" style={{minWidth:54,textAlign:"right"}}>{yearLabel(1,baseYear)}</th>
+                            <th style={{minWidth:80,textAlign:"center"}}>수입횟수 추이</th>
                             <th style={{minWidth:60,textAlign:"center"}}>등급</th>
                           </tr>
                         </thead>
