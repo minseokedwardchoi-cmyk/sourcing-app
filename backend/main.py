@@ -19,6 +19,7 @@ from fastapi import FastAPI, BackgroundTasks, Depends, Query, UploadFile, File, 
 
 log = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func, select
 from dotenv import load_dotenv
@@ -63,6 +64,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 대용량 목록(SKU 취급 제조사, 국가별 제조사 등)은 JSON 응답이 커서 전송 자체가
+# 느릴 수 있음 — 응답을 gzip으로 압축해 네트워크 전송 시간을 줄인다.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -99,6 +103,9 @@ _MV_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_mv_mc_btree    ON sku_history_mv (mc)",
     "CREATE INDEX IF NOT EXISTS idx_mv_import_type ON sku_history_mv (import_type)",
     "CREATE INDEX IF NOT EXISTS idx_mv_email       ON sku_history_mv (email)",
+    # manufacturer는 정렬(ORDER BY) 대상 컬럼인데 trigram GIN만 있고 btree가 없어
+    # 제조사명순 정렬 시 인덱스를 못 쓰고 매번 전체 정렬을 했음
+    "CREATE INDEX IF NOT EXISTS idx_mv_manufacturer ON sku_history_mv (manufacturer)",
     "CREATE INDEX IF NOT EXISTS idx_mv_gin_sku      ON sku_history_mv USING gin (sku_name      gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS idx_mv_gin_factory  ON sku_history_mv USING gin (factory       gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS idx_mv_gin_mfr      ON sku_history_mv USING gin (manufacturer  gin_trgm_ops)",
