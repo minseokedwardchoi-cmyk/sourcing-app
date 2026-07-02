@@ -622,18 +622,6 @@ function MainDashboard({ navigate }) {
     }catch(err){setUploadMsg({ok:false,text:err.message});}
     finally{setUploading(false); e.target.value="";}
   }
-  async function handleClearAllData(){
-    if(!window.confirm("정말 모든 데이터를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다."))return;
-    if(window.prompt("삭제를 진행하려면 'DELETE'를 입력하세요.") !== "DELETE")return;
-    setUploading(true); setUploadMsg(null);
-    try{
-      const res=await clearAllData();
-      setUploadMsg({ok:true,text:res.message});
-      const r2=await fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50});
-      setData(r2.data); setMeta(r2.meta);
-    }catch(err){setUploadMsg({ok:false,text:err.message});}
-    finally{setUploading(false);}
-  }
   async function handleContactExcelUpload(e) {
   const file = e.target.files?.[0];
   if (!file) return;
@@ -766,11 +754,9 @@ function MainDashboard({ navigate }) {
 
               <button
                 className="upload-btn"
-                style={{ background: "#dc2626" }}
-                disabled={uploading}
-                onClick={handleClearAllData}
+                style={{ background: "#3b82f6" }}
               >
-                🗑️ 전체 데이터 삭제
+                🔄 데이터 업데이트
               </button>
             </div>
           </div>
