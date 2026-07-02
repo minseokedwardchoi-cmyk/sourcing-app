@@ -411,6 +411,42 @@ function SkeletonRows({ cols = 9, rows = 10 }) {
   ));
 }
 
+// 수천 행짜리 테이블을 한 번에 다 그리면 브라우저가 버벅이므로, 처음엔 일부만
+// 렌더링하고 하단 sentinel row가 뷰포트에 들어올 때마다 더 그려 넣는다.
+// 필터링/정렬 로직과 데이터는 그대로 두고 "화면에 그리는 행 수"만 줄이는 방식이라
+// 기존 검색/필터/CSV 다운로드 동작에는 영향이 없다.
+function useIncrementalRender(items, batchSize = 200) {
+  const [visibleCount, setVisibleCount] = useState(batchSize);
+  const sentinelRef = useRef(null);
+
+  useEffect(() => { setVisibleCount(batchSize); }, [items, batchSize]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || visibleCount >= items.length) return;
+    const io = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting) {
+        setVisibleCount(c => Math.min(items.length, c + batchSize));
+      }
+    }, { rootMargin: "400px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [items.length, visibleCount, batchSize]);
+
+  return { visibleItems: items.slice(0, visibleCount), sentinelRef, hasMore: visibleCount < items.length };
+}
+
+function LoadMoreSentinel({ sentinelRef, hasMore, colSpan }) {
+  if (!hasMore) return null;
+  return (
+    <tr ref={sentinelRef}>
+      <td colSpan={colSpan} style={{ textAlign: "center", padding: "10px", fontSize: 12, color: "#9ca3af" }}>
+        더 불러오는 중...
+      </td>
+    </tr>
+  );
+}
+
 function Pagination({ meta, page, setPage }) {
   if (!meta || meta.total_pages <= 1) return null;
   const start = Math.max(1, Math.min(meta.total_pages - 4, page - 2));
@@ -1200,6 +1236,8 @@ function SkuManufacturers({ navigate, state }) {
     return rows;
   }, [sortedRows, colFilters]);
 
+  const { visibleItems: visibleFilteredRows, sentinelRef: skuSentinelRef, hasMore: skuHasMore } = useIncrementalRender(filteredRows);
+
   const skuCountryVals = useMemo(() => Array.from(new Set((res?.data||[]).map(r=>r.country).filter(Boolean))).sort(), [res]);
   const skuOemVals     = useMemo(() => Array.from(new Set((res?.data||[]).flatMap(r=>r.import_types||[]).filter(Boolean))).sort(), [res]);
   const skuEmailVals   = useMemo(() => Array.from(new Set((res?.data||[]).map(r=>r.email).filter(Boolean))).sort(), [res]);
@@ -1290,7 +1328,7 @@ function SkuManufacturers({ navigate, state }) {
                 {loading ? <SkeletonRows cols={10}/>
                 : !filteredRows?.length
                   ? <tr><td colSpan={10}><div className="empty-state">선택한 SKU와 연결된 제조사 정보가 없습니다.</div></td></tr>
-                  : filteredRows.map((g,i)=>(
+                  : visibleFilteredRows.map((g,i)=>(
                     <tr key={i}>
                       <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("sku_name",i))?"normal":"nowrap"}}>
                         <div className="sku-cell">
@@ -1351,6 +1389,7 @@ function SkuManufacturers({ navigate, state }) {
                       </td>
                     </tr>
                   ))}
+                <LoadMoreSentinel sentinelRef={skuSentinelRef} hasMore={skuHasMore} colSpan={10}/>
               </tbody>
             </table>
           </div>
@@ -2209,6 +2248,8 @@ function CountryDetail({ navigate, state }) {
     return rows;
   }, [mfrRes, colFilters, sortBy, sortDir]);
 
+  const { visibleItems: visibleFilteredMfr, sentinelRef: mfrSentinelRef, hasMore: mfrHasMore } = useIncrementalRender(filteredMfr);
+
   const mfrMcVals    = useMemo(() => Array.from(new Set((mfrRes?.data||[]).flatMap(r=>r.all_mcs||[]).filter(Boolean))).sort(), [mfrRes]);
   const mfrNameVals  = useMemo(() => Array.from(new Set((mfrRes?.data||[]).map(r=>r.manufacturer).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ko")), [mfrRes]);
   const mfrSkuCountVals = useMemo(() => [...new Set((mfrRes?.data||[]).map(r=>String(r.sku_count)))].sort((a,b)=>Number(a)-Number(b)), [mfrRes]);
@@ -2404,7 +2445,7 @@ function CountryDetail({ navigate, state }) {
                 {mfrLoading ? <SkeletonRows cols={7}/>
                 : !filteredMfr.length
                   ? <tr><td colSpan={7}><div className="empty-state">조건에 맞는 제조사가 없습니다.</div></td></tr>
-                  : filteredMfr.map((m,i)=>(
+                  : visibleFilteredMfr.map((m,i)=>(
                     <tr key={i}>
                       <td style={{maxWidth:"none",overflow:"visible",whiteSpace:expandedOverflow.has(cellKey("manufacturer",i))?"normal":"nowrap"}}>
                         <div className="sku-cell">
@@ -2453,6 +2494,7 @@ function CountryDetail({ navigate, state }) {
                       </td>
                     </tr>
                   ))}
+                <LoadMoreSentinel sentinelRef={mfrSentinelRef} hasMore={mfrHasMore} colSpan={7}/>
               </tbody>
             </table>
           </div>
