@@ -97,12 +97,36 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+# ─── 필터 드롭다운(컨텍스트 없는 기본 목록) 캐시 ─────────────────────────────
+# /api/column-values는 검색/필터 조건이 하나도 없는 "기본" 상태로 열리는 경우가
+# 대부분인데, 그때마다 SELECT DISTINCT를 새로 계산하면 데이터가 커질수록 느려진다.
+# 컬럼당 고유값 개수는 원본 데이터 규모에 비해 훨씬 작으므로(수십~수천 개), 전체를
+# 서버 메모리에 캐싱해두고 데이터가 바뀔 때(=refresh_mvs 호출 시점)만 다시 계산한다.
+# 검색/필터 조건이 있는 요청은 캐시를 안 쓰고 기존처럼 그 자리에서 계산한다(정확성 유지).
+_COLUMN_VALUES_CACHEABLE_COLS = ["category", "mc", "import_type", "importer", "country", "factory", "email", "sku_name"]
+_column_values_cache: dict[str, list] = {}
+
+
+async def _refresh_column_values_cache():
+    new_cache: dict[str, list] = {}
+    async with engine.connect() as conn:
+        for col in _COLUMN_VALUES_CACHEABLE_COLS:
+            r = await conn.execute(text(f"""
+                SELECT DISTINCT {col} FROM sku_history_mv
+                WHERE {col} IS NOT NULL ORDER BY {col}
+            """))
+            new_cache[col] = [row[0] for row in r.fetchall()]
+    global _column_values_cache
+    _column_values_cache = new_cache
+
+
 async def refresh_mvs(db: AsyncSession = None):
     """Materialized view refresh — CONCURRENTLY는 트랜잭션 밖에서 실행해야 함"""
     # CONCURRENTLY는 autocommit 커넥션 필요 (트랜잭션 블록 내 실행 불가)
     async with engine.execution_options(isolation_level="AUTOCOMMIT").connect() as conn:
         await conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_history_mv"))
         await conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_factory_mv"))
+    await _refresh_column_values_cache()
 
 
 _MV_INDEXES = [
@@ -209,6 +233,11 @@ async def _startup_bg():
                 await conn.execute(text(sql))
         except Exception:
             pass
+
+    try:
+        await _refresh_column_values_cache()
+    except Exception:
+        pass
     print("STARTUP BG COMPLETE")
 
 _SKU_HISTORY_MV_SQL = """
@@ -370,6 +399,20 @@ async def get_column_values(
     allowed = {"category", "mc", "import_type", "importer", "country", "factory", "email", "sku_name"}
     if col not in allowed:
         raise HTTPException(status_code=400, detail="허용되지 않은 컬럼")
+
+    # 검색/필터/기간 조건이 하나도 없는 "기본" 요청이면 미리 계산해둔 캐시를 즉시 반환.
+    # 조건이 하나라도 있으면 그 조합까지 캐싱하진 않으므로 기존처럼 그 자리에서 계산한다.
+    no_context = (
+        not (search and search.strip())
+        and (not competitor or competitor == "전체")
+        and not date_from and not date_to
+        and not any([
+            filter_category, filter_mc, filter_import_type, filter_importer,
+            filter_country, filter_factory, filter_email, filter_sku_name,
+        ])
+    )
+    if no_context and col in _column_values_cache:
+        return _column_values_cache[col]
 
     params: dict = {}
     conds = [f"{col} IS NOT NULL"]
