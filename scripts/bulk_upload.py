@@ -63,6 +63,45 @@ _FIELD_MAP_KEYS = {
 _HEADERLESS_COLS = ["category", "mc", "sku_name", "importer", "import_type", "factory", "country"]
 
 
+def _date_like_ratio(series: pd.Series) -> float:
+    values = series.dropna()
+    if values.empty:
+        return 0.0
+    parsed = pd.to_datetime(values, errors="coerce")
+    return float(parsed.notna().sum()) / float(len(values))
+
+
+def _email_like_ratio(series: pd.Series) -> float:
+    values = series.dropna()
+    if values.empty:
+        return 0.0
+    matched = values.astype(str).str.contains(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", regex=True).sum()
+    return float(matched) / float(len(values))
+
+
+def classify_optional_column(series: pd.Series) -> str:
+    if _date_like_ratio(series) >= 0.8:
+        return "process_date"
+    if _email_like_ratio(series) >= 0.8:
+        return "email"
+    return "extra_0"
+
+
+def recover_unmapped_date_columns(df: pd.DataFrame) -> pd.DataFrame:
+    if "process_date" in df.columns or "import_date" in df.columns:
+        return df
+    ignored = set(_HEADERLESS_COLS + ["email", "homepage", "manufacturer"])
+    candidates = [c for c in df.columns if c not in ignored]
+    scored = [(c, _date_like_ratio(df[c])) for c in candidates]
+    scored = [(c, score) for c, score in scored if score >= 0.8]
+    if not scored:
+        return df
+    best_col = max(scored, key=lambda item: item[1])[0]
+    df = df.copy()
+    df["process_date"] = df[best_col]
+    return df
+
+
 def load_excel(path: str) -> list[dict]:
     df_raw = pd.read_excel(path, engine="openpyxl", header=None)
     df_raw = df_raw.dropna(how="all").dropna(axis=1, how="all")
@@ -93,7 +132,7 @@ def load_excel(path: str) -> list[dict]:
         elif n_cols == 7:
             df.columns = _HEADERLESS_COLS
         elif n_cols == 8:
-            df.columns = _HEADERLESS_COLS + ["email"]
+            df.columns = _HEADERLESS_COLS + [classify_optional_column(df.iloc[:, 7])]
         else:
             base_cols = _HEADERLESS_COLS.copy()
             if n_cols <= len(base_cols):
@@ -101,6 +140,7 @@ def load_excel(path: str) -> list[dict]:
             else:
                 df.columns = base_cols + [f"extra_{i}" for i in range(n_cols - len(base_cols))]
 
+    df = recover_unmapped_date_columns(df)
     df = df.where(pd.notnull(df), None)
     return df.to_dict(orient="records")
 

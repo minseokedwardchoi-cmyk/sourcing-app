@@ -25,6 +25,17 @@ async function request(path, params = {}) {
 const _columnValuesCache = new Map(); // key(URL) -> { ts, promise }
 const COLUMN_VALUES_TTL_MS = 30000;
 
+function normalizeMonthRange(dateFrom, dateTo) {
+  const from = dateFrom && /^\d{4}-\d{2}$/.test(dateFrom) ? `${dateFrom}-01` : dateFrom;
+  let to = dateTo;
+  if (dateTo && /^\d{4}-\d{2}$/.test(dateTo)) {
+    const [year, month] = dateTo.split("-").map(Number);
+    const lastDay = new Date(year, month, 0).getDate();
+    to = `${dateTo}-${String(lastDay).padStart(2, "0")}`;
+  }
+  return { from, to };
+}
+
 /** 컬럼별 고유값 목록 (contextParams로 현재 필터 컨텍스트 전달) */
 export function fetchColumnValues(col, contextParams = {}) {
   const url = new URL(`${BASE_URL}/api/column-values`, window.location.origin);
@@ -32,8 +43,9 @@ export function fetchColumnValues(col, contextParams = {}) {
   const { search, competitor, dateFrom, dateTo, colFilters } = contextParams;
   if (search) url.searchParams.set("search", search);
   if (competitor && competitor !== "전체") url.searchParams.set("competitor", competitor);
-  if (dateFrom) url.searchParams.set("date_from", dateFrom);
-  if (dateTo)   url.searchParams.set("date_to", dateTo);
+  const { from, to } = normalizeMonthRange(dateFrom, dateTo);
+  if (from) url.searchParams.set("date_from", from);
+  if (to)   url.searchParams.set("date_to", to);
   const colMap = {
     category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
     importer: "filter_importer", country: "filter_country", factory: "filter_factory",
@@ -104,8 +116,9 @@ export async function fetchMonthlyImportCounts(row, dateFrom, dateTo) {
       url.searchParams.set(col, String(v));
     }
   });
-  if (dateFrom) url.searchParams.set("date_from", dateFrom);
-  if (dateTo)   url.searchParams.set("date_to", dateTo);
+  const { from, to } = normalizeMonthRange(dateFrom, dateTo);
+  if (from) url.searchParams.set("date_from", from);
+  if (to)   url.searchParams.set("date_to", to);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
@@ -288,8 +301,9 @@ export async function fetchFactoryViewMonthly(row, dateFrom, dateTo) {
       url.searchParams.set(col, String(v));
     }
   });
-  if (dateFrom) url.searchParams.set("date_from", dateFrom);
-  if (dateTo)   url.searchParams.set("date_to", dateTo);
+  const { from, to } = normalizeMonthRange(dateFrom, dateTo);
+  if (from) url.searchParams.set("date_from", from);
+  if (to)   url.searchParams.set("date_to", to);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {

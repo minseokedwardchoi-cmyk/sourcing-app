@@ -12,6 +12,7 @@ main.py — FastAPI 앱 진입점
 from __future__ import annotations
 import os
 import math
+from calendar import monthrange
 from datetime import date
 from typing import Optional, List
 import logging
@@ -49,6 +50,16 @@ from schemas import (
 )
 
 load_dotenv()
+
+
+def _parse_date_param(value: Optional[str], *, end_of_month: bool = False) -> Optional[date]:
+    if not value:
+        return None
+    if len(value) == 7:
+        year, month = map(int, value.split("-"))
+        day = monthrange(year, month)[1] if end_of_month else 1
+        return date(year, month, day)
+    return date.fromisoformat(value)
 
 # ─── 앱 초기화 ───────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -597,8 +608,8 @@ async def get_sku_history_monthly(
     match_sql = " AND ".join(match_conds)
 
     if date_from or date_to:
-        range_from = date.fromisoformat(date_from) if date_from else None
-        range_to   = date.fromisoformat(date_to)   if date_to   else None
+        range_from = _parse_date_param(date_from)
+        range_to   = _parse_date_param(date_to, end_of_month=True)
         if range_from is None:
             bounds_r = await db.execute(text(f"""
                 SELECT MIN(COALESCE(import_date, process_date)) FROM import_history WHERE {match_sql}
@@ -1103,9 +1114,9 @@ async def get_manufacturer_detail(
         sku_conds.append("sku_name ILIKE :sku_search")
         sku_params["sku_search"] = f"%{sku_search.strip()}%"
     if date_from or date_to:
-        df = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
-        dt = date.fromisoformat(date_to)   if date_to   else date(9999, 12, 31)
-        sku_conds.append("import_date >= :df AND import_date <= :dt")
+        df = _parse_date_param(date_from) if date_from else date(1900, 1, 1)
+        dt = _parse_date_param(date_to, end_of_month=True) if date_to else date(9999, 12, 31)
+        sku_conds.append("COALESCE(import_date, process_date) >= :df AND COALESCE(import_date, process_date) <= :dt")
         sku_params["df"] = df
         sku_params["dt"] = dt
     sku_where = " AND ".join(sku_conds)
@@ -1349,7 +1360,7 @@ class JsonUploadRequest(BaseModel):
 
 @app.post("/api/upload-json")
 async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get_db)):
-    from importer import normalize_importer, normalize_oem, normalize_name, safe_str, safe_date, FIELD_MAP
+    from importer import normalize_importer, normalize_oem, normalize_name, safe_str, safe_date, FIELD_MAP, pick_date_like_value
 
     inserted = 0
     skipped = 0
@@ -1367,6 +1378,9 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
             if not sku:
                 skipped += 1
                 continue
+            if not mapped.get("import_date") and not mapped.get("process_date"):
+                mapped["process_date"] = pick_date_like_value(mapped)
+
             records.append({
                 "category":     safe_str(mapped.get("category")),
                 "mc":           safe_str(mapped.get("mc")),
@@ -1696,8 +1710,8 @@ async def get_factory_view_monthly(
     match_sql = " AND ".join(match_conds)
 
     if date_from or date_to:
-        range_from = date.fromisoformat(date_from) if date_from else None
-        range_to   = date.fromisoformat(date_to)   if date_to   else None
+        range_from = _parse_date_param(date_from)
+        range_to   = _parse_date_param(date_to, end_of_month=True)
         if range_from is None:
             bounds_r = await db.execute(text(f"""
                 SELECT MIN(COALESCE(import_date, process_date)) FROM import_history WHERE {match_sql}

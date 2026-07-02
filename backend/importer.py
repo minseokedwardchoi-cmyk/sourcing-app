@@ -165,6 +165,71 @@ def safe_str(val) -> str | None:
     return s if s else None
 
 
+def _date_like_ratio(series: pd.Series) -> float:
+    values = series.dropna()
+    if values.empty:
+        return 0.0
+    parsed = pd.to_datetime(values, errors="coerce")
+    return float(parsed.notna().sum()) / float(len(values))
+
+
+def _email_like_ratio(series: pd.Series) -> float:
+    values = series.dropna()
+    if values.empty:
+        return 0.0
+    matched = values.astype(str).str.contains(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", regex=True).sum()
+    return float(matched) / float(len(values))
+
+
+def classify_optional_column(series: pd.Series) -> str:
+    if _date_like_ratio(series) >= 0.8:
+        return "process_date"
+    if _email_like_ratio(series) >= 0.8:
+        return "email"
+    return "extra_0"
+
+
+def pick_date_like_value(row: dict):
+    ignored = set(HEADERLESS_COLS + [
+        "email", "homepage", "oem_status", "oem_memo", "manager_mc",
+        "product_type", "product_category", "certificates", "manufacturer",
+        "import_date", "process_date",
+    ])
+    for key, value in row.items():
+        if key in ignored:
+            continue
+        if safe_date(value) is not None:
+            return value
+    return None
+
+
+def recover_unmapped_date_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep date columns from headerless or oddly headed uploads.
+
+    Older/headerless files sometimes place process/import dates in columns that do
+    not match FIELD_MAP, so they were discarded as extra_* columns. Overall counts
+    still increased, but yearly/monthly counts became zero because both date fields
+    were NULL.
+    """
+    if "process_date" in df.columns or "import_date" in df.columns:
+        return df
+
+    ignored = set(HEADERLESS_COLS + [
+        "email", "homepage", "oem_status", "oem_memo", "manager_mc",
+        "product_type", "product_category", "certificates", "manufacturer",
+    ])
+    candidates = [c for c in df.columns if c not in ignored]
+    scored = [(c, _date_like_ratio(df[c])) for c in candidates]
+    scored = [(c, score) for c, score in scored if score >= 0.8]
+    if not scored:
+        return df
+
+    best_col = max(scored, key=lambda item: item[1])[0]
+    df = df.copy()
+    df["process_date"] = df[best_col]
+    return df
+
+
 def detect_header(df_raw: pd.DataFrame) -> bool:
     """첫 행이 '구분' 같은 헤더인지 판별"""
     first = str(df_raw.iloc[0, 0]) if len(df_raw) > 0 else ""
@@ -247,16 +312,7 @@ def read_excel_file(file_bytes: bytes) -> pd.DataFrame:
             ]
 
         elif n_cols == 8:
-            df.columns = [
-                "category",
-                "mc",
-                "sku_name",
-                "importer",
-                "import_type",
-                "factory",
-                "country",
-                "email",
-            ]
+            df.columns = HEADERLESS_COLS + [classify_optional_column(df.iloc[:, 7])]
 
         else:
             base_cols = HEADERLESS_COLS.copy()
@@ -287,6 +343,7 @@ def read_excel_file(file_bytes: bytes) -> pd.DataFrame:
         ]
     )
 
+    df = recover_unmapped_date_columns(df)
     df = df[[c for c in df.columns if c in valid]]
     df = df.dropna(how="all")
 
