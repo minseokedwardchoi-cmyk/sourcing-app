@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>해외 제조업체 발굴 대시보드 사용가이드</title>
+<style>
+  @page { size: A4; margin: 22mm 18mm 20mm 18mm; }
+
+  :root {
+    --green: #16a34a;
+    --green-dark: #15803d;
+    --green-bg: #f0fdf4;
+    --green-bg2: #e8f5e9;
+    --navy: #1a3a6b;
+    --navy-dark: #10233f;
+    --text: #1a1a2e;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --border-soft: #eef1f4;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: "Noto Sans CJK KR", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    color: var(--text);
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+
+  .page { page-break-after: always; position: relative; }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---------- 표지 ---------- */
+  .cover {
+    height: 253mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    background: linear-gradient(160deg, var(--green-bg) 0%, #ffffff 55%);
+    padding: 0 6mm;
+    position: relative;
+  }
+  .cover-topbar {
+    position: absolute; top: 0; left: 0; right: 0; height: 10mm;
+    background: linear-gradient(90deg, var(--navy) 0%, var(--green) 100%);
+  }
+  .cover-kicker {
+    color: var(--green-dark); font-weight: 700; font-size: 13px;
+    letter-spacing: 2px; margin-bottom: 14px; text-transform: uppercase;
+  }
+  .cover-title {
+    font-size: 40px; font-weight: 700; color: var(--navy-dark);
+    line-height: 1.35; margin-bottom: 18px; letter-spacing: -0.5px;
+  }
+  .cover-subtitle {
+    font-size: 18px; color: var(--muted); margin-bottom: 46px;
+  }
+  .cover-meta {
+    border-top: 2px solid var(--green); padding-top: 16px; font-size: 13px; color: var(--text);
+  }
+  .cover-meta div { margin-bottom: 6px; }
+  .cover-meta b { color: var(--navy); display: inline-block; width: 70px; }
+  .cover-footer {
+    position: absolute; bottom: 14mm; left: 6mm; font-size: 11px; color: var(--muted);
+  }
+
+  /* ---------- 목차 ---------- */
+  .toc-title {
+    font-size: 24px; font-weight: 700; color: var(--navy-dark);
+    margin: 4mm 0 10mm 0; padding-bottom: 8px; border-bottom: 3px solid var(--green);
+  }
+  .toc-list { list-style: none; margin: 0; padding: 0; }
+  .toc-list > li {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 9px 0; border-bottom: 1px dashed var(--border);
+    font-size: 14px;
+  }
+  .toc-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-size: 12px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .toc-list .toc-sub {
+    font-size: 12px; color: var(--muted); margin-top: 3px; padding-left: 32px;
+  }
+
+  /* ---------- 섹션 공통 ---------- */
+  .section-banner {
+    background: linear-gradient(90deg, var(--navy) 0%, #234a82 100%);
+    color: #fff; padding: 10px 16px; border-radius: 8px;
+    font-size: 18px; font-weight: 700; margin: 0 0 12px 0;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-banner .badge-num {
+    background: var(--green); border-radius: 6px; padding: 2px 10px; font-size: 15px;
+  }
+  .section-intro { color: var(--muted); font-size: 12.5px; margin-bottom: 14px; }
+
+  h3.sub {
+    font-size: 14.5px; font-weight: 700; color: var(--navy-dark);
+    margin: 16px 0 8px 0; padding-left: 10px; border-left: 4px solid var(--green);
+  }
+  h4.sub2 {
+    font-size: 13px; font-weight: 700; color: var(--text);
+    margin: 12px 0 6px 0;
+  }
+  p { margin: 0 0 8px 0; }
+  ul.plain { margin: 4px 0 10px 0; padding-left: 18px; }
+  ul.plain li { margin-bottom: 4px; }
+
+  /* ---------- 스크린샷 ---------- */
+  .shot {
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    margin: 10px 0 6px 0; background: #fff;
+    box-shadow: 0 1px 4px rgba(15,35,63,0.08);
+  }
+  .shot img { display: block; width: 100%; height: auto; }
+  .shot-cap {
+    font-size: 11px; color: var(--muted); text-align: center;
+    margin: 4px 0 14px 0;
+  }
+
+  /* ---------- 번호 설명 목록 (legend) ---------- */
+  .legend { margin: 6px 0 16px 0; }
+  .legend-item {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 5px 0; border-bottom: 1px solid var(--border-soft);
+    font-size: 12px;
+  }
+  .legend-item:last-child { border-bottom: none; }
+  .legend-num {
+    flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--navy); color: #fff; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; margin-top: 1px;
+  }
+  .legend-text b { color: var(--navy-dark); }
+
+  /* ---------- 표 ---------- */
+  table.spec {
+    width: 100%; border-collapse: collapse; margin: 6px 0 16px 0; font-size: 11.5px;
+  }
+  table.spec th {
+    background: var(--navy); color: #fff; text-align: left;
+    padding: 7px 9px; font-weight: 600;
+  }
+  table.spec td {
+    padding: 6px 9px; border-bottom: 1px solid var(--border-soft);
+    vertical-align: top;
+  }
+  table.spec tr:nth-child(even) td { background: #f8fafc; }
+  table.spec td.num-col, table.spec th.num-col { width: 26px; text-align: center; }
+
+  .note-box {
+    background: var(--green-bg); border: 1px solid #bbf7d0; border-radius: 6px;
+    padding: 9px 12px; font-size: 11.5px; color: #14532d; margin: 8px 0 14px 0;
+  }
+  .note-box b { color: var(--green-dark); }
+
+  .quick-table td:first-child { font-weight: 700; color: var(--navy-dark); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<!-- ======================= 1. 표지 ======================= -->
+<div class="page cover">
+  <div class="cover-topbar"></div>
+  <div class="cover-kicker">USER GUIDE</div>
+  <div class="cover-title">해외 제조업체 발굴<br>대시보드 사용가이드</div>
+  <div class="cover-subtitle">화면별 사용 방법 안내</div>
+  <div class="cover-meta">
+    <div><b>작성일</b> 2026-07-02</div>
+    <div><b>버전</b> v1.0</div>
+    <div><b>대상</b> 식품/상품 MD (해외 제조업체 · 상품 · 수입 이력 · 국가별 현황 조회 담당자)</div>
+  </div>
+  <div class="cover-footer">본 문서는 대시보드의 화면 구성과 버튼 사용법을 안내합니다.</div>
+</div>
+
+<!-- ======================= 2. 목차 ======================= -->
+<div class="page">
+  <div class="toc-title">목차</div>
+  <ul class="toc-list">
+    <li><span class="toc-num">1</span> 표지</li>
+    <li><span class="toc-num">2</span> 목차</li>
+    <li><span class="toc-num">3</span> 사이트 전체 구성</li>
+    <li><span class="toc-num">4</span> 메인 대시보드</li>
+    <li><span class="toc-num">5</span> 공장별 보기</li>
+    <li><span class="toc-num">6</span> 국가별 보기</li>
+    <li><span class="toc-num">7</span> 제품명 클릭 후 나오는 제조사 후보 화면</li>
+    <li><span class="toc-num">8</span> 제조사 상세 화면</li>
+    <li><span class="toc-num">9</span> 수입횟수 추이 창</li>
+    <li><span class="toc-num">10</span> 업로드 버튼</li>
+    <li><span class="toc-num">11</span> 화면별 빠른 이동 요약</li>
+  </ul>
+</div>
+
+<!-- ======================= 3. 사이트 전체 구성 ======================= -->
+<div class="page">
+  <div class="section-banner"><span class="badge-num">3</span> 사이트 전체 구성</div>
+  <p class="section-intro">이 사이트는 아래 6개의 화면으로 구성되어 있습니다. 화면 사이의 이동은 버튼 클릭 또는 표 안의 글자(제품명, 해외제조업소, 제조국, 제조사명) 클릭으로 이루어집니다. 뒤로 갈 때는 각 화면 위쪽의 "← 돌아가기" 글자를 클릭합니다.</p>
+
+  <table class="spec">
+    <tr><th style="width:22%">화면 이름</th><th style="width:38%">이동 방법</th><th>확인할 수 있는 정보</th></tr>
+    <tr>
+      <td>① 메인 대시보드</td>
+      <td>사이트에 접속하면 가장 먼저 나오는 화면</td>
+      <td>전체 수입 / OEM 이력 목록 (제품 단위)</td>
+    </tr>
+    <tr>
+      <td>② 공장별 보기</td>
+      <td>메인 대시보드 위쪽의 <b>"🏭 공장별로 보기"</b> 버튼 클릭</td>
+      <td>같은 이력을 해외제조업소(공장) 단위로 묶어서 확인</td>
+    </tr>
+    <tr>
+      <td>③ 국가별 보기</td>
+      <td>메인 대시보드 또는 공장별 보기 위쪽의 <b>"🌍 국가별로 보기"</b> 버튼 클릭, 또는 표의 <b>제조국</b> 글자 클릭</td>
+      <td>국가별 요약, 주요 수입 품목, 해당 국가 제조사 목록</td>
+    </tr>
+    <tr>
+      <td>④ 제품 상세 (제조사 후보 화면)</td>
+      <td>메인 대시보드나 공장별 보기 표에서 <b>제품명</b> 글자 클릭</td>
+      <td>해당 제품을 취급하는 해외 제조업체 후보 목록</td>
+    </tr>
+    <tr>
+      <td>⑤ 제조사 상세 화면</td>
+      <td>표의 <b>해외제조업소</b> 글자 클릭, 또는 제조사 후보/제조사 목록에서 <b>제조사명</b> 클릭</td>
+      <td>연락처, 상품 정보, OEM/소싱 정보, 국내수입 추이, 취급 제품 목록</td>
+    </tr>
+    <tr>
+      <td>⑥ 수입횟수 추이 창</td>
+      <td>표의 <b>"📈 추이 보기"</b> 버튼 클릭</td>
+      <td>연도별 / 월별 수입횟수</td>
+    </tr>
+  </table>
+
+  <div class="note-box">
+    화면을 이동한 뒤 다시 처음으로 돌아가려면, 화면 위쪽의 <b>"← 수입/OEM SKU 이력으로 돌아가기"</b>(또는 상황에 맞는 문구)를 클릭합니다. 브라우저의 새로고침(F5) 버튼을 누르면 항상 메인 대시보드 화면으로 돌아갑니다.
+  </div>
+</div>
+
+<!-- ======================= 4. 메인 대시보드 ======================= -->
+<div class="page">
+  <div class="section-banner"><span class="badge-num">4</span> 메인 대시보드</div>
+  <p class="section-intro">사이트에 접속하면 가장 먼저 보이는 화면입니다. 전체 수입 / OEM 이력이 제품(SKU) 단위 표로 표시됩니다.</p>
+
+  <div class="shot"><img src="images/main-01-full.png"></div>
+  <div class="shot-cap">메인 대시보드 전체 화면</div>
+
+  <h3 class="sub">상단 버튼 영역</h3>
+  <div class="shot"><img src="images/main-03-top.png"></div>
+  <div class="shot-cap">상단 배너와 버튼 영역</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>🌍 국가별로 보기</b> — 국가별 보기 화면으로 이동합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>🏭 공장별로 보기</b> — 공장별 보기 화면으로 이동합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>📤 Excel 업로드</b> — 수입 이력 엑셀 파일을 올립니다. 자세한 내용은 10번 항목을 참고합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">4</span><span class="legend-text"><b>📇 연락처 보강 업로드</b> — 제조사 연락처(이메일, 홈페이지 등)를 올립니다. 자세한 내용은 10번 항목을 참고합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">5</span><span class="legend-text"><b>경쟁사 카드</b> — 전체 / 코스트코 / 이마트 / 롯데마트 / 홈플러스 / 쿠팡 중 하나를 클릭하면, 아래 표가 해당 유통사를 거래한 제품 이력만 보여주도록 바뀝니다. 다시 <b>전체</b>를 클릭하면 원래대로 돌아갑니다.</span></div>
+  </div>
+
+  <h3 class="sub">검색창 · 날짜 필터 · CSV · 열 설정</h3>
+  <div class="shot"><img src="images/main-02-toolbar.png"></div>
+  <div class="shot-cap">검색 및 필터 도구 모음</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>검색창</b> — 제품명, 해외제조업소, MC, 수입업체, 제조국 중 어떤 값으로도 검색할 수 있습니다. 글자를 입력하면 아래 표가 자동으로 검색 결과로 바뀝니다.</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>날짜 필터</b> — 왼쪽 칸에 시작일, 오른쪽 칸에 종료일을 선택합니다. 날짜를 입력하면 표에는 그 기간에 해당하는 이력만 표시됩니다. 입력한 날짜 옆의 <b>✕</b> 를 누르면 날짜 조건이 지워지고 표가 전체 기간 기준으로 되돌아갑니다.</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>⬇ CSV</b> — 현재 검색 · 필터 조건이 적용된 전체 목록을 CSV 파일로 내려받습니다. 화면에 보이는 행뿐 아니라 조건에 맞는 전체 데이터가 포함됩니다.</span></div>
+    <div class="legend-item"><span class="legend-num">4</span><span class="legend-text"><b>⚙ 열 설정</b> — 표에 표시할 열(컬럼)을 선택합니다. 자세한 내용은 아래를 참고합니다.</span></div>
+  </div>
+  <p>검색창 위쪽에는 <b>"총 N건 중 표시"</b> 문구가 표시되어, 현재 조건에 맞는 전체 건수를 확인할 수 있습니다.</p>
+
+  <h3 class="sub">표 컬럼 설명</h3>
+  <div class="shot"><img src="images/main-04-table.png"></div>
+  <div class="shot-cap">표 영역 (첫 번째 행 기준으로 클릭 가능한 열과 추이 보기 버튼을 표시)</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>제품명</b> — 글자를 클릭하면 해당 제품을 취급하는 제조사 후보 화면으로 이동합니다. (7번 항목 참고)</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>해외제조업소</b> — 글자를 클릭하면 그 제조사의 상세 화면으로 이동합니다. (8번 항목 참고)</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>제조국</b> — 글자를 클릭하면 그 국가의 상세 화면으로 이동합니다. (6번 항목 참고)</span></div>
+    <div class="legend-item"><span class="legend-num">4</span><span class="legend-text"><b>추이 보기</b> — 클릭하면 그 제품의 연도별 / 월별 수입횟수를 보여주는 창이 열립니다. (9번 항목 참고)</span></div>
+  </div>
+
+  <table class="spec">
+    <tr><th class="num-col">#</th><th style="width:22%">컬럼명</th><th>표시되는 값</th></tr>
+    <tr><td class="num-col">1</td><td>구분</td><td>PB, NB, 부자재 등 제품 구분값</td></tr>
+    <tr><td class="num-col">2</td><td>MC</td><td>제품이 속한 상품 카테고리</td></tr>
+    <tr><td class="num-col">3</td><td>제품명</td><td>제품 이름 (클릭 가능)</td></tr>
+    <tr><td class="num-col">4</td><td>OEM/수입</td><td>OEM 또는 수입 여부 배지</td></tr>
+    <tr><td class="num-col">5</td><td>수입업체</td><td>제품을 수입한 업체명</td></tr>
+    <tr><td class="num-col">6</td><td>해외제조업소</td><td>실제 제조 공장 이름 (클릭 가능)</td></tr>
+    <tr><td class="num-col">7</td><td>제조국</td><td>제조업소가 위치한 국가 (클릭 가능)</td></tr>
+    <tr><td class="num-col">8</td><td>수입횟수(전체)</td><td>지금까지 전체 수입 건수 합계</td></tr>
+    <tr><td class="num-col">9</td><td>연도별 수입횟수 (3개 열)</td><td>최근 3개 연도 각각의 수입 건수. 값이 없으면 "-"로 표시</td></tr>
+    <tr><td class="num-col">10</td><td>수입횟수 추이</td><td>"📈 추이 보기" 버튼</td></tr>
+  </table>
+
+  <h3 class="sub">열 설정 버튼</h3>
+  <div class="shot"><img src="images/main-05-columnsettings.png"></div>
+  <div class="shot-cap">"⚙ 열 설정" 클릭 시 나오는 체크박스 목록</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text">체크된 열만 표에 표시됩니다. 체크를 해제하면 해당 열이 표에서 즉시 사라지고, 다시 체크하면 다시 나타납니다.</span></div>
+  </div>
+
+  <h3 class="sub">열 머리글의 필터 아이콘 (▾)</h3>
+  <div class="shot"><img src="images/main-06-columnfilter.png"></div>
+  <div class="shot-cap">"제조국" 열 머리글의 ▾ 아이콘 클릭 시 나오는 창</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>정렬</b> — 오름차순 또는 내림차순으로 표를 정렬합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>검색창</b> — 목록에 나온 값 중 원하는 값을 빠르게 찾습니다.</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>값 목록 체크박스</b> — 원하는 값에 체크하면, 표에는 체크한 값에 해당하는 행만 표시됩니다. 값이 비어 있는 경우 "(비어있음)"으로 표시됩니다.</span></div>
+    <div class="legend-item"><span class="legend-num">4</span><span class="legend-text"><b>확인 / 취소</b> — "확인"을 누르면 선택한 조건이 표에 적용되고, "취소"를 누르면 창이 닫히고 선택이 취소됩니다.</span></div>
+  </div>
+  <p>모든 열 머리글(구분, MC, 제품명, OEM/수입, 수입업체, 해외제조업소, 제조국 등)에서 같은 방식으로 정렬과 필터를 사용할 수 있습니다.</p>
+
+  <h3 class="sub">추이 보기 버튼</h3>
+  <div class="shot"><img src="images/main-07-trendmodal.png"></div>
+  <div class="shot-cap">"추이 보기" 클릭 시 나오는 창</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>연도별 수입횟수 표</b> — 2021년부터 올해까지 연도별 수입 건수를 보여줍니다. 각 값 아래에는 전년 대비 증감률이 함께 표시됩니다.</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>월별 수입횟수 그래프</b> — 월 단위 수입 건수를 선 그래프로 보여줍니다. 그래프 위쪽에는 해당 기간의 총 수입횟수가 표시됩니다.</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>기간 필터</b> — 조회할 시작 월과 종료 월을 선택하면 아래 월별 그래프만 그 기간 기준으로 다시 그려집니다. 위쪽 연도별 표는 이 필터의 영향을 받지 않습니다.</span></div>
+    <div class="legend-item"><span class="legend-num">4</span><span class="legend-text"><b>닫기(✕)</b> — 창을 닫습니다. 창 바깥의 어두운 영역을 클릭해도 닫힙니다.</span></div>
+  </div>
+  <p>이 창은 메인 대시보드, 공장별 보기, 제조사 상세 화면의 취급 제품 목록에서 동일한 방식으로 열립니다. 자세한 내용은 9번 항목을 참고합니다.</p>
+</div>
+
+<!-- ======================= 5. 공장별 보기 ======================= -->
+<div class="page">
+  <div class="section-banner"><span class="badge-num">5</span> 공장별 보기</div>
+  <p class="section-intro">메인 대시보드와 같은 수입 이력을, 제품이 아닌 해외제조업소(공장) 단위로 확인하는 화면입니다.</p>
+
+  <div class="shot"><img src="images/factory-01-full.png"></div>
+  <div class="shot-cap">공장별 보기 화면 전체</div>
+
+  <h3 class="sub">진입 방법</h3>
+  <p>메인 대시보드 위쪽의 <b>"🏭 공장별로 보기"</b> 버튼을 클릭하면 이 화면으로 이동합니다.</p>
+
+  <h3 class="sub">메인 대시보드와 다른 점</h3>
+  <ul class="plain">
+    <li>카드 제목이 <b>"수입/OEM SKU 이력 (공장별 보기)"</b>로 표시됩니다.</li>
+    <li>상단 버튼이 <b>"📋 수입이력 별로 보기"</b>(메인 대시보드로 이동), <b>"🌍 국가별로 보기"</b> 로 구성됩니다.</li>
+    <li><b>수입업체</b> 열이 5대 유통사(이마트, 홈플러스, 롯데마트, 쿠팡, 코스트코) 배지와 "외 N개" 형태로 표시됩니다.</li>
+    <li>업로드 버튼 오른쪽에 <b>"🗑️ 전체 데이터 삭제"</b> 버튼이 있습니다. 메인 대시보드에는 없는 버튼입니다. (10번 항목 참고)</li>
+  </ul>
+
+  <div class="shot"><img src="images/factory-02-uploadarea.png"></div>
+  <div class="shot-cap">공장별 보기 상단 버튼 영역</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>📋 수입이력 별로 보기</b> — 메인 대시보드로 돌아갑니다.</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>🌍 국가별로 보기</b> — 국가별 보기 화면으로 이동합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>📤 Excel 업로드</b> — 메인 대시보드와 동일하게 동작합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">4</span><span class="legend-text"><b>📇 연락처 보강 업로드</b> — 메인 대시보드와 동일하게 동작합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">5</span><span class="legend-text"><b>🗑️ 전체 데이터 삭제</b> — 등록된 전체 데이터를 삭제합니다. 자세한 내용은 10번 항목을 참고합니다.</span></div>
+  </div>
+
+  <h3 class="sub">표에 표시되는 정보</h3>
+  <p>표의 열 구성(구분, MC, 제품명, OEM/수입, 수입업체, 해외제조업소, 제조국, 수입횟수(전체), 연도별 수입횟수, 수입횟수 추이)은 메인 대시보드와 동일합니다. 검색창, 날짜 필터, 열 설정, CSV, 추이 보기 버튼도 메인 대시보드와 같은 방식으로 동작합니다. 자세한 사용법은 4번 항목을 참고합니다.</p>
+
+  <div class="shot"><img src="images/factory-03-table.png"></div>
+  <div class="shot-cap">공장별 보기 표 (수입업체 열이 유통사 배지로 표시됨)</div>
+</div>
+
+<!-- ======================= 6. 국가별 보기 ======================= -->
+<div class="page">
+  <div class="section-banner"><span class="badge-num">6</span> 국가별 보기</div>
+  <p class="section-intro">국가 단위로 제조사 현황과 수입 품목을 확인하는 화면입니다.</p>
+
+  <div class="shot"><img src="images/country-01-map.png"></div>
+  <div class="shot-cap">국가별 보기 지도 화면</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>국가명 검색창</b> — 국가 이름을 입력하면 목록이 나타나고, 원하는 국가를 클릭하거나 첫 번째 항목에서 엔터 키를 누르면 해당 국가 상세 화면으로 이동합니다.</span></div>
+  </div>
+
+  <h3 class="sub">진입 방법</h3>
+  <p>메인 대시보드 또는 공장별 보기 화면 위쪽의 <b>"🌍 국가별로 보기"</b> 버튼을 클릭하면 이 화면으로 이동합니다.</p>
+
+  <h3 class="sub">지도에서 국가 선택하는 방법</h3>
+  <ul class="plain">
+    <li>지도에서 <b>초록색</b>으로 표시된 국가는 데이터베이스에 등록된 국가입니다. 이 국가를 클릭하면 국가 상세 화면으로 이동합니다.</li>
+    <li>회색으로 표시된 국가는 등록된 데이터가 없어 클릭해도 이동하지 않습니다.</li>
+    <li>지도 위에 마우스를 올리면 국가명과, 등록된 국가의 경우 순위 · 비중 · 주요 수입품목 정보가 함께 표시됩니다.</li>
+    <li>지도 오른쪽 위의 <b>+</b>, <b>−</b>, <b>⟲</b> 버튼으로 지도를 확대, 축소, 초기화할 수 있습니다.</li>
+    <li>지도 왼쪽 아래에는 <b>대한민국 수입금액 기준 국가 순위</b> 목록이 항상 표시됩니다.</li>
+  </ul>
+
+  <h3 class="sub">국가 상세 화면에서 보이는 정보</h3>
+
+  <h4 class="sub2">국가 요약</h4>
+  <div class="shot"><img src="images/country-02-summary.png"></div>
+  <div class="shot-cap">국가 요약 영역 (예시: 베트남)</div>
+  <p>국가명과 국기, 대한민국 수입금액 기준 국가 순위와 비중, 등록된 제조사 수, 수입이력 건수가 표시됩니다. 오른쪽에는 상위 국가들의 수입금액 비중 목록이 함께 표시됩니다.</p>
+
+  <h4 class="sub2">주요 수입 품목</h4>
+  <div class="shot"><img src="images/country-03-topitems.png"></div>
+  <div class="shot-cap">국가별 주요 수입품목 TOP10</div>
+  <p>해당 국가에서 대한민국으로 수입되는 품목 상위 10개가 순위, 품목명, 비중(%)과 함께 원 그래프로 표시됩니다.</p>
+
+  <h4 class="sub2">제조사 목록</h4>
+  <div class="shot"><img src="images/country-04-mfrlist.png"></div>
+  <div class="shot-cap">해당 국가 제조사 목록</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>제조사명</b> — 글자를 클릭하면 그 제조사의 상세 화면으로 이동합니다. (8번 항목 참고)</span></div>
+  </div>
+  <p>목록 위쪽의 검색창으로 제조사명 · SKU명 · MC명을 검색할 수 있고, 날짜 필터로 기간을 지정할 수 있습니다. "⬇ CSV" 버튼으로 목록을 내려받을 수 있습니다.</p>
+
+  <table class="spec">
+    <tr><th class="num-col">#</th><th style="width:26%">컬럼명</th><th>표시되는 값</th></tr>
+    <tr><td class="num-col">1</td><td>제조사명</td><td>제조사 이름 (클릭 가능)</td></tr>
+    <tr><td class="num-col">2</td><td>주요 MC</td><td>이 제조사가 취급한 상품 카테고리 목록</td></tr>
+    <tr><td class="num-col">3</td><td>취급 SKU 수</td><td>이 제조사가 취급하는 제품 수</td></tr>
+    <tr><td class="num-col">4</td><td>종합점수</td><td>A / B / C 등급 배지와 대표 제품명</td></tr>
+    <tr><td class="num-col">5</td><td>주요 유통사 거래 다양성</td><td>A / B / C 등급 배지와 거래한 유통사 이름</td></tr>
+    <tr><td class="num-col">6</td><td>국내 수입횟수</td><td>A / B / C 등급 배지와 전체 수입 건수</td></tr>
+    <tr><td class="num-col">7</td><td>최근 3개년 성장추세</td><td>A / B / C 등급 배지와 연도별 수입 건수 흐름 (예: 5 → 11 → 9)</td></tr>
+  </table>
+  <div class="note-box">
+    <b>종합점수 · 등급 안내</b> — A, B, C 등급은 같은 제품 또는 같은 국가 안에 있는 다른 제조사들과 비교했을 때의 상대적인 위치를 나타내는 값입니다. 화면에 표시되는 참고 정보이며, 표에서 정렬 기준으로도 사용할 수 있습니다.
+  </div>
+</div>
+
+<!-- ======================= 7. 제품명 클릭 후 나오는 제조사 후보 화면 ======================= -->
+<div class="page">
+  <div class="section-banner"><span class="badge-num">7</span> 제품명 클릭 후 나오는 제조사 후보 화면</div>
+  <p class="section-intro">메인 대시보드나 공장별 보기 표에서 <b>제품명</b>을 클릭하면 나오는 화면입니다. 해당 제품을 취급하는 해외 제조업체 후보들을 한 화면에서 비교할 수 있습니다.</p>
+
+  <div class="shot"><img src="images/sku-01-full.png"></div>
+  <div class="shot-cap">제조사 후보 화면 (예시: 콜드브루 캔커피)</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>SKU 정보 카드</b> — 현재 어떤 제품을 기준으로 제조사 목록이 표시되고 있는지 보여줍니다. 제품명, MC(카테고리), 구분, 이 제품을 거래한 수입업체가 표시됩니다.</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>검색창 · 날짜 필터 · CSV</b> — 해외제조업소, 국가, 수입업체로 검색할 수 있고, 기간을 지정하면 그 기간의 이력만 표시됩니다. "⬇ CSV"로 목록을 내려받을 수 있습니다.</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>제조업체명</b> — 글자를 클릭하면 그 제조사의 상세 화면으로 이동합니다. (8번 항목 참고)</span></div>
+    <div class="legend-item"><span class="legend-num">4</span><span class="legend-text"><b>종합점수</b> — A / B / C 등급 배지로 표시됩니다.</span></div>
+  </div>
+
+  <h3 class="sub">제조사 후보 목록에 표시되는 값</h3>
+  <table class="spec">
+    <tr><th class="num-col">#</th><th style="width:26%">컬럼명</th><th>표시되는 값</th></tr>
+    <tr><td class="num-col">1</td><td>SKU</td><td>기준이 되는 제품명</td></tr>
+    <tr><td class="num-col">2</td><td>수입업체</td><td>이 제품을 거래한 유통사 배지</td></tr>
+    <tr><td class="num-col">3</td><td>OEM 여부</td><td>OEM 또는 수입 배지</td></tr>
+    <tr><td class="num-col">4</td><td>제조업체</td><td>제조사 이름 (클릭 가능)</td></tr>
+    <tr><td class="num-col">5</td><td>제조국</td><td>제조사가 위치한 국가</td></tr>
+    <tr><td class="num-col">6</td><td>종합점수</td><td>A / B / C 등급 배지</td></tr>
+    <tr><td class="num-col">7</td><td>주요 유통사 거래 다양성</td><td>A / B / C 등급 배지와 거래 유통사명</td></tr>
+    <tr><td class="num-col">8</td><td>국내 수입횟수</td><td>A / B / C 등급 배지와 수입 건수</td></tr>
+    <tr><td class="num-col">9</td><td>최근 3개년 성장추세</td><td>A / B / C 등급 배지와 연도별 흐름</td></tr>
+    <tr><td class="num-col">10</td><td>연락처</td><td>이메일 또는 홈페이지 링크. 등록된 값이 없으면 "-"로 표시</td></tr>
+  </table>
+</div>
+
+<!-- ======================= 8. 제조사 상세 화면 ======================= -->
+<div class="page">
+  <div class="section-banner"><span class="badge-num">8</span> 제조사 상세 화면</div>
+  <p class="section-intro">표에서 <b>해외제조업소</b> 또는 <b>제조사명</b>을 클릭하면 나오는 화면입니다. 특정 제조사의 연락처, 상품 정보, 수입 이력을 한 화면에서 확인합니다.</p>
+
+  <h3 class="sub">상단 정보</h3>
+  <div class="shot"><img src="images/mfr-01-top.png"></div>
+  <div class="shot-cap">제조사 상세 화면 상단</div>
+  <p>제조국, 제조사명(해외제조업소명), 상태 배지가 표시됩니다. 상태 배지는 이메일 등록 여부에 따라 <b>"연락 가능"</b>, OEM 이력 여부에 따라 <b>"OEM 이력 있음"</b>, 한국 수출이력 여부에 따라 <b>"한국 수출이력 있음"</b>, 담당 MD가 등록된 경우 <b>"담당: OOO"</b>로 표시됩니다.</p>
+
+  <h3 class="sub">연락처 정보</h3>
+  <div class="shot"><img src="images/mfr-02-contact.png"></div>
+  <div class="shot-cap">연락처 정보 영역</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>컨택 여부</b> — 목록에서 진행 상태를 선택합니다. "+ 추가" 버튼으로 새로운 항목을 만들 수 있습니다.</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>MD명</b> — 담당 MD 이름을 입력합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>이메일</b> — 연락용 이메일 주소를 입력합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">4</span><span class="legend-text"><b>홈페이지</b> — 제조사 홈페이지 주소를 입력합니다.</span></div>
+    <div class="legend-item"><span class="legend-num">5</span><span class="legend-text"><b>저장</b> — 입력한 내용을 저장합니다. 저장이 끝나면 화면에 저장 결과 문구가 표시됩니다.</span></div>
+  </div>
+  <p>영역 위쪽에는 등록되어 있는 이메일과 홈페이지가 표시됩니다. 값이 없으면 "-"로 표시됩니다.</p>
+
+  <h3 class="sub">상품 정보</h3>
+  <div class="shot"><img src="images/mfr-03-product.png"></div>
+  <div class="shot-cap">상품 정보 영역</div>
+  <p>이 제조사가 취급하는 <b>MC(카테고리)</b>, <b>구분</b>, <b>제조국</b>, <b>주요 제품</b>(최대 5개, 그 이상은 "외 N건"으로 표시)이 나열됩니다.</p>
+
+  <h3 class="sub">OEM / 소싱 정보</h3>
+  <div class="shot"><img src="images/mfr-04-oem.png"></div>
+  <div class="shot-cap">OEM / 소싱 정보 영역</div>
+  <p><b>OEM 이력</b>(OEM 이력 있음 / 수입만 있음), <b>거래 수입업체</b> 목록, <b>한국 수출이력</b> 건수, <b>최근 수입일</b>이 표시됩니다.</p>
+
+  <h3 class="sub">제조사 국내수입 추이</h3>
+  <div class="shot"><img src="images/mfr-05-trend.png"></div>
+  <div class="shot-cap">제조사 국내수입 추이 영역</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>연도별 수입횟수 표</b> — 2021년부터 올해까지 이 제조사의 연도별 수입 건수와 전년 대비 증감률을 보여줍니다.</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>월별 수입횟수 그래프</b> — 월 단위 수입 건수를 선 그래프로 보여주며, 위쪽에 총 수입횟수가 표시됩니다.</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>기간 필터</b> — 시작 월과 종료 월을 선택하면 이 영역의 월별 그래프만 다시 그려집니다. 값이 입력되어 있으면 "초기화" 버튼이 나타나며, 누르면 필터가 지워지고 전체 기간 기준으로 되돌아갑니다.</span></div>
+  </div>
+  <div class="note-box">
+    이 영역의 기간 필터를 바꾸면 <b>이 영역의 월별 그래프만</b> 다시 그려집니다. 연도별 표와 아래 "취급 제품 목록"에는 영향을 주지 않습니다. 반대로 아래 "취급 제품 목록"의 날짜 필터를 바꾸어도 이 영역에는 영향이 없습니다. 두 필터는 서로 독립적으로 동작합니다.
+  </div>
+
+  <h3 class="sub">취급 제품 목록</h3>
+  <div class="shot"><img src="images/mfr-06-skulist.png"></div>
+  <div class="shot-cap">취급 제품 목록 영역</div>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-num">1</span><span class="legend-text"><b>제품명</b> — 글자를 클릭하면 그 제품의 제조사 후보 화면으로 이동합니다. (7번 항목 참고)</span></div>
+    <div class="legend-item"><span class="legend-num">2</span><span class="legend-text"><b>추이 보기</b> — 클릭하면 그 제품의 연도별 / 월별 수입횟수 창이 열립니다. (9번 항목 참고)</span></div>
+    <div class="legend-item"><span class="legend-num">3</span><span class="legend-text"><b>등급</b> — A / B / C 배지로 표시됩니다.</span></div>
+  </div>
+  <p>제목을 클릭하면 목록을 펼치거나 접을 수 있습니다. 검색창(제품명, MC, 구분, 수입업체)과 날짜 필터, "⬇ CSV" 버튼이 함께 제공됩니다. 표 열 구성(구분, MC, 제품명, OEM/수입, 수입업체, 수입횟수(전체), 연도별 수입횟수, 수입횟수 추이, 등급)은 메인 대시보드 표와 같은 방식으로 읽으면 됩니다.</p>
+</div>
+
+<!-- ======================= 9. 수입횟수 추이 창 ======================= -->
+<div class="page">
+  <div class="section-banner"><span class="badge-num">9</span> 수입횟수 추이 창</div>
+  <p class="section-intro">표에 있는 <b>"📈 추이 보기"</b> 버튼을 클릭하면 나오는 창입니다. 메인 대시보드, 공장별 보기, 제조사 상세 화면의 취급 제품 목록에서 동일한 방식으로 열립니다.</p>
+
+  <div class="shot"><img src="images/popup-01-trendmodal.png"></div>
+  <div class="shot-cap">수입횟수 추이 창</div>
+
+  <table class="spec">
+    <tr><th style="width:26%">구성 요소</th><th>내용</th></tr>
+    <tr><td>연도별 수입횟수 표</td><td>2021년부터 올해까지 연도별 수입 건수와 전년 대비 증감률을 보여줍니다. 이력이 전혀 없으면 "이력 없음"으로 표시됩니다.</td></tr>
+    <tr><td>월별 수입횟수 그래프</td><td>월 단위 수입 건수를 선 그래프로 보여줍니다. 위쪽에 해당 기간의 총 수입횟수가 표시됩니다. 해당 기간에 이력이 없으면 "해당 기간 이력 없음"으로 표시됩니다.</td></tr>
+    <tr><td>기간 필터</td><td>시작 월과 종료 월을 선택하면 월별 그래프만 그 기간 기준으로 다시 그려집니다. 연도별 표는 이 필터의 영향을 받지 않습니다. 값이 입력되어 있으면 "초기화" 버튼으로 필터를 지울 수 있습니다.</td></tr>
+    <tr><td>닫기 버튼</td><td>창 오른쪽 위의 "✕"를 클릭하면 창이 닫힙니다. 창 바깥의 어두운 영역을 클릭해도 닫힙니다.</td></tr>
+  </table>
+</div>
+
+<!-- ======================= 10. 업로드 버튼 ======================= -->
+<div class="page">
+  <div class="section-banner"><span class="badge-num">10</span> 업로드 버튼</div>
+  <p class="section-intro">데이터를 올리거나 지우는 버튼들은 메인 대시보드와 공장별 보기 화면 위쪽에 있습니다.</p>
+
+  <div class="shot"><img src="images/upload-01-main.png"></div>
+  <div class="shot-cap">메인 대시보드 상단 버튼 영역</div>
+
+  <h3 class="sub">Excel 업로드 버튼</h3>
+  <p><b>"📤 Excel 업로드"</b> 버튼을 클릭하면 파일 선택 창이 열립니다. 기본 수입 / OEM 데이터가 담긴 .xlsx 파일을 선택하면 업로드가 진행됩니다. 업로드가 끝나면 화면 위쪽에 처리 결과 문구(적재 건수, 스킵 건수)가 표시되고, 표 내용이 새로 고쳐집니다. .xlsx 또는 .xls가 아닌 파일은 업로드되지 않습니다.</p>
+
+  <h3 class="sub">연락처 보강 업로드 버튼</h3>
+  <p><b>"📇 연락처 보강 업로드"</b> 버튼을 클릭하면 파일 선택 창이 열립니다. 제조사의 이메일, 홈페이지, 인증서 등 연락처 정보가 담긴 .xlsx 파일을 선택하면, 기존에 등록된 수입 이력에 해당 연락처 정보가 채워집니다. 업로드가 끝나면 처리 결과 문구(처리한 행 수, 매칭된 행 수)가 표시됩니다.</p>
+
+  <h3 class="sub">전체 데이터 삭제 버튼</h3>
+  <div class="shot"><img src="images/factory-02-uploadarea.png"></div>
+  <div class="shot-cap">전체 데이터 삭제 버튼 위치 (공장별 보기 화면)</div>
+  <p><b>"🗑️ 전체 데이터 삭제"</b> 버튼은 <b>공장별 보기 화면에만</b> 있습니다. 클릭하면 삭제를 진행할지 묻는 창이 뜨고, 이어서 "DELETE"라는 글자를 정확히 입력해야 실제 삭제가 진행되는 확인 창이 한 번 더 나타납니다. 두 확인 단계를 모두 통과해야 삭제가 실행되며, 삭제되면 등록된 모든 데이터가 사라지고 되돌릴 수 없습니다.</p>
+  <div class="note-box">
+    <b>관리자용 기능</b> — 전체 데이터 삭제는 등록된 모든 수입/OEM 이력을 한 번에 지우는 기능으로, 일반 조회 업무에서 사용하는 기능이 아닙니다.
+  </div>
+
+  <h3 class="sub">데이터 업데이트 버튼</h3>
+  <p>메인 대시보드에는 <b>"🔄 데이터 업데이트"</b> 버튼이 있습니다. 현재는 클릭해도 별도로 열리는 화면이나 동작이 없는 버튼입니다.</p>
+
+  <h3 class="sub">업로드 후 반영 시간</h3>
+  <div class="note-box">
+    업로드가 끝나면 화면의 표 내용은 자동으로 새로 고쳐집니다. 다만 업로드한 데이터 양이 많은 경우, 화면 전체(요약 숫자, 국가별 정보 등)에 반영되기까지 몇 분 정도 시간이 걸릴 수 있습니다.
+  </div>
+</div>
+
+<!-- ======================= 11. 화면별 빠른 이동 요약 ======================= -->
+<div class="page">
+  <div class="section-banner"><span class="badge-num">11</span> 화면별 빠른 이동 요약</div>
+  <p class="section-intro">어떤 정보를 보고 싶을 때 어느 화면으로 이동하면 되는지 정리한 표입니다.</p>
+
+  <table class="spec quick-table">
+    <tr><th style="width:34%">보고 싶은 정보</th><th>이동 방법</th></tr>
+    <tr><td>제품 정보</td><td>메인 대시보드 검색창에 제품명을 입력합니다.</td></tr>
+    <tr><td>제조사 상세</td><td>표에서 해외제조업소명을 클릭합니다.</td></tr>
+    <tr><td>국가별 제조사</td><td>"🌍 국가별로 보기" 버튼을 클릭하거나, 표에서 제조국을 클릭합니다.</td></tr>
+    <tr><td>공장 단위 이력</td><td>"🏭 공장별로 보기" 버튼을 클릭합니다.</td></tr>
+    <tr><td>수입 추이(연도별 · 월별)</td><td>표의 "📈 추이 보기" 버튼을 클릭하거나, 제조사 상세 화면의 "제조사 국내수입 추이" 영역을 확인합니다.</td></tr>
+  </table>
+</div>
+
+</body>
+</html>
