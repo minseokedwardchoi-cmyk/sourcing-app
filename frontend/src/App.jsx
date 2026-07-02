@@ -1490,17 +1490,23 @@ function ManufacturerDetail({ navigate, state }) {
       .catch(e => setMonthlyModal(m => m ? { ...m, chartLoading: false, error: e.message } : null));
   }
 
-  function fetchManufacturerTrend(from = manufacturerTrendFrom, to = manufacturerTrendTo) {
+  function fetchManufacturerTrend(from = manufacturerTrendFrom, to = manufacturerTrendTo, { refreshYearly = false } = {}) {
     setManufacturerTrend(prev => ({ ...prev, loading: true, error: null }));
     fetchManufacturerMonthlyImportCounts(manufacturer, factory, from || null, to || null)
-      .then(res => setManufacturerTrend({ loading: false, error: null, yearly: res.yearly || [], monthly: res.data || [] }))
+      .then(res => setManufacturerTrend(prev => ({
+        loading: false,
+        error: null,
+        yearly: refreshYearly ? (res.yearly || []) : (prev.yearly || []),
+        monthly: res.data || [],
+      })))
       .catch(e => setManufacturerTrend(prev => ({ ...prev, loading: false, error: e.message })));
   }
 
   useEffect(() => {
     setManufacturerTrendFrom("");
     setManufacturerTrendTo("");
-    fetchManufacturerTrend("", "");
+    setManufacturerTrend({ loading: true, error: null, yearly: [], monthly: [] });
+    fetchManufacturerTrend("", "", { refreshYearly: true });
   }, [manufacturer, factory]);
   useEffect(()=>{const t=setTimeout(()=>setSkuDebSearch(skuSearch),400);return()=>clearTimeout(t);},[skuSearch]);
 
