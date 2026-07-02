@@ -180,16 +180,16 @@ const styles = `
   .date-range-sep { font-size:12px; color:#9ca3af; }
   .date-range-clear { border:none; background:#f3f4f6; color:#6b7280; border-radius:50%; width:20px; height:20px; cursor:pointer; font-size:11px; line-height:1; }
   .date-range-clear:hover { background:#e5e7eb; color:#374151; }
-  .hero { background: #f0fdf4; border-bottom: 1px solid #bbf7d0; padding: 32px 0 28px; }
+  .hero { background: #f0fdf4; border-bottom: 1px solid #bbf7d0; padding: 16px 0 14px; }
   .hero-inner { max-width: 1400px; margin: 0 auto; padding: 0 32px; }
-  .hero-title { font-size: 32px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; margin-bottom: 8px; }
-  .hero-desc  { font-size: 16px; color: #475569; margin-bottom: 28px; line-height: 1.6; }
-  .hero-kpi   { display: flex; gap: 0; border-top: 1px solid #e8eaed; padding-top: 24px; }
-  .hero-kpi-item { flex: 1; padding: 0 28px 0 0; }
-  .hero-kpi-item + .hero-kpi-item { padding-left: 28px; border-left: 1px solid #e8eaed; }
-  .hero-kpi-label { font-size: 13px; font-weight: 600; color: #64748b; letter-spacing: 0.3px; margin-bottom: 6px; }
-  .hero-kpi-num   { font-size: 28px; font-weight: 700; color: #0f172a; line-height: 1; }
-  .hero-kpi-unit  { font-size: 13px; font-weight: 400; color: #64748b; margin-left: 3px; }
+  .hero-title { font-size: 16px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; margin-bottom: 4px; }
+  .hero-desc  { font-size: 8px; color: #475569; margin-bottom: 14px; line-height: 1.6; }
+  .hero-kpi   { display: flex; gap: 0; border-top: 1px solid #e8eaed; padding-top: 12px; }
+  .hero-kpi-item { flex: 1; padding: 0 14px 0 0; }
+  .hero-kpi-item + .hero-kpi-item { padding-left: 14px; border-left: 1px solid #e8eaed; }
+  .hero-kpi-label { font-size: 6.5px; font-weight: 600; color: #64748b; letter-spacing: 0.3px; margin-bottom: 3px; }
+  .hero-kpi-num   { font-size: 14px; font-weight: 700; color: #0f172a; line-height: 1; }
+  .hero-kpi-unit  { font-size: 6.5px; font-weight: 400; color: #64748b; margin-left: 1.5px; }
   .notice { padding: 8px 14px; margin: 0 0 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; font-size: 12px; color: #92400e; }
   .competitor-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 4px; }
   .comp-card { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; border: 1.5px solid #e2e8f0; background: #f9fafb; cursor: pointer; transition: all .15s; text-align: left; }
