@@ -1301,6 +1301,10 @@ async def upload_contacts(
 
         print("CONTACT_UPLOAD_RESULT:", result)
 
+        # 연락처 보강 결과를 목록/필터용 캐시에 반영하되, 업로드 응답은 막지 않는다.
+        import asyncio
+        asyncio.create_task(refresh_mvs())
+
         return ContactBulkUploadResponse(**result)
 
     except HTTPException:

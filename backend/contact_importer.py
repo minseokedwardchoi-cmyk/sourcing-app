@@ -1,4 +1,5 @@
 from io import BytesIO
+import json
 from typing import Any
 
 import pandas as pd
@@ -108,6 +109,7 @@ async def import_contacts(
     total_rows = len(df)
     matched_rows = 0
     skipped = 0
+    payload_by_key: dict[tuple[str, str | None], dict[str, str | None]] = {}
 
     for _, row in df.iterrows():
         factory = clean_value(row.get("factory"))
@@ -140,43 +142,85 @@ async def import_contacts(
             skipped += 1
             continue
 
-        set_parts = []
-        params = {
-            "factory": factory,
-            "country": country,
-            "overwrite": overwrite,
-        }
-
+        key = (factory, country)
+        payload_row = payload_by_key.setdefault(
+            key,
+            {
+                "factory": factory,
+                "country": country,
+                "email": None,
+                "homepage": None,
+                "certificates": None,
+                "oem_status": None,
+                "oem_memo": None,
+            },
+        )
         for col, value in values_to_update.items():
-            params[col] = value
+            payload_row[col] = value
 
-            if overwrite:
-                set_parts.append(f"{col} = :{col}")
-            else:
-                set_parts.append(
-                    f"{col} = CASE "
-                    f"WHEN {col} IS NULL OR {col} = '' THEN :{col} "
-                    f"ELSE {col} END"
-                )
+    payload = list(payload_by_key.values())
 
-        country_cond = ""
-        if country:
-            country_cond = "AND country = :country"
+    if payload:
+        if overwrite:
+            set_sql = """
+                email = COALESCE(i.email, ih.email),
+                homepage = COALESCE(i.homepage, ih.homepage),
+                certificates = COALESCE(i.certificates, ih.certificates),
+                oem_status = COALESCE(i.oem_status, ih.oem_status),
+                oem_memo = COALESCE(i.oem_memo, ih.oem_memo)
+            """
+        else:
+            set_sql = """
+                email = CASE WHEN i.email IS NOT NULL AND (ih.email IS NULL OR ih.email = '') THEN i.email ELSE ih.email END,
+                homepage = CASE WHEN i.homepage IS NOT NULL AND (ih.homepage IS NULL OR ih.homepage = '') THEN i.homepage ELSE ih.homepage END,
+                certificates = CASE WHEN i.certificates IS NOT NULL AND (ih.certificates IS NULL OR ih.certificates = '') THEN i.certificates ELSE ih.certificates END,
+                oem_status = CASE WHEN i.oem_status IS NOT NULL AND (ih.oem_status IS NULL OR ih.oem_status = '') THEN i.oem_status ELSE ih.oem_status END,
+                oem_memo = CASE WHEN i.oem_memo IS NOT NULL AND (ih.oem_memo IS NULL OR ih.oem_memo = '') THEN i.oem_memo ELSE ih.oem_memo END
+            """
 
         sql = f"""
-            UPDATE import_history
-            SET {", ".join(set_parts)}
-            WHERE
-                (
-                    factory = :factory
-                    OR manufacturer = :factory
+            WITH input AS (
+                SELECT *
+                FROM jsonb_to_recordset(CAST(:payload AS jsonb)) AS i(
+                    factory text,
+                    country text,
+                    email text,
+                    homepage text,
+                    certificates text,
+                    oem_status text,
+                    oem_memo text
                 )
-                {country_cond}
+            ), matched AS (
+                SELECT DISTINCT ON (ih.id)
+                    ih.id,
+                    i.email,
+                    i.homepage,
+                    i.certificates,
+                    i.oem_status,
+                    i.oem_memo
+                FROM import_history AS ih
+                JOIN input AS i
+                  ON (
+                      ih.factory = i.factory
+                      OR ih.manufacturer = i.factory
+                  )
+                 AND (
+                      i.country IS NULL
+                      OR ih.country = i.country
+                 )
+                ORDER BY ih.id, (i.country IS NOT NULL) DESC
+            )
+            UPDATE import_history AS ih
+            SET {set_sql}
+            FROM matched AS i
+            WHERE ih.id = i.id
         """
 
-        result = await db.execute(text(sql), params)
-        matched_rows += result.rowcount or 0
-
+        result = await db.execute(
+            text(sql),
+            {"payload": json.dumps(payload, ensure_ascii=False)},
+        )
+        matched_rows = result.rowcount or 0
     await db.commit()
 
     return {

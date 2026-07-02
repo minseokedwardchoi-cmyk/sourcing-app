@@ -457,7 +457,6 @@ const ALL_COLS = [
   { key:"count_year2",  label:"",               w:78,  isYearCount:2                      },
   { key:"count_year1",  label:"",               w:78,  isYearCount:1                      },
   { key:"_trend",       label:"수입횟수 추이",  w:90,  isTrend:true                        },
-  { key:"email",        label:"이메일",         w:160, filterKey:"email"                   },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
