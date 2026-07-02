@@ -94,6 +94,11 @@ _MV_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_mv_country     ON sku_history_mv (country)",
     "CREATE INDEX IF NOT EXISTS idx_mv_latest      ON sku_history_mv (latest_import DESC)",
     "CREATE INDEX IF NOT EXISTS idx_mv_importer    ON sku_history_mv (importer)",
+    # 체크박스 필터(IN 조건)는 등가 비교라 trigram GIN보다 btree가 적합
+    "CREATE INDEX IF NOT EXISTS idx_mv_category    ON sku_history_mv (category)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_mc_btree    ON sku_history_mv (mc)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_import_type ON sku_history_mv (import_type)",
+    "CREATE INDEX IF NOT EXISTS idx_mv_email       ON sku_history_mv (email)",
     "CREATE INDEX IF NOT EXISTS idx_mv_gin_sku      ON sku_history_mv USING gin (sku_name      gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS idx_mv_gin_factory  ON sku_history_mv USING gin (factory       gin_trgm_ops)",
     "CREATE INDEX IF NOT EXISTS idx_mv_gin_mfr      ON sku_history_mv USING gin (manufacturer  gin_trgm_ops)",
@@ -509,28 +514,34 @@ async def get_sku_history(
             {col_filter_conds}
         """
 
+    # COUNT(*) OVER()로 전체 건수를 데이터 쿼리에 함께 실어, 매 요청마다
+    # 동일한 집계를 두 번(데이터 + COUNT) 실행하던 것을 한 번으로 줄인다.
     agg_sql = f"""
         SELECT
             category, mc, sku_name, import_type, importer,
             import_count, manufacturer, factory, country,
             email, latest_import,
-            base_year, count_year1, count_year2, count_year3
+            base_year, count_year1, count_year2, count_year3,
+            COUNT(*) OVER() AS total_count
         {base_sql}
         ORDER BY {sort_by} {sort_dir} NULLS LAST, latest_import DESC
         LIMIT :limit OFFSET :offset
     """
 
-    count_sql = f"SELECT COUNT(*) {base_sql}"
+    rows_result = await db.execute(text(agg_sql), params)
+    rows = rows_result.mappings().all()
 
-    rows_result  = await db.execute(text(agg_sql),  params)
-    count_result = await db.execute(text(count_sql), params)
-
-
-    rows  = rows_result.mappings().all()
-    total = count_result.scalar() or 0
+    if rows:
+        total = rows[0]["total_count"]
+    elif page == 1:
+        total = 0
+    else:
+        # 요청 페이지가 마지막 페이지를 넘어가 빈 결과가 온 경우에만 별도로 COUNT 조회
+        count_result = await db.execute(text(f"SELECT COUNT(*) {base_sql}"), params)
+        total = count_result.scalar() or 0
 
     return SkuHistoryResponse(
-        data=[SkuHistoryRow(**dict(r)) for r in rows],
+        data=[SkuHistoryRow(**{k: v for k, v in dict(r).items() if k != "total_count"}) for r in rows],
         meta=PaginationMeta(
             total=total,
             page=page,
@@ -1126,21 +1137,15 @@ async def get_manufacturer_detail(
         others = sorted(i for i in imps if i not in _MAIN5)
         return main5 + others
 
-    # 취급 SKU별 역량 점수 — 각 SKU의 peer group 안에서 이 factory의 상대 랭킹
-    # SKU 취급 제조사 페이지와 동일한 방식: SKU별로 개별 호출
+    # 취급 SKU별 역량 점수 — 각 SKU의 peer group 안에서 이 factory의 상대 랭킹.
+    # SKU마다 개별 쿼리를 반복하면(N+1) SKU 수만큼 DB 왕복이 늘어나므로,
+    # sku_name/factory로 그룹핑한 쿼리 세 번으로 전체 SKU의 peer group을 한 번에 조회한다.
     unique_skus = list({r["sku_name"] for r in sku_rows_raw})
     sku_score_map: dict[str, float | None] = {}
     if unique_skus:
-        from ranking import compute_factory_rankings
-        import asyncio
-        async def _score_for_sku(sku_name: str) -> tuple[str, float | None]:
-            try:
-                rankings = await compute_factory_rankings(db, [sku_name])
-                return sku_name, rankings.get(factory, {}).get("ranking_score")
-            except Exception:
-                return sku_name, None
-        results = await asyncio.gather(*[_score_for_sku(s) for s in unique_skus])
-        sku_score_map = dict(results)
+        from ranking import compute_factory_ranking_per_sku
+        rankings = await compute_factory_ranking_per_sku(db, factory, unique_skus)
+        sku_score_map = {s: rankings.get(s, {}).get("ranking_score") for s in unique_skus}
 
     sku_rows = []
     for r in sku_rows_raw:
@@ -1566,6 +1571,8 @@ async def get_factory_view(
 
     sort_expr = sort_by if sort_by != "import_type" else "import_type"
 
+    # COUNT(*) OVER()로 전체 그룹 수를 데이터 쿼리에 함께 실어, 동일한 GROUP BY
+    # 집계를 데이터/COUNT 쿼리로 두 번 반복 실행하던 것을 한 번으로 줄인다.
     data_sql = f"""
         SELECT
             category, mc, sku_name, import_type,
@@ -1577,7 +1584,8 @@ async def get_factory_view(
             SUM(count_year1)::int                                                  AS count_year1,
             SUM(count_year2)::int                                                  AS count_year2,
             SUM(count_year3)::int                                                  AS count_year3,
-            array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)       AS importers
+            array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)       AS importers,
+            COUNT(*) OVER()                                                        AS total_count
         FROM {source_sql}
         WHERE 1=1
             {search_cond}
@@ -1588,23 +1596,28 @@ async def get_factory_view(
         LIMIT :limit OFFSET :offset
     """
 
-    count_sql = f"""
-        SELECT COUNT(*) FROM (
-            SELECT 1
-            FROM {source_sql}
-            WHERE 1=1
-                {search_cond}
-                {where_col_conds}
-            GROUP BY category, mc, sku_name, import_type, manufacturer, factory, country
-            {having_full}
-        ) AS _grouped
-    """
+    rows_r = await db.execute(text(data_sql), params)
+    rows = rows_r.mappings().all()
 
-    rows_r  = await db.execute(text(data_sql),  params)
-    count_r = await db.execute(text(count_sql), params)
-
-    rows  = rows_r.mappings().all()
-    total = count_r.scalar() or 0
+    if rows:
+        total = rows[0]["total_count"]
+    elif page == 1:
+        total = 0
+    else:
+        # 요청 페이지가 마지막 페이지를 넘어가 빈 결과가 온 경우에만 별도로 COUNT 조회
+        count_sql = f"""
+            SELECT COUNT(*) FROM (
+                SELECT 1
+                FROM {source_sql}
+                WHERE 1=1
+                    {search_cond}
+                    {where_col_conds}
+                GROUP BY category, mc, sku_name, import_type, manufacturer, factory, country
+                {having_full}
+            ) AS _grouped
+        """
+        count_r = await db.execute(text(count_sql), params)
+        total = count_r.scalar() or 0
 
     return FactoryViewResponse(
         data=[

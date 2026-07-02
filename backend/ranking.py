@@ -160,6 +160,88 @@ async def compute_factory_rankings(
     )
 
 
+async def compute_factory_ranking_per_sku(
+    db: AsyncSession, factory: str, skus: list[str]
+) -> dict[str, dict]:
+    """
+    제조사 상세 페이지: 한 factory가 취급하는 여러 SKU 각각에 대해, 그 SKU를
+    취급하는 factory 집단(peer group) 안에서의 상대 랭킹을 계산한다.
+
+    compute_factory_rankings(db, [sku_name])를 SKU마다 반복 호출하면 SKU 수만큼
+    쿼리가 늘어나므로(N+1), sku_name/factory로 그룹핑한 세 번의 쿼리로 모든 SKU의
+    peer group 데이터를 한 번에 가져온 뒤 파이썬에서 SKU별로 등급을 계산한다.
+    peer group 산정 방식(등급/가중치 로직)은 compute_factory_rankings와 동일하다.
+
+    반환: {sku_name: {"ranking_score": float}} — 요청한 factory 관점의 점수만 담는다.
+    """
+    if not skus:
+        return {}
+
+    in_params = {f"s{i}": s for i, s in enumerate(skus)}
+    in_clause = ", ".join(f":s{i}" for i in range(len(skus)))
+
+    count_r = await db.execute(text(f"""
+        SELECT sku_name, factory, SUM(import_count) AS cnt
+        FROM sku_factory_mv
+        WHERE sku_name IN ({in_clause}) AND factory IS NOT NULL
+        GROUP BY sku_name, factory
+    """), in_params)
+    counts_by_sku: dict[str, dict[str, int]] = {}
+    for sku_name, fac, cnt in count_r.fetchall():
+        counts_by_sku.setdefault(sku_name, {})[fac] = int(cnt or 0)
+
+    importers_r = await db.execute(text(f"""
+        SELECT sku_name, factory, array_agg(DISTINCT imp) AS all_importers
+        FROM sku_factory_mv
+        LEFT JOIN LATERAL unnest(importers) AS imp ON true
+        WHERE sku_name IN ({in_clause}) AND factory IS NOT NULL
+        GROUP BY sku_name, factory
+    """), in_params)
+    importers_by_sku_factory: dict[tuple[str, str], set[str]] = {
+        (sku_name, fac): {imp for imp in (imps or []) if imp}
+        for sku_name, fac, imps in importers_r.fetchall()
+    }
+
+    cur_year = date.today().year
+    y1, y2, y3 = cur_year - 3, cur_year - 2, cur_year - 1
+    growth_r = await db.execute(text(f"""
+        SELECT sku_name, factory,
+               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y1 THEN 1 END)::int,
+               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y2 THEN 1 END)::int,
+               COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = :y3 THEN 1 END)::int
+        FROM import_history
+        WHERE sku_name IN ({in_clause}) AND factory IS NOT NULL
+        GROUP BY sku_name, factory
+    """), {**in_params, "y1": y1, "y2": y2, "y3": y3})
+    growth_by_sku_factory: dict[tuple[str, str], tuple[int, int, int]] = {
+        (sku_name, fac): (c1, c2, c3) for sku_name, fac, c1, c2, c3 in growth_r.fetchall()
+    }
+
+    results: dict[str, dict] = {}
+    for sku_name, counts_by_factory in counts_by_sku.items():
+        if factory not in counts_by_factory:
+            continue
+        import_grade = _import_count_grades(counts_by_factory).get(factory, "C")
+
+        matched_top5 = sorted(
+            importers_by_sku_factory.get((sku_name, factory), set()) & set(TOP5_RETAILERS),
+            key=TOP5_RETAILERS.index,
+        )
+        top5_grade = _top5_grade(len(matched_top5))
+
+        gy1, gy2, gy3 = growth_by_sku_factory.get((sku_name, factory), (0, 0, 0))
+        growth_grade = _growth_grade(gy1, gy2, gy3)
+
+        weighted = (
+            _GRADE_SCORE[top5_grade] * 0.5
+            + _GRADE_SCORE[import_grade] * 0.3
+            + _GRADE_SCORE[growth_grade] * 0.2
+        )
+        results[sku_name] = {"ranking_score": round(weighted / 3 * 100, 1)}
+
+    return results
+
+
 async def compute_manufacturer_rankings_by_country(
     db: AsyncSession, country: str
 ) -> dict[str, dict]:
