@@ -332,10 +332,10 @@ async def compute_best_sku_rankings_for_country(
 
         best_score: float | None = None
         best_sku: str | None = None
+        best_sku_count = 0
         best_import_grade = "C"
-        total_count = sum(sku_counts_map.values())
 
-        for sku_name in sku_counts_map:
+        for sku_name, sku_count in sku_counts_map.items():
             import_grade = sku_import_grades.get(sku_name, {}).get(mfr_key, "C")
             weighted = (
                 _GRADE_SCORE[top5_grade] * 0.5
@@ -346,6 +346,7 @@ async def compute_best_sku_rankings_for_country(
             if best_score is None or score > best_score:
                 best_score = score
                 best_sku = sku_name
+                best_sku_count = sku_count
                 best_import_grade = import_grade
 
         results[mfr_key] = {
@@ -354,7 +355,7 @@ async def compute_best_sku_rankings_for_country(
             "top5_retailer_grade":    top5_grade,
             "top5_retailers_matched": matched_top5,
             "import_count_grade":     best_import_grade,
-            "total_import_count":     total_count,
+            "total_import_count":     best_sku_count,
             "growth_trend_grade":     growth_grade,
             "growth_yearly": [
                 {"year": str(y1), "count": gy1},
