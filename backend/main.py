@@ -1827,6 +1827,42 @@ async def backfill_mc(db: AsyncSession = Depends(get_db)):
         "updated_rows": result.rowcount,
     }
 
+
+@app.post("/api/admin/backfill-mc-loose")
+async def backfill_mc_loose(db: AsyncSession = Depends(get_db)):
+    """
+    backfill-mc 이후에도 남은 mc NULL 행을 더 느슨한 기준(sku_name, manufacturer,
+    factory만 일치 — importer/country/import_type은 무시)으로 한 번 더 채운다.
+    범위가 넓어질수록 오추정 위험도 커지므로, backfill-mc로 먼저 채우고 남은
+    것만 대상으로 한다.
+    """
+    import asyncio
+    result = await db.execute(text("""
+        WITH fill AS (
+            SELECT sku_name, manufacturer, factory,
+                   MODE() WITHIN GROUP (ORDER BY mc) AS mc
+            FROM import_history
+            WHERE mc IS NOT NULL
+            GROUP BY sku_name, manufacturer, factory
+        )
+        UPDATE import_history t
+        SET mc = fill.mc
+        FROM fill
+        WHERE t.mc IS NULL
+          AND t.sku_name = fill.sku_name
+          AND t.manufacturer IS NOT DISTINCT FROM fill.manufacturer
+          AND t.factory      IS NOT DISTINCT FROM fill.factory
+    """))
+    await db.commit()
+
+    asyncio.create_task(refresh_mvs())
+
+    return {
+        "status": "ok",
+        "message": "mc 느슨한 기준 백필 완료",
+        "updated_rows": result.rowcount,
+    }
+
 # ─── 빠른 데이터 확인 ────────────────────────────────────────────────────────
 @app.get("/api/quick-check")
 async def quick_check(db: AsyncSession = Depends(get_db)):
