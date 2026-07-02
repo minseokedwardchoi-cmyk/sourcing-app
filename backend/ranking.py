@@ -261,14 +261,16 @@ async def compute_best_sku_rankings_for_country(
 ) -> dict[str, dict]:
     """
     국가 페이지: 각 제조사(manufacturer)에 대해 SKU별로 평가한 점수 중 가장 높은 점수와
-    해당 SKU명을 반환한다. import_count_grade는 해당 SKU를 취급하는 제조사 집단 내
-    상대 순위로, top5/growth grade는 제조사 전체 이력 기준으로 산출한다.
+    해당 SKU명을 반환한다. import_count_grade는 국가에 관계없이 해당 SKU를 취급하는
+    전체 제조사 집단 내 상대 순위로 산출한다(같은 SKU라면 다른 국가 제조사도 비교
+    대상에 포함). top5/growth grade는 제조사 전체 이력 기준으로 산출한다.
 
     반환: {manufacturer: {ranking_score, best_sku_name, top5_retailer_grade,
                           top5_retailers_matched, import_count_grade, total_import_count,
                           growth_trend_grade, growth_yearly}}
     """
-    # 1. Per (manufacturer, sku_name) import counts
+    # 1. Per (manufacturer, sku_name) import counts — 국가 페이지에 표시할 실적 수치는
+    #    해당 국가로 한정한다.
     count_r = await db.execute(text("""
         SELECT manufacturer, sku_name, SUM(import_count) AS cnt
         FROM sku_factory_mv
@@ -277,16 +279,28 @@ async def compute_best_sku_rankings_for_country(
     """), {"country": country})
 
     mfr_sku_counts: dict[str, dict[str, int]] = {}
-    sku_all_counts: dict[str, dict[str, int]] = {}
+    sku_names: set[str] = set()
     for mfr_key, sku_name, cnt in count_r.fetchall():
-        c = int(cnt or 0)
-        mfr_sku_counts.setdefault(mfr_key, {})[sku_name] = c
-        sku_all_counts.setdefault(sku_name, {})[mfr_key] = c
+        mfr_sku_counts.setdefault(mfr_key, {})[sku_name] = int(cnt or 0)
+        sku_names.add(sku_name)
 
     if not mfr_sku_counts:
         return {}
 
-    # 2. import_count_grades per SKU peer group
+    # 2. import_count_grade의 비교 대상(peer group)은 국가로 한정하지 않고, 같은 SKU를
+    #    취급하는 전체 제조사(모든 국가)로 잡는다.
+    sku_in_params = {f"sk{i}": s for i, s in enumerate(sku_names)}
+    sku_in_clause = ", ".join(f":sk{i}" for i in range(len(sku_names)))
+    sku_all_counts_r = await db.execute(text(f"""
+        SELECT sku_name, manufacturer, SUM(import_count) AS cnt
+        FROM sku_factory_mv
+        WHERE sku_name IN ({sku_in_clause}) AND manufacturer IS NOT NULL
+        GROUP BY sku_name, manufacturer
+    """), sku_in_params)
+    sku_all_counts: dict[str, dict[str, int]] = {}
+    for sku_name, mfr_key, cnt in sku_all_counts_r.fetchall():
+        sku_all_counts.setdefault(sku_name, {})[mfr_key] = int(cnt or 0)
+
     sku_import_grades: dict[str, dict[str, str]] = {
         sku_name: _import_count_grades(counts)
         for sku_name, counts in sku_all_counts.items()
