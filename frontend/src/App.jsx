@@ -7,8 +7,8 @@ import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "re
 import { geoCentroid } from "d3-geo";
 import {
   fetchSkuHistory, fetchSkuFactories,
-  fetchManufacturerDetail, fetchManufacturerMonthlyImportCounts, uploadExcel,
-  updateManufacturerContact, uploadContacts,
+  fetchManufacturerDetail, fetchManufacturerMonthlyImportCounts,
+  updateManufacturerContact,
   fetchColumnValues, fetchMonthlyImportCounts,
   fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers, fetchCountryAmountShare,
   fetchFactoryView, fetchFactoryViewMonthly,
@@ -513,8 +513,6 @@ function MainDashboard({ navigate }) {
   const [page,        setPage]        = useState(1);
   const [visibleCols, setVisibleCols] = useState(ALL_COLS.map(c=>c.key));
   const [showColMenu, setShowColMenu] = useState(false);
-  const [uploading,   setUploading]   = useState(false);
-  const [uploadMsg,   setUploadMsg]   = useState(null);
   const [colFilters,  setColFilters]  = useState({});
   const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());  // 픽셀 오버플로우 기반 펼침 상태 (`${colKey}:${i}`)
   const [overflowCells,    setOverflowCells]    = useState(()=>new Set());  // 잘려서 펼치기 화살표가 필요한 셀 (`${colKey}:${i}`)
@@ -523,7 +521,6 @@ function MainDashboard({ navigate }) {
   const [modalChartFrom, setModalChartFrom] = useState("");
   const [modalChartTo,   setModalChartTo]   = useState("");
   const colMenuRef = useRef(null);
-  const fileRef    = useRef(null);
 
   function cellKey(colKey, i) { return `${colKey}:${i}`; }
 
@@ -647,54 +644,6 @@ function MainDashboard({ navigate }) {
     setPage(1);
   }
 
-  async function handleUpload(e){
-    const file=e.target.files?.[0]; if(!file)return;
-    setUploading(true); setUploadMsg(null);
-    try{
-      const res=await uploadExcel(file);
-      setUploadMsg({ok:true,text:res.message});
-      const r2=await fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50});
-      setData(r2.data); setMeta(r2.meta);
-    }catch(err){setUploadMsg({ok:false,text:err.message});}
-    finally{setUploading(false); e.target.value="";}
-  }
-  async function handleContactExcelUpload(e) {
-  const file = e.target.files?.[0];
-  if (!file) return;
-
-  setUploading(true);
-  setUploadMsg(null);
-
-  try {
-    const res = await uploadContacts(file, true);
-
-    setUploadMsg({
-      ok: true,
-      text: res.message,
-    });
-
-    const refreshed = await fetchSkuHistory({
-      search: debSearch,
-      competitor,
-      sortBy,
-      sortDir,
-      page,
-      pageSize: 50,
-    });
-
-    setData(refreshed.data);
-    setMeta(refreshed.meta);
-    setError(null);
-  } catch (err) {
-    setUploadMsg({
-      ok: false,
-      text: err.message || "연락처 보강 업로드 실패",
-    });
-  } finally {
-    setUploading(false);
-    e.target.value = "";
-  }
-}
 
   const baseYear = data[0]?.base_year || new Date().getFullYear();
   const cols = ALL_COLS
@@ -729,12 +678,6 @@ function MainDashboard({ navigate }) {
         </div>
       </div>
       <div className="page">
-        {uploadMsg && (
-          <div className={uploadMsg.ok?"notice":"error-box"} style={{marginBottom:10}}>
-            {uploadMsg.text}
-          </div>
-        )}
-
         <div className="card">
           <div className="sticky-panel-header" ref={stickyHeaderRef}>
           <div className="card-header">
@@ -752,42 +695,6 @@ function MainDashboard({ navigate }) {
               >
                 🏭 공장별로 보기
               </button>
-            </div>
-            <div style={{display:"flex",gap:8}}>
-              <input
-                type="file"
-                accept=".xlsx,.xls"
-                ref={fileRef}
-                style={{display:"none"}}
-                onChange={handleUpload}
-              />
-
-              <button
-                className="upload-btn"
-                disabled={uploading}
-                onClick={()=>fileRef.current?.click()}
-              >
-                {uploading ? "업로드 중..." : "📤 Excel 업로드"}
-              </button>
-
-              <label
-                className="upload-btn"
-                style={{
-                  background: "#0f766e",
-                  cursor: uploading ? "not-allowed" : "pointer",
-                  opacity: uploading ? 0.5 : 1,
-                }}
-              >
-                {uploading ? "업로드 중..." : "📇 연락처 보강 업로드"}
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleContactExcelUpload}
-                  disabled={uploading}
-                  style={{display:"none"}}
-                />
-              </label>
-
             </div>
           </div>
 
@@ -2770,8 +2677,6 @@ function FactoryViewDashboard({ navigate }) {
   const [page,        setPage]        = useState(1);
   const [visibleCols, setVisibleCols] = useState(ALL_COLS.map(c=>c.key));
   const [showColMenu, setShowColMenu] = useState(false);
-  const [uploading,   setUploading]   = useState(false);
-  const [uploadMsg,   setUploadMsg]   = useState(null);
   const [colFilters,  setColFilters]  = useState({});
   const [expandedOverflow, setExpandedOverflow] = useState(()=>new Set());
   const [overflowCells,    setOverflowCells]    = useState(()=>new Set());
@@ -2780,7 +2685,6 @@ function FactoryViewDashboard({ navigate }) {
   const [modalChartFrom, setModalChartFrom] = useState("");
   const [modalChartTo,   setModalChartTo]   = useState("");
   const colMenuRef = useRef(null);
-  const fileRef    = useRef(null);
 
   function cellKey(colKey, i) { return `${colKey}:${i}`; }
 
@@ -2893,34 +2797,6 @@ function FactoryViewDashboard({ navigate }) {
     setPage(1);
   }
 
-  async function handleUpload(e){
-    const file=e.target.files?.[0]; if(!file)return;
-    setUploading(true); setUploadMsg(null);
-    try{
-      const res=await uploadExcel(file);
-      setUploadMsg({ok:true,text:res.message});
-      const r2=await fetchFactoryView({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50});
-      setData(r2.data); setMeta(r2.meta);
-    }catch(err){setUploadMsg({ok:false,text:err.message});}
-    finally{setUploading(false); e.target.value="";}
-  }
-
-  async function handleContactExcelUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true); setUploadMsg(null);
-    try {
-      const res = await uploadContacts(file, true);
-      setUploadMsg({ ok: true, text: res.message });
-      const refreshed = await fetchFactoryView({ search: debSearch, competitor, sortBy, sortDir, page, pageSize: 50 });
-      setData(refreshed.data); setMeta(refreshed.meta); setError(null);
-    } catch (err) {
-      setUploadMsg({ ok: false, text: err.message || "연락처 보강 업로드 실패" });
-    } finally {
-      setUploading(false); e.target.value = "";
-    }
-  }
-
   const baseYear = data[0]?.base_year || new Date().getFullYear();
   const cols = ALL_COLS
     .filter(c=>visibleCols.includes(c.key))
@@ -2953,12 +2829,6 @@ function FactoryViewDashboard({ navigate }) {
         </div>
       </div>
       <div className="page">
-        {uploadMsg && (
-          <div className={uploadMsg.ok?"notice":"error-box"} style={{marginBottom:10}}>
-            {uploadMsg.text}
-          </div>
-        )}
-
         <div className="card">
           <div className="sticky-panel-header" ref={stickyHeaderRef}>
           <div className="card-header">
@@ -2976,16 +2846,6 @@ function FactoryViewDashboard({ navigate }) {
               >
                 🌍 국가별로 보기
               </button>
-            </div>
-            <div style={{display:"flex",gap:8}}>
-              <input type="file" accept=".xlsx,.xls" ref={fileRef} style={{display:"none"}} onChange={handleUpload}/>
-              <button className="upload-btn" disabled={uploading} onClick={()=>fileRef.current?.click()}>
-                {uploading ? "업로드 중..." : "📤 Excel 업로드"}
-              </button>
-              <label className="upload-btn" style={{ background: "#0f766e", cursor: uploading ? "not-allowed" : "pointer", opacity: uploading ? 0.5 : 1 }}>
-                {uploading ? "업로드 중..." : "📇 연락처 보강 업로드"}
-                <input type="file" accept=".xlsx,.xls" onChange={handleContactExcelUpload} disabled={uploading} style={{display:"none"}}/>
-              </label>
             </div>
           </div>
 
