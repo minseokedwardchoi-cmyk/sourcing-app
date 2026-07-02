@@ -356,14 +356,22 @@ def read_excel_file(file_bytes: bytes) -> pd.DataFrame:
 
 
 async def import_excel(file_bytes: bytes, db: AsyncSession) -> dict:
+    """Excel 파일 → import_history 테이블 적재 (파일 바이트를 받는 경우)."""
+    df = read_excel_file(file_bytes)
+    return await import_dataframe(df, db)
+
+
+async def import_dataframe(df: pd.DataFrame, db: AsyncSession) -> dict:
     """
-    Excel 파일 → import_history 테이블 적재.
+    이미 매핑된 DataFrame → import_history 테이블 적재.
     중복: (sku_name, importer, factory, country) 동일 조합은 집계만 함 (중복 삽입 허용,
     SELECT 시 GROUP BY로 집계).
     100만 건 대응: 청크 단위 flush.
-    """
-    df = read_excel_file(file_bytes)
 
+    크롤러(crawler.py)는 이미 메모리에 DataFrame을 들고 있으므로, 굳이 엑셀로
+    직렬화했다가 이 함수 안에서 다시 파싱하는 왕복을 거치지 않고 바로 이 함수를
+    호출한다 (대량 행에서 불필요한 메모리 중복/OOM을 피하기 위함).
+    """
     inserted = 0
     skipped  = 0
     CHUNK    = 2000
@@ -398,7 +406,9 @@ async def import_excel(file_bytes: bytes, db: AsyncSession) -> dict:
     for i in range(0, len(records), CHUNK):
         await db.execute(ImportHistory.__table__.insert(), records[i:i+CHUNK])
         await db.flush()
+        print(f"DB 적재 진행: {min(i+CHUNK, len(records))}/{len(records)}행 flush", flush=True)
 
     await db.commit()
+    print(f"DB 적재 완료 (commit): 삽입 {inserted}건, 스킵 {skipped}건, 원본 {len(df)}행", flush=True)
 
     return {"inserted": inserted, "skipped": skipped, "total_rows": len(df)}

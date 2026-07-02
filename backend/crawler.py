@@ -236,20 +236,16 @@ async def run_crawl(start: str, end: str, db: AsyncSession) -> dict:
         return mark_and_transform(full_df, oem_set, mc_map)
 
     result_df = await asyncio.to_thread(_transform)
+    print(f"변환 완료: {len(result_df)}행 — DB 적재 시작", flush=True)
 
-    # Excel 직렬화 → 스레드풀
-    def _to_excel_bytes():
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            result_df.to_excel(writer, index=False, sheet_name="시트1")
-        buf.seek(0)
-        return buf.read()
-
-    file_bytes = await asyncio.to_thread(_to_excel_bytes)
-
-    # DB에 직접 적재 (HTTP 왕복 없음)
-    from importer import import_excel
-    result = await import_excel(file_bytes, db)
+    # result_df를 엑셀로 직렬화했다가 import_excel()에서 다시 파싱하던 왕복을 제거.
+    # 77,000행급 데이터에서 같은 내용을 DataFrame → 엑셀바이트 → DataFrame으로
+    # 중복 보관하면 메모리 스파이크로 OOM 재시작이 발생할 수 있어, 컬럼만
+    # DB 필드명으로 매핑해 바로 적재 함수에 넘긴다.
+    from importer import import_dataframe, FIELD_MAP
+    df = result_df.rename(columns={k: v for k, v in FIELD_MAP.items() if k in result_df.columns})
+    result = await import_dataframe(df, db)
 
     log.info("=== 완료: %d건 업로드 ===", len(result_df))
+    print(f"CRAWL PIPELINE DONE: {result}", flush=True)
     return {"rows": len(result_df), "start": start, "end": end, **result}

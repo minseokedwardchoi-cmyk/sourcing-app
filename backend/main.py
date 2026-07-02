@@ -18,6 +18,10 @@ from typing import Optional, List
 import logging
 from fastapi import FastAPI, BackgroundTasks, Depends, Query, UploadFile, File, HTTPException, Form
 
+# logging.basicConfig() 없이는 루트 로거에 핸들러가 없어 log.info()가 전부 조용히
+# 버려진다 (WARNING 미만은 출력 안 됨) — 크롤링 완료/실패 등 log.info/log.error
+# 메시지가 배포 로그에 안 보이던 원인이 이것이었음.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
