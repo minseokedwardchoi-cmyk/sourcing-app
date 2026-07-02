@@ -20,8 +20,13 @@ async function request(path, params = {}) {
   return res.json();
 }
 
+// 컬럼 필터 드롭다운은 같은 조건으로 여러 번 열릴 수 있어(재오픈, 여러 드롭다운 간
+// 공유 컨텍스트 등) 매번 새로 조회하지 않도록 짧은 TTL로 응답을 캐싱 + 동시 요청을 dedupe.
+const _columnValuesCache = new Map(); // key(URL) -> { ts, promise }
+const COLUMN_VALUES_TTL_MS = 30000;
+
 /** 컬럼별 고유값 목록 (contextParams로 현재 필터 컨텍스트 전달) */
-export async function fetchColumnValues(col, contextParams = {}) {
+export function fetchColumnValues(col, contextParams = {}) {
   const url = new URL(`${BASE_URL}/api/column-values`, window.location.origin);
   url.searchParams.set("col", col);
   const { search, competitor, dateFrom, dateTo, colFilters } = contextParams;
@@ -41,9 +46,25 @@ export async function fetchColumnValues(col, contextParams = {}) {
       }
     });
   }
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error("컬럼값 로드 실패");
-  return res.json();
+
+  const key = url.toString();
+  const cached = _columnValuesCache.get(key);
+  if (cached && Date.now() - cached.ts < COLUMN_VALUES_TTL_MS) {
+    return cached.promise;
+  }
+
+  const promise = fetch(key)
+    .then(res => {
+      if (!res.ok) throw new Error("컬럼값 로드 실패");
+      return res.json();
+    })
+    .catch(err => {
+      _columnValuesCache.delete(key); // 실패한 요청은 캐싱하지 않음
+      throw err;
+    });
+
+  _columnValuesCache.set(key, { ts: Date.now(), promise });
+  return promise;
 }
 
 /** 메인 대시보드: SKU 이력 집계 */
