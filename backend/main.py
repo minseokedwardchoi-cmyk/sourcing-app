@@ -1863,6 +1863,39 @@ async def backfill_mc_loose(db: AsyncSession = Depends(get_db)):
         "updated_rows": result.rowcount,
     }
 
+
+@app.post("/api/admin/backfill-mc-by-name")
+async def backfill_mc_by_name(db: AsyncSession = Depends(get_db)):
+    """
+    backfill-mc / backfill-mc-loose 이후에도 남은 mc NULL 행을 sku_name(제품명)만
+    일치하면 채우는 가장 느슨한 기준으로 채운다. 제조사/수입업체가 달라도
+    같은 제품명이면 같은 MC로 간주 — 범위가 가장 넓어 오추정 위험이 가장 크다.
+    """
+    import asyncio
+    result = await db.execute(text("""
+        WITH fill AS (
+            SELECT sku_name,
+                   MODE() WITHIN GROUP (ORDER BY mc) AS mc
+            FROM import_history
+            WHERE mc IS NOT NULL
+            GROUP BY sku_name
+        )
+        UPDATE import_history t
+        SET mc = fill.mc
+        FROM fill
+        WHERE t.mc IS NULL
+          AND t.sku_name = fill.sku_name
+    """))
+    await db.commit()
+
+    asyncio.create_task(refresh_mvs())
+
+    return {
+        "status": "ok",
+        "message": "mc 제품명 기준 백필 완료",
+        "updated_rows": result.rowcount,
+    }
+
 # ─── 빠른 데이터 확인 ────────────────────────────────────────────────────────
 @app.get("/api/quick-check")
 async def quick_check(db: AsyncSession = Depends(get_db)):
