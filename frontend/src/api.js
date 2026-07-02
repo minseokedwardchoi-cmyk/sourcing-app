@@ -158,6 +158,31 @@ export function fetchManufacturerDetail(manufacturer, factory, { skuSearch, date
   });
 }
 
+/** 제조사 전체 국내수입 연도별/월별 추이 */
+export async function fetchManufacturerMonthlyImportCounts(manufacturer, factory, dateFrom, dateTo) {
+  const url = new URL(BASE_URL + "/api/manufacturer/monthly", window.location.origin);
+  url.searchParams.set("manufacturer", manufacturer);
+  url.searchParams.set("factory", factory);
+  const { from, to } = normalizeMonthRange(dateFrom, dateTo);
+  if (from) url.searchParams.set("date_from", from);
+  if (to)   url.searchParams.set("date_to", to);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const res = await fetch(url.toString(), { signal: controller.signal });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || "API 오류");
+    }
+    return res.json();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("서버 응답 시간 초과 (20초). 잠시 후 다시 시도해주세요.");
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** DB 통계 */
 export function fetchStats() {
   return request("/api/stats");

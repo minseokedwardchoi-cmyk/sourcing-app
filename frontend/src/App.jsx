@@ -7,7 +7,7 @@ import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "re
 import { geoCentroid } from "d3-geo";
 import {
   fetchSkuHistory, fetchSkuFactories,
-  fetchManufacturerDetail, uploadExcel,
+  fetchManufacturerDetail, fetchManufacturerMonthlyImportCounts, uploadExcel,
   updateManufacturerContact, uploadContacts, clearAllData,
   fetchColumnValues, fetchMonthlyImportCounts,
   fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers, fetchCountryAmountShare,
@@ -1447,6 +1447,10 @@ function ManufacturerDetail({ navigate, state }) {
   const [monthlyModal, setMonthlyModal] = useState(null);
   const [modalChartFrom, setModalChartFrom] = useState("");
   const [modalChartTo,   setModalChartTo]   = useState("");
+  const [manufacturerTrend, setManufacturerTrend] = useState({ loading: true, error: null, yearly: [], monthly: [] });
+  const [manufacturerTrendFrom, setManufacturerTrendFrom] = useState("");
+  const [manufacturerTrendTo, setManufacturerTrendTo] = useState("");
+
 
   function cellKey(col, i) { return `${col}:${i}`; }
   function toggleOverflowExpand(col, i) {
@@ -1486,6 +1490,18 @@ function ManufacturerDetail({ navigate, state }) {
       .catch(e => setMonthlyModal(m => m ? { ...m, chartLoading: false, error: e.message } : null));
   }
 
+  function fetchManufacturerTrend(from = manufacturerTrendFrom, to = manufacturerTrendTo) {
+    setManufacturerTrend(prev => ({ ...prev, loading: true, error: null }));
+    fetchManufacturerMonthlyImportCounts(manufacturer, factory, from || null, to || null)
+      .then(res => setManufacturerTrend({ loading: false, error: null, yearly: res.yearly || [], monthly: res.data || [] }))
+      .catch(e => setManufacturerTrend(prev => ({ ...prev, loading: false, error: e.message })));
+  }
+
+  useEffect(() => {
+    setManufacturerTrendFrom("");
+    setManufacturerTrendTo("");
+    fetchManufacturerTrend("", "");
+  }, [manufacturer, factory]);
   useEffect(()=>{const t=setTimeout(()=>setSkuDebSearch(skuSearch),400);return()=>clearTimeout(t);},[skuSearch]);
 
   useEffect(()=>{
@@ -1680,20 +1696,7 @@ function ManufacturerDetail({ navigate, state }) {
           />
         </div>
 
-        <div className="contact-edit-field">
-          <label>인증서</label>
-          <input
-            type="text"
-            value={contactForm.certificates}
-            onChange={(e) =>
-              setContactForm((prev) => ({
-                ...prev,
-                certificates: e.target.value,
-              }))
-            }
-            placeholder="예: HACCP, BRC, ISO22000"
-          />
-        </div>
+
       </div>
 
       <button
@@ -1788,15 +1791,86 @@ function ManufacturerDetail({ navigate, state }) {
                 </div>
               </div>
 
-              {/* 인증서 */}
+              {/* 제조사 국내수입 추이 */}
               <div className="card">
-                <div className="card-header"><span className="card-title">✅ 인증서</span></div>
+                <div className="card-header"><span className="card-title">📈 제조사 국내수입 추이</span></div>
                 <div className="card-body">
-                  <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                    {d.certificates?.length
-                      ? d.certificates.map((c,i)=><span key={i} className="badge b-teal">{c}</span>)
-                      : <span style={{color:"#9ca3af",fontSize:12}}>인증 정보 없음 (추후 업데이트 예정)</span>}
-                  </div>
+                  {(() => {
+                    const today = new Date();
+                    const thisYear = today.getFullYear();
+                    const thisMonth = today.getMonth() + 1;
+                    const monthly = manufacturerTrend.monthly || [];
+                    const yearly = manufacturerTrend.yearly || [];
+                    const chartData = monthly.map(mo => ({ month: mo.month, count: mo.count }));
+                    const chartTotal = chartData.reduce((sum, item) => sum + item.count, 0);
+                    const yearlyMap = {};
+                    yearly.forEach(y => { yearlyMap[y.year] = y.count; });
+                    const allYears = [];
+                    for (let yr = 2021; yr <= thisYear; yr++) allYears.push({ year: String(yr), count: yearlyMap[String(yr)] ?? 0 });
+                    const firstDataYear = allYears.find(y => y.count > 0)?.year;
+                    function getYearChangeRate(y) {
+                      if (y.year === firstDataYear) return null;
+                      const prev = allYears.find(a => a.year === String(Number(y.year) - 1))?.count ?? 0;
+                      if (prev === 0) return null;
+                      if (Number(y.year) === thisYear) {
+                        const currSlice = monthly.filter(mo => { const [yy, mm] = mo.month.split("/"); return Number("20" + yy) === thisYear && Number(mm) <= thisMonth; }).reduce((s, mo) => s + mo.count, 0);
+                        const prevSlice = monthly.filter(mo => { const [yy, mm] = mo.month.split("/"); return Number("20" + yy) === thisYear - 1 && Number(mm) <= thisMonth; }).reduce((s, mo) => s + mo.count, 0);
+                        if (prevSlice === 0) return null;
+                        return { pct: Math.round((currSlice - prevSlice) / prevSlice * 100), isCurrent: true };
+                      }
+                      return { pct: Math.round((y.count - prev) / prev * 100), isCurrent: false };
+                    }
+                    if (manufacturerTrend.loading) return <div className="empty-state">불러오는 중...</div>;
+                    if (manufacturerTrend.error) return <div className="error-box" style={{margin:0}}>오류: {manufacturerTrend.error}</div>;
+                    return (
+                      <>
+                        <div className="modal-section-title">연도별 수입횟수</div>
+                        {!allYears.some(y => y.count > 0) ? <div className="empty-state">이력 없음</div> : (
+                          <div style={{overflowX:"auto"}}>
+                            <div style={{display:"grid",gridTemplateColumns:"auto repeat(" + allYears.length + ", auto)",gap:1,background:"#e8eaed",fontSize:12,width:"fit-content",border:"1px solid #e8eaed",borderRadius:4,overflow:"hidden"}}>
+                              <div style={{padding:"5px 10px",background:"#f1f3f5",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap"}}>연도</div>
+                              {allYears.map(y => <div key={y.year} style={{padding:"5px 10px",background:"#fff",textAlign:"center"}}>{y.year}</div>)}
+                              <div style={{padding:"5px 10px",background:"#f1f3f5",fontWeight:600,color:"#6b7280",whiteSpace:"nowrap"}}>수입횟수</div>
+                              {allYears.map(y => {
+                                const rate = getYearChangeRate(y);
+                                return (
+                                  <div key={y.year} style={{padding:"5px 10px",background:"#fff",textAlign:"center",color:y.count>0?"#15803d":"#9ca3af",fontWeight:y.count>0?600:400}}>
+                                    {y.count}
+                                    {rate !== null && <span style={{display:"block",fontSize:10,color:rate.pct>=0?"#dc2626":"#2563eb",fontWeight:500}}>{Number(y.year)===thisYear ? "(전년 동기비 " + (rate.pct>=0?"+":"") + rate.pct + "%)" : "(" + (rate.pct>=0?"+":"") + rate.pct + "%)"}</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                        <div style={{marginTop:16,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                          <div className="modal-section-title" style={{margin:0}}>월별 수입횟수 추이</div>
+                          <div style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}>
+                            <input type="month" className="date-range-input" style={{padding:"3px 7px",fontSize:12}} value={manufacturerTrendFrom} onChange={e=>{setManufacturerTrendFrom(e.target.value);fetchManufacturerTrend(e.target.value,manufacturerTrendTo);}}/>
+                            <span style={{color:"#9ca3af"}}>~</span>
+                            <input type="month" className="date-range-input" style={{padding:"3px 7px",fontSize:12}} value={manufacturerTrendTo} onChange={e=>{setManufacturerTrendTo(e.target.value);fetchManufacturerTrend(manufacturerTrendFrom,e.target.value);}}/>
+                            {(manufacturerTrendFrom || manufacturerTrendTo) && <button className="icon-btn" style={{fontSize:11}} onClick={()=>{setManufacturerTrendFrom("");setManufacturerTrendTo("");fetchManufacturerTrend("","");}}>초기화</button>}
+                          </div>
+                        </div>
+                        {!chartData.length ? <div className="empty-state" style={{marginTop:8}}>해당 기간 이력 없음</div> : (
+                          <div style={{position:"relative",marginTop:8}}>
+                            <div style={{position:"absolute",top:4,left:8,zIndex:1,fontSize:12,color:"#374151",fontWeight:600}}>총 수입횟수: <span style={{color:"#15803d"}}>{chartTotal.toLocaleString()}건</span></div>
+                            <ResponsiveContainer width="100%" height={220}>
+                              <LineChart data={chartData} margin={{top:28,right:16,bottom:4,left:0}}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
+                                <XAxis dataKey="month" tick={{fontSize:10}} interval="preserveStartEnd"/>
+                                <YAxis tick={{fontSize:10}} allowDecimals={false} width={36}/>
+                                <Tooltip formatter={(v)=>[v + "건", "수입횟수"]} contentStyle={{fontSize:12,borderRadius:6}}/>
+                                <Line type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2} dot={{r:2,fill:"#16a34a"}} activeDot={{r:4}}>
+                                  <LabelList dataKey="count" position="top" style={{fontSize:10,fill:"#374151",fontWeight:600}} formatter={v=>v>0?v:""}/>
+                                </Line>
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
