@@ -6,7 +6,7 @@ import {
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { geoCentroid } from "d3-geo";
 import {
-  fetchSkuHistory, fetchSkuFactories,
+  fetchSkuHistory, fetchHybridSearch, fetchSkuFactories,
   fetchManufacturerDetail, fetchManufacturerMonthlyImportCounts,
   updateManufacturerContact,
   fetchColumnValues, fetchMonthlyImportCounts,
@@ -2572,7 +2572,7 @@ function CountryMapPage({ navigate }) {
 
           <div style={{position:"relative", border:"1px solid #e8eaed", borderRadius:8, overflow:"hidden", background:"#eff6ff"}}
             onMouseLeave={()=>setHovered(null)}>
-            <div ref={mapSearchRef} style={{position:"absolute", top:8, right:44, zIndex:210, width:230}}>
+            <div ref={mapSearchRef} style={{position:"absolute", top:8, right:44, zIndex:1000, width:230}}>
               <input
                 className="date-range-input"
                 style={{width:"100%", background:"#fff"}}
@@ -2583,7 +2583,7 @@ function CountryMapPage({ navigate }) {
                 onKeyDown={e=>{ if (e.key==="Enter" && suggestions.length>0) { setSearch(""); closeMapSearch(); goToCountry(suggestions[0]); } }}
               />
               {showSuggest && (
-                <div ref={mapSearchDropRef} className="filter-dropdown" style={{minWidth:"100%", maxWidth:"100%", zIndex:220}}>
+                <div ref={mapSearchDropRef} className="filter-dropdown" style={{minWidth:"100%", maxWidth:"100%", zIndex:1001}}>
                   <div className="filter-list" style={{maxHeight:240}}>
                     {suggestions.length === 0
                       ? <div style={{padding:"8px 12px", fontSize:12, color:"#9ca3af"}}>결과 없음</div>
@@ -3323,7 +3323,162 @@ function FactoryViewDashboard({ navigate }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // ROOT
 // ═══════════════════════════════════════════════════════════════════════════════
+const HYBRID_TEST_TERMS = [
+  "참치캔", "바나나", "바나나칩", "어묵", "오뎅", "Fish Cake",
+  "감자칩", "탄산수", "스파클링워터", "냉동만두", "냉동피자",
+  "올리브오일", "두유", "즉석밥", "새우튀김", "토마토소스", "김", "생수",
+];
+
+function SearchTestPage() {
+  const [search, setSearch] = useState("참치캔");
+  const [page, setPage] = useState(1);
+  const [candidateLimit, setCandidateLimit] = useState(300);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.72);
+  const [request, setRequest] = useState({
+    search: "참치캔",
+    page: 1,
+    candidateLimit: 300,
+    similarityThreshold: 0.72,
+  });
+  const [direct, setDirect] = useState({ data: [], meta: null, elapsed: null, error: null, loading: false });
+  const [hybrid, setHybrid] = useState({ data: [], meta: null, elapsed: null, error: null, loading: false, enabled: false, appliedThreshold: null });
+
+  function runSearch(nextPage = 1, nextSearch = search) {
+    const nextRequest = {
+      search: nextSearch.trim(),
+      page: nextPage,
+      candidateLimit: Number(candidateLimit),
+      similarityThreshold: Number(similarityThreshold),
+    };
+    setPage(nextPage);
+    setDirect({ data: [], meta: null, elapsed: null, error: null, loading: true });
+    setHybrid({ data: [], meta: null, elapsed: null, error: null, loading: true, enabled: false, appliedThreshold: null });
+    setRequest(nextRequest);
+  }
+
+  useEffect(() => {
+    const query = request.search.trim();
+    if (!query) return;
+    const params = {
+      search: query,
+      competitor: "전체",
+      sortBy: "import_count",
+      sortDir: "desc",
+      page: request.page,
+      pageSize: 30,
+      candidateLimit: Number(request.candidateLimit),
+      similarityThreshold: Number(request.similarityThreshold),
+    };
+
+    const directStarted = performance.now();
+    setDirect(s => ({ ...s, loading: true, error: null }));
+    fetchSkuHistory(params)
+      .then(r => setDirect({ data: r.data || [], meta: r.meta, elapsed: Math.round(performance.now() - directStarted), error: null, loading: false }))
+      .catch(e => setDirect({ data: [], meta: null, elapsed: null, error: e.message, loading: false }));
+
+    setHybrid(s => ({ ...s, loading: true, error: null }));
+    fetchHybridSearch(params)
+      .then(r => setHybrid({
+        data: r.data || [],
+        meta: r.meta,
+        elapsed: r.search_elapsed_ms,
+        error: r.semantic_error || null,
+        loading: false,
+        enabled: !!r.hybrid_enabled,
+        appliedThreshold: r.applied_similarity_threshold,
+      }))
+      .catch(e => setHybrid({ data: [], meta: null, elapsed: null, error: e.message, loading: false, enabled: false, appliedThreshold: null }));
+  }, [request]);
+
+  function renderRows(items, isHybrid) {
+    if (!items.length) return <tr><td colSpan={9}><div className="empty-state">No results</div></td></tr>;
+    return items.map((row, idx) => (
+      <tr key={`${row.sku_name}-${idx}`}>
+        <td title={row.sku_name}>{row.sku_name}</td>
+        <td>{row.mc || "-"}</td>
+        <td>{row.category || "-"}</td>
+        <td>{row.manufacturer || "-"}</td>
+        <td>{row.country || "-"}</td>
+        <td>{row.import_count}</td>
+        <td>{isHybrid ? row.match_type : "direct"}</td>
+        <td>{isHybrid ? (row.semantic_score ?? "-") : "-"}</td>
+        <td>{row.import_type || "-"}</td>
+      </tr>
+    ));
+  }
+
+  return (
+    <div className="app">
+      <style>{styles}</style>
+      <div className="page" style={{maxWidth:1600}}>
+        <div className="page-header">
+          <h2>Hybrid Search Test</h2>
+          <div className="sub">Hidden MVP page. Results are sorted by import count descending.</div>
+        </div>
+        <div className="card">
+          <div className="toolbar">
+            <div className="search-wrap">
+              <span className="search-icon">S</span>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search product intent" />
+            </div>
+            <span className="count-label">Direct {direct.elapsed ?? "-"} ms</span>
+            <span className="count-label">Hybrid {hybrid.elapsed ?? "-"} ms</span>
+            <span className="count-label">Applied {hybrid.appliedThreshold ?? "-"}</span>
+            <span className="badge b-gray">{hybrid.enabled ? "semantic on" : "semantic off/fallback"}</span>
+            <label className="count-label">Candidates</label>
+            <input className="date-range-input" type="number" min="1" max="5000" value={candidateLimit} onChange={e => setCandidateLimit(Number(e.target.value) || 300)} style={{width:90}} />
+            <label className="count-label">Threshold</label>
+            <input className="date-range-input" type="number" min="0" max="1" step="0.01" value={similarityThreshold} onChange={e => setSimilarityThreshold(Number(e.target.value) || 0.72)} style={{width:90}} />
+            <button className="upload-btn" onClick={() => runSearch(1)}>Search</button>
+          </div>
+          <div className="notice">Only a small embedding sample may be loaded. Use this page for threshold checks, not final quality judgment.</div>
+          <div className="filter-bar">
+            {HYBRID_TEST_TERMS.map(term => (
+              <button key={term} className={`pill${term === search ? " active" : ""}`} onClick={() => { setSearch(term); runSearch(1, term); }}>
+                {term}
+              </button>
+            ))}
+          </div>
+          {hybrid.error && <div className="notice">Hybrid note: {hybrid.error}</div>}
+        </div>
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, alignItems:"start"}}>
+          {[
+            ["Direct search", direct, false],
+            ["Hybrid search", hybrid, true],
+          ].map(([title, state, isHybrid]) => (
+            <div className="card" key={title}>
+              <div className="card-header">
+                <span className="card-title">{title}</span>
+                <span className="count-label">{state.meta ? `${state.meta.total.toLocaleString()} rows` : ""}</span>
+              </div>
+              {state.error && !isHybrid && <div className="error-box">{state.error}</div>}
+              <div className="table-wrap">
+                <table style={{minWidth:980}}>
+                  <thead>
+                    <tr>
+                      <th>Product</th><th>MC</th><th>Category</th><th>Manufacturer</th>
+                      <th>Country</th><th>Imports</th><th>Match</th><th>Score</th><th>Type</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.loading ? <SkeletonRows cols={9} rows={8}/> : renderRows(state.data, isHybrid)}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+        <Pagination meta={hybrid.meta || direct.meta} page={page} setPage={(next) => {
+          const nextPage = typeof next === "function" ? next(page) : next;
+          runSearch(nextPage);
+        }}/>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  if (window.location.pathname === "/search-test") return <SearchTestPage />;
   const [page, setPage] = useState({ name:"main", state:null });
   function navigate(name, state) { setPage({name,state}); window.scrollTo({top:0,behavior:"smooth"}); }
   if (page.name==="sku") return <SkuManufacturers navigate={navigate} state={page.state}/>;

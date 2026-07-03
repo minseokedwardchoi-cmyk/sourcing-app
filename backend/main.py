@@ -53,6 +53,8 @@ from schemas import (
     CountryAmountShareRow, CountryAmountShareResponse,
     ItemCountryRow, ItemCountriesResponse,
 )
+from hybrid_schemas import HybridSearchResponse
+from hybrid_search import search_hybrid
 
 load_dotenv()
 
@@ -631,6 +633,53 @@ _MONTHLY_GROUP_COLS = [
     "category", "mc", "sku_name", "import_type",
     "importer", "manufacturer", "factory", "country",
 ]
+
+@app.get("/api/search-hybrid", response_model=HybridSearchResponse)
+async def get_search_hybrid(
+    search:          Optional[str]       = Query(None,   description="검색어"),
+    competitor:      Optional[str]       = Query("전체", description="경쟁사 필터"),
+    sort_by:         str                 = Query("import_count", description="정렬 컬럼"),
+    sort_dir:        str                 = Query("desc",          description="asc | desc"),
+    page:            int                 = Query(1,    ge=1),
+    page_size:       int                 = Query(50,   ge=1, le=10000),
+    date_from:       Optional[str]       = Query(None, description="조회 시작일(YYYY-MM-DD)"),
+    date_to:         Optional[str]       = Query(None, description="조회 종료일(YYYY-MM-DD)"),
+    filter_category:    Optional[List[str]] = Query(None),
+    filter_mc:          Optional[List[str]] = Query(None),
+    filter_import_type: Optional[List[str]] = Query(None),
+    filter_importer:    Optional[List[str]] = Query(None),
+    filter_country:     Optional[List[str]] = Query(None),
+    filter_factory:     Optional[List[str]] = Query(None),
+    filter_email:       Optional[List[str]] = Query(None),
+    filter_sku_name:    Optional[List[str]] = Query(None),
+    candidate_limit: Optional[int] = Query(None, ge=1, le=5000),
+    similarity_threshold: Optional[float] = Query(None, ge=0, le=1),
+    db: AsyncSession = Depends(get_db),
+):
+    return await search_hybrid(
+        db,
+        search=search,
+        competitor=competitor,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        page=page,
+        page_size=page_size,
+        date_from=date_from,
+        date_to=date_to,
+        candidate_limit=candidate_limit,
+        similarity_threshold=similarity_threshold,
+        filters={
+            "category": filter_category,
+            "mc": filter_mc,
+            "import_type": filter_import_type,
+            "importer": filter_importer,
+            "country": filter_country,
+            "factory": filter_factory,
+            "email": filter_email,
+            "sku_name": filter_sku_name,
+        },
+    )
+
 
 @app.get("/api/sku-history/monthly", response_model=MonthlyImportCountResponse)
 async def get_sku_history_monthly(
