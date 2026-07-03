@@ -14,10 +14,11 @@ import sys
 
 from dotenv import load_dotenv
 
+load_dotenv()  # must run before importing hybrid_search/hybrid_config, which
+                # read HYBRID_SEARCH_ENABLED etc. from os.environ at import time
+
 import hybrid_search
 from database import AsyncSessionLocal
-
-load_dotenv()
 
 
 async def main():
