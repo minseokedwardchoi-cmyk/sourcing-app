@@ -327,17 +327,10 @@ async def refresh_country_stats(year: Optional[str] = None, db: AsyncSession = D
     """
     MFDS 수입식품정보마루 API를 직접 호출해 국가별 통계를 자동 갱신한다.
     ① 국가별 수입 상위 20개국 금액(천달러)
-    ② DB의 import_history에 존재하는 모든 국가의 주요 수입품목 TOP10
+    ② 국가별 주요 수입품목 TOP10 (전체 국가를 한 번에 수집)
     결과를 country_import_stat / country_top_item 테이블에 upsert.
     """
-    from stats_fetcher import KO_TO_CODE
-
-    # DB에 있는 모든 국가명 → ISO 코드 변환
-    rows = await db.execute(text("SELECT DISTINCT country FROM import_history WHERE country IS NOT NULL"))
-    db_countries = [r[0] for r in rows.fetchall()]
-    extra_codes = [KO_TO_CODE[c] for c in db_countries if c in KO_TO_CODE]
-
-    result = await fetch_all_stats(year=year, extra_codes=extra_codes)
+    result = await fetch_all_stats(year=year)
     async with engine.begin() as conn:
         summary = await upsert_stats_to_db(result, conn)
     return summary

@@ -2,21 +2,18 @@
 stats_fetcher.py — 수입식품정보마루 국가별 통계 자동 수집
 
 ① 국가별 수입 상위 20개국 현황 (금액/천달러)
-② 각 국가별 주요 수입품목 TOP10 (chartRate 비중 기준)
+② 국가별 주요 수입품목 TOP10 — '월별 제조국가별 품목별 수입 현황' 화면에서
+   국가/품목별 연간 합계(tot, 이미 1~12월 합산된 값)를 가져와 비중을 계산한다.
 
-수집 방식:
-  1순위: httpx 직접 호출 (세션 쿠키 선취득)  ← Render 서버 배포 시 사용
-  2순위: Playwright 브라우저 자동화           ← httpx가 403 받을 때 fallback
+수집 방식: httpx 직접 호출만 사용 (Playwright는 배포 환경에 설치돼 있지 않음).
 
-URL 탐색이 필요한 경우:
-  python scripts/discover_mfds_urls.py 실행 후 _TOP20_URL, _ITEMS_URL 상수 수정.
+URL 탐색이 필요한 경우: 브라우저 개발자도구 Network 탭에서 해당 화면의
+.action 요청을 확인해 아래 URL 상수를 수정한다.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 import httpx
 from country_utils import normalize_country_name
@@ -30,8 +27,8 @@ _MAIN_URL = f"{_ORIGIN}/ifs/websquare/websquare.html?w2xPath=/ifs/ui/index.xml"
 # ① 국가별 수입 상위 20개국 현황
 _TOP20_URL = f"{_ORIGIN}/ifs/CFSBB01F010/selectCFSBB01F060.action"
 
-# ② 국가별 주요품목 통계
-_ITEMS_URL = f"{_ORIGIN}/ifs/CFDAA07F010/selectStatistics.action"
+# ② 월별 제조국가별 품목별 수입 현황 (전체 국가를 한 번에 반환)
+_ITEM_REPORT_URL = f"{_ORIGIN}/ifs/CFSBB01F010/selectCFSBB01F050.action"
 
 _HEADERS = {
     "User-Agent":        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -136,30 +133,6 @@ class FetchResult:
     errors: list[str] = field(default_factory=list)
 
 
-# ── 파싱 유틸 ─────────────────────────────────────────────────────────────────
-
-def _parse_amount(raw: Any) -> int:
-    if raw is None:
-        return 0
-    return int(str(raw).replace(",", "").strip() or "0")
-
-
-def _first_list(data: dict) -> list:
-    """응답 dict에서 첫 번째 list 값을 반환."""
-    for v in data.values():
-        if isinstance(v, list) and v:
-            return v
-    return []
-
-
-def _find_list_with_key(data: dict, key: str) -> list:
-    """특정 키를 포함하는 첫 번째 list를 반환."""
-    for v in data.values():
-        if isinstance(v, list) and v and key in v[0]:
-            return v
-    return []
-
-
 # ── httpx 수집 ───────────────────────────────────────────────────────────────
 
 async def _init_session(client: httpx.AsyncClient) -> None:
@@ -204,201 +177,98 @@ async def _fetch_top20_httpx(client: httpx.AsyncClient, year: str) -> list[Count
     return result
 
 
-async def _fetch_items_httpx(
-    client: httpx.AsyncClient, year: str, code: str, top_n: int = 10
-) -> list[TopItem]:
+async def _fetch_country_top_items_httpx(
+    client: httpx.AsyncClient, year: str, top_n: int = 10
+) -> dict[str, list[TopItem]]:
+    """
+    '월별 제조국가별 품목별 수입 현황' 화면(selectCFSBB01F050)에서 전체 국가의
+    품목별 연간 수입금액을 한 번에 가져와 국가별 TOP N을 계산한다.
+
+    응답 각 행은 (국가, 대분류/중분류/소분류) 계층이며, 레벨마다 '소계' 행과
+    국가 전체 '합계' 행이 함께 내려온다:
+      - itmLclsCd == "0"                     → 국가 합계 행
+      - itmSclsNm이 없거나(null) "소계"인 행  → 대분류/중분류 소계 행
+      - 그 외 (itmSclsNm에 실제 품목명이 있는 행) → 실제 최소 단위 품목 행
+
+    tot는 이미 1~12월(jan~dec) 합계이므로 따로 더할 필요가 없다.
+    """
     resp = await client.post(
-        _ITEMS_URL,
-        json={"dma_Search": {"columnInfo": "", "stdrYear": year, "ntncd": code, "mberNo": "", "transferYn": ""}},
-        timeout=30,
+        _ITEM_REPORT_URL,
+        json={"dma_Search": {
+            "stdrYear": year,
+            "itmLclsCd": "", "itmLclsCdList": "",
+            "itmMclsCd": "", "itmMclsCdList": "",
+            "itmSclsCd": "", "itmSclsCdList": "", "itmSclsNm": "",
+            "cnd": "amt",   # 금액(천달러) 기준
+            "columnInfo": "ntncd,ntnnm,itmLclsCd,itmLclsNm,itmMclsCd,itmMclsNm,"
+                           "itmSclsCd,itmSclsNm,tot,jan,feb,mar,apr,may,jun,jul,aug,sep,oct,nov,dec",
+            "ntncd": "", "ntncdList": "",
+            "mberNo": "", "transferYn": "",
+        }},
+        timeout=60,
     )
     resp.raise_for_status()
     data = resp.json()
+    rows = data.get("dlt_DataList") or []
 
-    rows = (
-        data.get("dlt_DataList6")
-        or data.get("dlt_DataList5")
-        or _find_list_with_key(data, "itmNm")
-        or _first_list(data)
-    )
+    country_totals: dict[str, float] = {}
+    items_by_country: dict[str, list[tuple[str, float]]] = {}
 
-    items = []
-    for r in sorted(rows, key=lambda x: int(x.get("rank", 999)))[:top_n]:
-        items.append(TopItem(
-            rank=int(r.get("rank", 0)),
-            item_name=str(r.get("itmNm", "")).strip(),
-            chart_rate=float(r.get("chartRate", 0)),
-        ))
-    log.info("국가 %s 주요품목 수집 (httpx): %d건", code, len(items))
-    return items
+    for r in rows:
+        code = str(r.get("ntncd") or "").strip()
+        if not code:
+            continue
+        tot = float(r.get("tot") or 0)
 
+        if str(r.get("itmLclsCd")) == "0":
+            country_totals[code] = tot
+            continue
 
-# ── Playwright fallback ──────────────────────────────────────────────────────
+        item_name = r.get("itmSclsNm")
+        if not item_name or item_name == "소계":
+            continue
 
-async def _fetch_with_playwright(year: str) -> tuple[list[CountryStat], dict[str, list[TopItem]]]:
-    """
-    httpx가 403을 받을 경우 Playwright로 실제 브라우저를 구동해 XHR을 가로챈다.
-    playwright 패키지와 chromium이 설치된 환경에서만 작동.
-    """
-    from playwright.async_api import async_playwright
+        items_by_country.setdefault(code, []).append((str(item_name).strip(), tot))
 
-    top20: list[CountryStat] = []
-    top_items: dict[str, list[TopItem]] = {}
+    result: dict[str, list[TopItem]] = {}
+    for code, items in items_by_country.items():
+        total = country_totals.get(code) or sum(t for _, t in items)
+        if not total:
+            continue
+        ranked = sorted(items, key=lambda kv: kv[1], reverse=True)[:top_n]
+        result[code] = [
+            TopItem(rank=i + 1, item_name=name, chart_rate=round(tot / total * 100, 2))
+            for i, (name, tot) in enumerate(ranked)
+        ]
 
-    chromium_path = "/opt/pw-browsers/chromium"  # 서버 환경 기본 경로
-
-    async with async_playwright() as p:
-        try:
-            browser = await p.chromium.launch(
-                executable_path=chromium_path, headless=True
-            )
-        except Exception:
-            browser = await p.chromium.launch(headless=True)  # 로컬 설치 사용
-
-        ctx = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = await ctx.new_page()
-        captured: dict[str, Any] = {}
-
-        async def on_response(resp):
-            url = resp.url
-            if ".action" not in url:
-                return
-            try:
-                body = await resp.json()
-                if isinstance(body, dict):
-                    captured[url] = {"body": body, "post_data": resp.request.post_data}
-            except Exception:
-                pass
-
-        page.on("response", on_response)
-
-        await page.goto(_MAIN_URL, timeout=30000)
-        await page.wait_for_timeout(3000)
-
-        # ① 국가별 상위 20개국 메뉴 클릭
-        try:
-            await page.get_by_text("국가별 수입 상위 20개국 현황", exact=False).first.click(timeout=8000)
-            await page.wait_for_timeout(3000)
-        except Exception as e:
-            log.warning("상위 20개국 메뉴 클릭 실패: %s", e)
-
-        # ② 국가별 주요 품목 메뉴 클릭 + 미국 데이터 수집
-        try:
-            await page.get_by_text("국가별 주요 품목", exact=False).first.click(timeout=8000)
-            await page.wait_for_timeout(3000)
-        except Exception as e:
-            log.warning("국가별 주요품목 메뉴 클릭 실패: %s", e)
-
-        await browser.close()
-
-        # 캡처된 응답 파싱
-        for url, info in captured.items():
-            body = info["body"]
-            post = info.get("post_data") or ""
-
-            # top20 판별
-            if "ntnNm" in str(body) or ("col1" in str(body) and "col3" in str(body)):
-                rows = _first_list(body)
-                total_amt = sum(_parse_amount(r.get("sumAmt") or r.get("col3") or "0") for r in rows)
-                for r in rows:
-                    ko = (r.get("ntnNm") or r.get("col1") or "").strip()
-                    amt = _parse_amount(r.get("sumAmt") or r.get("col3") or "0")
-                    top20.append(CountryStat(
-                        country_ko=normalize_country_name(ko),
-                        country_code=KO_TO_CODE.get(ko, ""),
-                        amount_usd_k=amt,
-                        share_pct=round(amt / total_amt * 100, 1) if total_amt else 0.0,
-                    ))
-
-            # 품목 데이터 판별
-            item_rows = _find_list_with_key(body, "itmNm")
-            if item_rows:
-                # post_data에서 ntncd 추출
-                code = ""
-                for part in post.split("&"):
-                    if part.startswith("ntncd="):
-                        code = part.split("=", 1)[1]
-                        break
-                if not code:
-                    code = "US"   # 기본값
-                items = [
-                    TopItem(
-                        rank=int(r.get("rank", 0)),
-                        item_name=str(r.get("itmNm", "")).strip(),
-                        chart_rate=float(r.get("chartRate", 0)),
-                    )
-                    for r in sorted(item_rows, key=lambda x: int(x.get("rank", 999)))[:10]
-                ]
-                top_items[code] = items
-
-    log.info("Playwright 수집 완료: top20=%d개국, 품목=%d국", len(top20), len(top_items))
-    return top20, top_items
+    log.info("품목별 수입현황 수집 (httpx): %d개국", len(result))
+    return result
 
 
 # ── 전체 수집 파이프라인 ──────────────────────────────────────────────────────
 
-async def fetch_all_stats(
-    year: str | None = None,
-    extra_codes: list[str] | None = None,
-) -> FetchResult:
-    """
-    ①②를 모두 수집해 FetchResult로 반환.
-    extra_codes: MFDS 상위 20개국 외에 추가로 품목을 수집할 국가코드 목록.
-                 /api/refresh-country-stats 가 DB의 모든 국가를 넘겨준다.
-    """
+async def fetch_all_stats(year: str | None = None) -> FetchResult:
+    """①②를 모두 수집해 FetchResult로 반환."""
     import datetime
     if year is None:
         year = str(datetime.date.today().year - 1)  # 당해연도는 미완성이므로 전년도 사용
 
     result = FetchResult(year=year, top20=[], top_items={})
 
-    # 1순위: httpx
-    httpx_ok = False
     async with httpx.AsyncClient(headers=_HEADERS, follow_redirects=True) as client:
         await _init_session(client)
 
         try:
             result.top20 = await _fetch_top20_httpx(client, year)
-            httpx_ok = True
         except Exception as e:
-            log.warning("httpx top20 수집 실패: %s", e)
-            result.errors.append(f"top20 httpx 실패: {e}")
+            log.warning("top20 수집 실패: %s", e)
+            result.errors.append(f"top20 실패: {e}")
 
-        # 품목 수집 대상: MFDS 상위 20개국 + 호출자가 넘긴 추가 국가 (중복 제거)
-        top20_codes = [s.country_code for s in result.top20 if s.country_code]
-        codes = list(dict.fromkeys(top20_codes + (extra_codes or [])))
-        if not codes:
-            codes = list(COUNTRY_CODE_TO_KO.keys())
-
-        item_errors = 0
-        for code in codes:
-            try:
-                items = await _fetch_items_httpx(client, year, code)
-                if items:
-                    result.top_items[code] = items
-                await asyncio.sleep(0.3)
-            except Exception as e:
-                log.warning("국가 %s 품목 httpx 실패: %s", code, e)
-                item_errors += 1
-
-        if item_errors == len(codes):
-            httpx_ok = False
-
-    # 2순위: Playwright (httpx 완전 실패 시)
-    if not httpx_ok and not result.top20 and not result.top_items:
-        log.info("Playwright fallback 시도...")
         try:
-            pw_top20, pw_items = await _fetch_with_playwright(year)
-            if pw_top20:
-                result.top20 = pw_top20
-            result.top_items.update(pw_items)
+            result.top_items = await _fetch_country_top_items_httpx(client, year)
         except Exception as e:
-            msg = f"Playwright fallback 실패: {e}"
-            log.error(msg)
-            result.errors.append(msg)
+            log.warning("품목별 수입현황 수집 실패: %s", e)
+            result.errors.append(f"품목 수집 실패: {e}")
 
     return result
 
