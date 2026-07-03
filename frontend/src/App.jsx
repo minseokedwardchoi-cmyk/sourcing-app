@@ -11,6 +11,7 @@ import {
   updateManufacturerContact,
   fetchColumnValues, fetchMonthlyImportCounts,
   fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers, fetchCountryAmountShare,
+  fetchItemCountries,
   fetchFactoryView, fetchFactoryViewMonthly,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
@@ -2454,6 +2455,10 @@ function CountryMapPage({ navigate }) {
   const mapSearchRef = useRef(null);
   const mapSearchDropRef = useRef(null);
 
+  const [itemQuery, setItemQuery] = useState("");
+  const [itemResult, setItemResult] = useState(null);   // { query, total_amount_usd_k, countries }
+  const [itemSearching, setItemSearching] = useState(false);
+
   useEffect(() => {
     fetchCountryAmountShare().then(setAmountShare).catch(() => {});
   }, []);
@@ -2491,6 +2496,26 @@ function CountryMapPage({ navigate }) {
     if (!koreanName || !dbCountries || !dbCountries.has(koreanName)) return;
     navigate("country", { country: koreanName, from: "country-map" });
   }
+
+  // 품목 검색 (디바운스) — 타이핑하면 그 품목을 수입하는 국가 목록을 가져온다.
+  useEffect(() => {
+    const q = itemQuery.trim();
+    if (!q) { setItemResult(null); setItemSearching(false); return; }
+    setItemSearching(true);
+    const t = setTimeout(() => {
+      fetchItemCountries(q)
+        .then(setItemResult)
+        .catch(() => setItemResult({ query: q, total_amount_usd_k: 0, countries: [] }))
+        .finally(() => setItemSearching(false));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [itemQuery]);
+
+  // 품목 검색 결과가 있으면 그 국가들만 지도에서 강조하고 나머지는 회색으로.
+  const itemSearchCountries = useMemo(() => {
+    if (!itemResult || !itemQuery.trim()) return null;
+    return new Set(itemResult.countries.map(c => c.country));
+  }, [itemResult, itemQuery]);
 
   function toggleMapSearchCountry(name) {
     setMapSearchSelected(prev => {
@@ -2577,6 +2602,33 @@ function CountryMapPage({ navigate }) {
                 </div>
               )}
             </div>
+            <div style={{position:"absolute", top:46, right:44, zIndex:210, width:230}}>
+              <input
+                className="date-range-input"
+                style={{width:"100%", background:"#fff"}}
+                placeholder="품목명 검색 (예: 카카오원두...)"
+                value={itemQuery}
+                onChange={e=>setItemQuery(e.target.value)}
+              />
+              {itemQuery.trim() && (
+                <div className="filter-dropdown" style={{minWidth:"100%", maxWidth:"100%", zIndex:220}}>
+                  <div className="filter-list" style={{maxHeight:240}}>
+                    {itemSearching
+                      ? <div style={{padding:"8px 12px", fontSize:12, color:"#9ca3af"}}>검색 중...</div>
+                      : !itemResult?.countries?.length
+                      ? <div style={{padding:"8px 12px", fontSize:12, color:"#9ca3af"}}>결과 없음</div>
+                      : itemResult.countries.map(c => (
+                        <div key={c.country} className="filter-item" style={{justifyContent:"space-between"}}
+                          onClick={()=>goToCountry(c.country)}>
+                          <span>{c.country}</span>
+                          <span style={{color:"#9ca3af",flexShrink:0,marginLeft:8}}>{c.pct}%</span>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
+            </div>
             <div style={{position:"absolute", top:8, right:8, zIndex:200, display:"flex", flexDirection:"column", gap:4}}>
               <button type="button" className="icon-btn" style={{width:28,height:28,padding:0}} onClick={()=>zoomBy(1.25)}>+</button>
               <button type="button" className="icon-btn" style={{width:28,height:28,padding:0}} onClick={()=>zoomBy(0.8)}>−</button>
@@ -2601,6 +2653,12 @@ function CountryMapPage({ navigate }) {
                       {geographies.map(geo => {
                         const koreanName = resolveKoreanName(geo.properties.name, dbCountries);
                         const inDb = !!(koreanName && dbCountries && dbCountries.has(koreanName));
+                        // 품목 검색 중이면 그 품목을 수입하는 국가만 강조색(주황), 나머지는 회색.
+                        const itemMode = !!itemSearchCountries;
+                        const isItemMatch = itemMode && koreanName && itemSearchCountries.has(koreanName);
+                        const fillDefault = itemMode ? (isItemMatch ? "#f97316" : "#cbd5e1") : (inDb ? "#16a34a" : "#cbd5e1");
+                        const fillHover   = itemMode ? (isItemMatch ? "#ea580c" : "#94a3b8") : (inDb ? "#15803d" : "#94a3b8");
+                        const fillPressed = itemMode ? "#c2410c" : "#166534";
                         return (
                           <Geography
                             key={geo.rsmKey}
@@ -2621,17 +2679,17 @@ function CountryMapPage({ navigate }) {
                             onClick={() => goToCountry(koreanName)}
                             style={{
                               default: {
-                                fill: inDb ? "#16a34a" : "#cbd5e1",
+                                fill: fillDefault,
                                 stroke: "#fff", strokeWidth: 0.5 / zoomState.zoom,
                                 outline: "none", cursor: inDb ? "pointer" : "default",
                                 transition: "fill .1s",
                               },
                               hover: {
-                                fill: inDb ? "#15803d" : "#94a3b8",
+                                fill: fillHover,
                                 stroke: "#fff", strokeWidth: 0.5 / zoomState.zoom, outline: "none",
                                 cursor: inDb ? "pointer" : "default",
                               },
-                              pressed: { fill: "#166534", stroke: "#fff", strokeWidth: 0.5 / zoomState.zoom, outline: "none" },
+                              pressed: { fill: fillPressed, stroke: "#fff", strokeWidth: 0.5 / zoomState.zoom, outline: "none" },
                             }}
                           />
                         );

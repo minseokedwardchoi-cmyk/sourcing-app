@@ -51,6 +51,7 @@ from schemas import (
     CountrySummaryResponse, CountryTopItemRow, CountryTopItemsResponse,
     CountryManufacturerRow, CountryManufacturersResponse,
     CountryAmountShareRow, CountryAmountShareResponse,
+    ItemCountryRow, ItemCountriesResponse,
 )
 
 load_dotenv()
@@ -309,6 +310,7 @@ class RefreshCountryStatsResponse(BaseModel):
     year: str
     countries_updated: int
     items_updated: int
+    item_amounts_updated: int = 0
     errors: list[str]
 
 
@@ -971,6 +973,41 @@ async def get_country_top_items(country: str, db: AsyncSession = Depends(get_db)
     """), {"c": country})
     items = [CountryTopItemRow(rank=r[0], name=r[1], pct=float(r[2])) for r in rows_r.fetchall()]
     return CountryTopItemsResponse(country=country, items=items)
+
+
+# ─── 품목명으로 국가 검색 (국가별 지도 페이지) ─────────────────────────────────
+@app.get("/api/items/countries", response_model=ItemCountriesResponse)
+async def get_item_countries(
+    q: str = Query(..., min_length=1, description="품목명 검색어"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    품목명(부분 일치)으로 검색해, 그 품목을 수입하는 국가를 수입금액 내림차순으로
+    반환한다. pct는 검색된 품목의 국가간 총 수입금액 대비 각 국가의 비중.
+    """
+    q = q.strip()
+    if not q:
+        return ItemCountriesResponse(query=q, total_amount_usd_k=0, countries=[])
+
+    rows_r = await db.execute(text("""
+        SELECT country, SUM(amount_usd_k) AS amt
+        FROM country_item_amount
+        WHERE item_name ILIKE :q
+        GROUP BY country
+        ORDER BY amt DESC
+    """), {"q": f"%{q}%"})
+    rows = rows_r.fetchall()
+
+    total = sum(float(r[1]) for r in rows)
+    countries = [
+        ItemCountryRow(
+            country=r[0],
+            amount_usd_k=float(r[1]),
+            pct=round(float(r[1]) / total * 100, 2) if total else 0.0,
+        )
+        for r in rows
+    ]
+    return ItemCountriesResponse(query=q, total_amount_usd_k=total, countries=countries)
 
 
 _COUNTRY_SORT_FIELDS = {"ranking_score", "total_import_count", "sku_count", "top5_count", "latest_import"}

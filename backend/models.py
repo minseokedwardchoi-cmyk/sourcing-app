@@ -106,3 +106,22 @@ class CountryTopItem(Base):
         UniqueConstraint("country", "rank", name="uq_cti_country_rank"),
         Index("ix_cti_country", "country"),
     )
+
+
+class CountryItemAmount(Base):
+    """
+    국가별 품목별 수입금액 전체 (품목 검색 → 국가 리스트업 기능용).
+    country_top_item과 달리 국가당 상위 10개로 제한하지 않고 전체 품목을 저장한다.
+    """
+    __tablename__ = "country_item_amount"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    country      = Column(String(100), nullable=False, comment="국가명")
+    item_name    = Column(String(200), nullable=False, comment="수입품목명")
+    amount_usd_k = Column(Numeric,     nullable=False, comment="수입금액 (천달러)")
+
+    __table_args__ = (
+        UniqueConstraint("country", "item_name", name="uq_cia_country_item"),
+        Index("ix_cia_country", "country"),
+        Index("ix_cia_item_name", "item_name"),
+    )
