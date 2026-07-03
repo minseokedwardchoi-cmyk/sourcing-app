@@ -695,6 +695,22 @@ function MainDashboard({ navigate }) {
               >
                 🏭 공장별로 보기
               </button>
+              <a
+                className="icon-btn"
+                href="/guide-quick.pdf"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                📘 사용 가이드
+              </a>
+              <a
+                className="icon-btn"
+                href="/guide-detailed.pdf"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                📗 상세 가이드
+              </a>
             </div>
           </div>
 
@@ -2846,6 +2862,22 @@ function FactoryViewDashboard({ navigate }) {
               >
                 🌍 국가별로 보기
               </button>
+              <a
+                className="icon-btn"
+                href="/guide-quick.pdf"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                📘 사용 가이드
+              </a>
+              <a
+                className="icon-btn"
+                href="/guide-detailed.pdf"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                📗 상세 가이드
+              </a>
             </div>
           </div>
 
