@@ -2435,9 +2435,12 @@ function CountryMapPage({ navigate }) {
   const [hovered, setHovered] = useState(null); // { name, x, y, inDb }
   const [search,  setSearch]  = useState("");
   const [showSuggest, setShowSuggest] = useState(false);
+  const [mapSearchSelected, setMapSearchSelected] = useState(() => new Set());
   const [countryInfoCache, setCountryInfoCache] = useState({}); // { [koreanName]: { summary, topItems } }
   const [amountShare, setAmountShare] = useState(null);
   const [zoomState, setZoomState] = useState({ center: [0, 0], zoom: 1 });
+  const mapSearchRef = useRef(null);
+  const mapSearchDropRef = useRef(null);
 
   useEffect(() => {
     fetchCountryAmountShare().then(setAmountShare).catch(() => {});
@@ -2465,16 +2468,49 @@ function CountryMapPage({ navigate }) {
   }, []);
 
   const dbCountryList = useMemo(() => dbCountries ? [...dbCountries].sort() : [], [dbCountries]);
+  // 검색창 클릭 시 전체 목록을 보여주고, 타이핑하면 그 안에서 좁혀지는 엑셀 필터 방식.
   const suggestions = useMemo(() => {
-    if (!search.trim()) return [];
     const q = search.trim().toLowerCase();
-    return dbCountryList.filter(c => c.toLowerCase().includes(q)).slice(0, 8);
+    if (!q) return dbCountryList;
+    return dbCountryList.filter(c => c.toLowerCase().includes(q));
   }, [search, dbCountryList]);
 
   function goToCountry(koreanName) {
     if (!koreanName || !dbCountries || !dbCountries.has(koreanName)) return;
     navigate("country", { country: koreanName });
   }
+
+  function toggleMapSearchCountry(name) {
+    setMapSearchSelected(prev => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      return next;
+    });
+  }
+
+  function closeMapSearch() {
+    setShowSuggest(false);
+    setMapSearchSelected(new Set());
+  }
+
+  function confirmMapSearch() {
+    const picked = suggestions.find(c => mapSearchSelected.has(c)) || [...mapSearchSelected][0];
+    setSearch("");
+    closeMapSearch();
+    if (picked) goToCountry(picked);
+  }
+
+  // 드롭다운 바깥을 클릭하면 닫히도록 (선택은 취소)
+  useEffect(() => {
+    if (!showSuggest) return;
+    const h = e => {
+      if (mapSearchRef.current?.contains(e.target)) return;
+      if (mapSearchDropRef.current?.contains(e.target)) return;
+      closeMapSearch();
+    };
+    document.addEventListener("mousedown", h, true);
+    return () => document.removeEventListener("mousedown", h, true);
+  }, [showSuggest]);
 
   return (
     <div className="app">
@@ -2491,32 +2527,7 @@ function CountryMapPage({ navigate }) {
         <button className="back-btn" onClick={()=>navigate("main")}>← 수입/OEM SKU 이력으로 돌아가기</button>
 
         <div className="card" style={{padding:16}}>
-          <div className="page-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-            <h2>국가별로 보기</h2>
-            <div style={{position:"relative", width:260}}>
-              <input
-                className="date-range-input"
-                style={{width:"100%"}}
-                placeholder="국가명 검색 (예: 미국, 베트남...)"
-                value={search}
-                onChange={e=>{ setSearch(e.target.value); setShowSuggest(true); }}
-                onFocus={()=>setShowSuggest(true)}
-                onKeyDown={e=>{ if (e.key==="Enter" && suggestions.length>0) goToCountry(suggestions[0]); }}
-              />
-              {showSuggest && suggestions.length > 0 && (
-                <div className="filter-dropdown" style={{minWidth:"100%", maxWidth:"100%"}}>
-                  <div className="filter-list" style={{maxHeight:220}}>
-                    {suggestions.map(c => (
-                      <div key={c} className="filter-item" style={{justifyContent:"flex-start"}}
-                        onClick={()=>{ setShowSuggest(false); setSearch(""); goToCountry(c); }}>
-                        <span>{c}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <h2>국가별로 보기</h2>
 
           <p style={{fontSize:12, color:"#6b7280", marginBottom:10}}>
             데이터베이스에 보유한 국가(초록색)는 국가명이 항상 표시됩니다. 마우스를 올리면 상세 정보가, 클릭하면 해당 국가의 상세 페이지가 나타납니다.
@@ -2524,6 +2535,36 @@ function CountryMapPage({ navigate }) {
 
           <div style={{position:"relative", border:"1px solid #e8eaed", borderRadius:8, overflow:"hidden", background:"#eff6ff"}}
             onMouseLeave={()=>setHovered(null)}>
+            <div ref={mapSearchRef} style={{position:"absolute", top:8, right:44, zIndex:210, width:230}}>
+              <input
+                className="date-range-input"
+                style={{width:"100%", background:"#fff"}}
+                placeholder="국가명 검색 (예: 미국, 베트남...)"
+                value={search}
+                onChange={e=>{ setSearch(e.target.value); setShowSuggest(true); }}
+                onFocus={()=>setShowSuggest(true)}
+                onKeyDown={e=>{ if (e.key==="Enter" && suggestions.length>0) { setSearch(""); closeMapSearch(); goToCountry(suggestions[0]); } }}
+              />
+              {showSuggest && (
+                <div ref={mapSearchDropRef} className="filter-dropdown" style={{minWidth:"100%", maxWidth:"100%", zIndex:220}}>
+                  <div className="filter-list" style={{maxHeight:240}}>
+                    {suggestions.length === 0
+                      ? <div style={{padding:"8px 12px", fontSize:12, color:"#9ca3af"}}>결과 없음</div>
+                      : suggestions.map(c => (
+                        <label key={c} className="filter-item">
+                          <input type="checkbox" checked={mapSearchSelected.has(c)} onChange={()=>toggleMapSearchCountry(c)}/>
+                          <span>{c}</span>
+                        </label>
+                      ))
+                    }
+                  </div>
+                  <div className="filter-actions">
+                    <button className="filter-ok-btn" onClick={confirmMapSearch}>확인</button>
+                    <button className="filter-cancel-btn" onClick={closeMapSearch}>취소</button>
+                  </div>
+                </div>
+              )}
+            </div>
             <div style={{position:"absolute", top:8, right:8, zIndex:200, display:"flex", flexDirection:"column", gap:4}}>
               <button type="button" className="icon-btn" style={{width:28,height:28,padding:0}} onClick={()=>zoomBy(1.25)}>+</button>
               <button type="button" className="icon-btn" style={{width:28,height:28,padding:0}} onClick={()=>zoomBy(0.8)}>−</button>
@@ -2532,7 +2573,7 @@ function CountryMapPage({ navigate }) {
             <ComposableMap
               projection="geoEquirectangular"
               projectionConfig={{ scale: 148 }}
-              width={980} height={460} style={{width:"100%",height:"auto",display:"block"}}
+              width={980} height={460} style={{width:"100%",height:"auto",display:"block", transform:"translateY(16%)"}}
             >
               <ZoomableGroup
                 center={zoomState.center}
