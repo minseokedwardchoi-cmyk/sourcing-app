@@ -1,9 +1,9 @@
 /**
  * api.js — 백엔드 API 호출 모듈
- * BASE_URL은 .env 파일의 VITE_API_URL 환경변수로 관리
+ * BASE_URL은 .env 파일의 VITE_API_BASE_URL 환경변수로 관리
  */
 
-const BASE_URL = "https://sourcing-backend-ucp5.onrender.com";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://sourcing-backend-ucp5.onrender.com";
 
 async function request(path, params = {}) {
   const url = new URL(`${BASE_URL}${path}`, window.location.origin);
@@ -106,6 +106,35 @@ export async function fetchSkuHistory({ search, competitor, sortBy, sortDir, pag
 }
 
 /** 행(그룹)별 월별 수입횟수 */
+export async function fetchHybridSearch({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {}, dateFrom, dateTo, candidateLimit, similarityThreshold }) {
+  const url = new URL(`${BASE_URL}/api/search-hybrid`, window.location.origin);
+  const params = {
+    search, competitor, sort_by: sortBy, sort_dir: sortDir, page, page_size: pageSize,
+    date_from: dateFrom, date_to: dateTo,
+    candidate_limit: candidateLimit === null || candidateLimit === undefined || candidateLimit === "" ? undefined : Number(candidateLimit),
+    similarity_threshold: similarityThreshold === null || similarityThreshold === undefined || similarityThreshold === "" ? undefined : Number(similarityThreshold),
+  };
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== null && v !== undefined && v !== "") url.searchParams.set(k, String(v));
+  });
+  const colMap = {
+    category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
+    importer: "filter_importer", country: "filter_country", factory: "filter_factory",
+    email: "filter_email", sku_name: "filter_sku_name",
+  };
+  Object.entries(colFilters).forEach(([col, values]) => {
+    if (values && values.length > 0 && colMap[col]) {
+      values.forEach(v => url.searchParams.append(colMap[col], v));
+    }
+  });
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "API error");
+  }
+  return res.json();
+}
+
 export async function fetchMonthlyImportCounts(row, dateFrom, dateTo) {
   const cols = ["category", "mc", "sku_name", "import_type", "importer", "manufacturer", "factory", "country"];
   const url = new URL(`${BASE_URL}/api/sku-history/monthly`, window.location.origin);
