@@ -2107,6 +2107,8 @@ function PieChart({ slices, size = 120 }) {
 
 function CountryDetail({ navigate, state }) {
   const country = state?.country;
+  const cameFromCountryMap = state?.from === "country-map";
+  const goBack = () => navigate(cameFromCountryMap ? "country-map" : "main");
   const [summary,   setSummary]   = useState(null);
   const [topItems,  setTopItems]  = useState(null);
   const [amountShare, setAmountShare] = useState(null);
@@ -2230,7 +2232,7 @@ function CountryDetail({ navigate, state }) {
         </div>
       </div>
       <div className="page">
-        <button className="back-btn" onClick={()=>navigate("main")}>← 수입/OEM SKU 이력으로 돌아가기</button>
+        <button className="back-btn" onClick={goBack}>← {cameFromCountryMap ? "국가별 보기로 돌아가기" : "수입/OEM SKU 이력으로 돌아가기"}</button>
 
         {error && <div className="error-box">오류: {error}</div>}
 
@@ -2264,7 +2266,7 @@ function CountryDetail({ navigate, state }) {
                       key={it.country}
                       className="country-amount-share-item"
                       style={{cursor: it.is_other ? "default" : "pointer", fontWeight: it.country===summary.country?700:400}}
-                      onClick={it.is_other ? undefined : () => navigate("country", { country: it.country })}
+                      onClick={it.is_other ? undefined : () => navigate("country", { country: it.country, from: state?.from })}
                     >
                       <span className="legend-dot" style={{background: it.is_other ? "#e5e7eb" : PIE_COLORS[i % PIE_COLORS.length]}}/>
                       {it.flag} {it.country} ({it.pct}%)
@@ -2430,6 +2432,16 @@ function CountryDetail({ navigate, state }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 국가별 지도 보기
 // ═══════════════════════════════════════════════════════════════════════════════
+function sortCountryOptions(values) {
+  return [...values].sort((a, b) => {
+    const av = String(a || "");
+    const bv = String(b || "");
+    if (av === "기타" && bv !== "기타") return 1;
+    if (bv === "기타" && av !== "기타") return -1;
+    return av.localeCompare(bv, "ko");
+  });
+}
+
 function CountryMapPage({ navigate }) {
   const [dbCountries, setDbCountries] = useState(null);
   const [hovered, setHovered] = useState(null); // { name, x, y, inDb }
@@ -2467,8 +2479,8 @@ function CountryMapPage({ navigate }) {
     fetchColumnValues("country").then(vals => setDbCountries(new Set(vals)));
   }, []);
 
-  const dbCountryList = useMemo(() => dbCountries ? [...dbCountries].sort() : [], [dbCountries]);
-  // 검색창 클릭 시 전체 목록을 보여주고, 타이핑하면 그 안에서 좁혀지는 엑셀 필터 방식.
+  const dbCountryList = useMemo(() => dbCountries ? sortCountryOptions(dbCountries) : [], [dbCountries]);
+  // Search click shows the full list; typing narrows it within that list.
   const suggestions = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return dbCountryList;
@@ -2477,7 +2489,7 @@ function CountryMapPage({ navigate }) {
 
   function goToCountry(koreanName) {
     if (!koreanName || !dbCountries || !dbCountries.has(koreanName)) return;
-    navigate("country", { country: koreanName });
+    navigate("country", { country: koreanName, from: "country-map" });
   }
 
   function toggleMapSearchCountry(name) {
