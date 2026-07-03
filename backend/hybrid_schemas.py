@@ -27,6 +27,11 @@ class HybridSkuHistoryRow(BaseModel):
     match_type: str = Field("exact", description="exact or semantic")
     semantic_score: Optional[float] = None
     relevance_score: Optional[float] = None
+    mc_intent_bonus: Optional[float] = None
+    category_intent_bonus: Optional[float] = None
+    best_keyword_bonus: Optional[float] = None
+    mc_mismatch_penalty: Optional[float] = None
+    category_mismatch_penalty: Optional[float] = None
 
 
 class HybridSearchResponse(BaseModel):
@@ -35,5 +40,8 @@ class HybridSearchResponse(BaseModel):
     search_elapsed_ms: int
     hybrid_enabled: bool
     applied_similarity_threshold: float
+    applied_relevance_threshold: float
     applied_candidate_limit: int
+    minimum_returned_semantic_score: Optional[float] = None
+    minimum_returned_relevance_score: Optional[float] = None
     semantic_error: Optional[str] = None

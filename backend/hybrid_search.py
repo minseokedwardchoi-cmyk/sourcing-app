@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hybrid_config import HYBRID_CANDIDATE_LIMIT, HYBRID_SEARCH_ENABLED, HYBRID_SIMILARITY_THRESHOLD
 from hybrid_embeddings import EmbeddingProvider, default_embedding_provider
+from hybrid_relevance import RelevanceBreakdown, clamp_relevance_score, detect_intent
 from hybrid_schemas import HybridSearchResponse, HybridSkuHistoryRow
 from hybrid_vector_store import PgVectorSearchRepository, VectorSearchRepository
 from importer import COMPETITOR_MAP
@@ -94,11 +95,34 @@ def _source_sql(date_from: Optional[str], date_to: Optional[str], params: dict) 
     return "sku_history_mv AS source_rows"
 
 
-def _passes_similarity_threshold(row, threshold: float) -> bool:
+def _recompute_relevance(row: dict) -> dict:
+    """Defensive recompute: derive relevance_score from the bonus/penalty
+    components the SQL query already returned, using the exact same formula
+    SQL used to build them (hybrid_relevance.clamp_relevance_score, backed by
+    the same hybrid_config constants). This is not an independent second
+    formula - it is the single source of truth the SQL CASE expressions were
+    hand-translated from, so the two can never silently drift apart.
+    """
+    semantic_score = row.get("semantic_score")
+    if semantic_score is None:
+        return row
+    breakdown = RelevanceBreakdown(
+        mc_intent_bonus=float(row.get("mc_intent_bonus") or 0.0),
+        category_intent_bonus=float(row.get("category_intent_bonus") or 0.0),
+        best_keyword_bonus=float(row.get("best_keyword_bonus") or 0.0),
+        mc_mismatch_penalty=float(row.get("mc_mismatch_penalty") or 0.0),
+        category_mismatch_penalty=float(row.get("category_mismatch_penalty") or 0.0),
+    )
+    row = dict(row)
+    row["relevance_score"] = clamp_relevance_score(float(semantic_score), breakdown)
+    return row
+
+
+def _passes_relevance_threshold(row: dict, threshold: float) -> bool:
     if row["match_type"] == "exact":
         return True
-    score = row["semantic_score"]
-    return score is not None and float(score) >= threshold
+    relevance = row.get("relevance_score")
+    return relevance is not None and float(relevance) >= threshold
 
 
 async def search_hybrid(
@@ -161,6 +185,8 @@ async def search_hybrid(
         params["search"] = f"%{query}%"
         params["query_exact"] = query.lower()
 
+    intent = detect_intent(query)
+
     if hybrid_enabled and query_embedding:
         semantic_sql = vector_repository.semantic_sql(
             query_vector=query_embedding.vector,
@@ -168,6 +194,7 @@ async def search_hybrid(
             dimensions=query_embedding.dimensions,
             candidate_limit=effective_candidate_limit,
             similarity_threshold=effective_similarity_threshold,
+            intent=intent,
         )
         semantic_cte = semantic_sql.cte
         semantic_union = semantic_sql.union
@@ -195,7 +222,12 @@ async def search_hybrid(
                 category, mc, sku_name, import_type, importer, manufacturer, factory, country,
                 'exact' AS match_type,
                 NULL::float AS semantic_score,
-                NULL::float AS relevance_score
+                NULL::float AS relevance_score,
+                NULL::float AS mc_intent_bonus,
+                NULL::float AS category_intent_bonus,
+                NULL::float AS best_keyword_bonus,
+                NULL::float AS mc_mismatch_penalty,
+                NULL::float AS category_mismatch_penalty
             FROM filtered_source
             WHERE 1=1
               {direct_search_cond}
@@ -206,7 +238,12 @@ async def search_hybrid(
                 category, mc, sku_name, import_type, importer, manufacturer, factory, country,
                 CASE WHEN bool_or(match_type = 'exact') THEN 'exact' ELSE 'semantic' END AS match_type,
                 MAX(semantic_score) AS semantic_score,
-                MAX(relevance_score) AS relevance_score
+                MAX(relevance_score) AS relevance_score,
+                MAX(mc_intent_bonus) AS mc_intent_bonus,
+                MAX(category_intent_bonus) AS category_intent_bonus,
+                MAX(best_keyword_bonus) AS best_keyword_bonus,
+                MAX(mc_mismatch_penalty) AS mc_mismatch_penalty,
+                MAX(category_mismatch_penalty) AS category_mismatch_penalty
             FROM matched
             GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
         ),
@@ -214,7 +251,7 @@ async def search_hybrid(
             SELECT *
             FROM deduped
             WHERE match_type = 'exact'
-               OR semantic_score >= :similarity_threshold
+               OR relevance_score >= :similarity_threshold
         )
         SELECT
             s.category, s.mc, s.sku_name, s.import_type, s.importer,
@@ -222,6 +259,8 @@ async def search_hybrid(
             s.email, s.latest_import,
             s.base_year, s.count_year1, s.count_year2, s.count_year3,
             d.match_type, d.semantic_score, d.relevance_score,
+            d.mc_intent_bonus, d.category_intent_bonus, d.best_keyword_bonus,
+            d.mc_mismatch_penalty, d.category_mismatch_penalty,
             COUNT(*) OVER() AS total_count
         FROM filtered_source s
         JOIN thresholded d
@@ -239,9 +278,11 @@ async def search_hybrid(
 
     try:
         rows_result = await db.execute(text(data_sql), params)
+        raw_rows = [dict(r) for r in rows_result.mappings().all()]
+        recomputed_rows = [_recompute_relevance(r) for r in raw_rows]
         rows = [
-            r for r in rows_result.mappings().all()
-            if _passes_similarity_threshold(r, effective_similarity_threshold)
+            r for r in recomputed_rows
+            if _passes_relevance_threshold(r, effective_similarity_threshold)
         ]
         if rows:
             total = rows[0]["total_count"]
@@ -264,7 +305,8 @@ async def search_hybrid(
                     SELECT
                         category, mc, sku_name, import_type, importer, manufacturer, factory, country,
                         'exact' AS match_type,
-                        NULL::float AS semantic_score
+                        NULL::float AS semantic_score,
+                        NULL::float AS relevance_score
                     FROM filtered_source
                     WHERE 1=1
                       {direct_search_cond}
@@ -274,7 +316,8 @@ async def search_hybrid(
                     SELECT
                         category, mc, sku_name, import_type, importer, manufacturer, factory, country,
                         CASE WHEN bool_or(match_type = 'exact') THEN 'exact' ELSE 'semantic' END AS match_type,
-                        MAX(semantic_score) AS semantic_score
+                        MAX(semantic_score) AS semantic_score,
+                        MAX(relevance_score) AS relevance_score
                     FROM matched
                     GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
                 ),
@@ -282,7 +325,7 @@ async def search_hybrid(
                     SELECT *
                     FROM deduped
                     WHERE match_type = 'exact'
-                       OR semantic_score >= :similarity_threshold
+                       OR relevance_score >= :similarity_threshold
                 )
                 SELECT COUNT(*) FROM (
                     SELECT category, mc, sku_name, import_type, importer, manufacturer, factory, country
@@ -312,6 +355,8 @@ async def search_hybrid(
             )
         raise
 
+    exact_count = sum(1 for r in raw_rows if r["match_type"] == "exact")
+    semantic_candidate_count = sum(1 for r in raw_rows if r["match_type"] != "exact")
     min_semantic_score = min(
         (
             float(r["semantic_score"])
@@ -320,19 +365,31 @@ async def search_hybrid(
         ),
         default=None,
     )
+    min_relevance_score = min(
+        (
+            float(r["relevance_score"])
+            for r in rows
+            if r["match_type"] != "exact" and r["relevance_score"] is not None
+        ),
+        default=None,
+    )
     log.info(
-        "hybrid_search threshold=%s candidate_limit=%s hybrid_enabled=%s min_semantic_score=%s rows=%s",
+        "hybrid_search query=%r threshold=%s candidate_limit=%s exact_count=%s "
+        "semantic_candidates=%s final_count=%s min_semantic_score=%s min_relevance_score=%s",
+        query,
         effective_similarity_threshold,
         effective_candidate_limit,
-        hybrid_enabled,
-        min_semantic_score,
+        exact_count,
+        semantic_candidate_count,
         len(rows),
+        min_semantic_score,
+        min_relevance_score,
     )
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     return HybridSearchResponse(
         data=[
-            HybridSkuHistoryRow(**{k: v for k, v in dict(r).items() if k != "total_count"})
+            HybridSkuHistoryRow(**{k: v for k, v in r.items() if k != "total_count"})
             for r in rows
         ],
         meta=PaginationMeta(
@@ -344,7 +401,10 @@ async def search_hybrid(
         search_elapsed_ms=elapsed_ms,
         hybrid_enabled=hybrid_enabled,
         applied_similarity_threshold=effective_similarity_threshold,
+        applied_relevance_threshold=effective_similarity_threshold,
         applied_candidate_limit=effective_candidate_limit,
+        minimum_returned_semantic_score=min_semantic_score,
+        minimum_returned_relevance_score=min_relevance_score,
         semantic_error=semantic_error,
     )
 

@@ -57,5 +57,17 @@ def embedding_dimensions_required() -> int:
 
 HYBRID_SEARCH_ENABLED = env_bool("HYBRID_SEARCH_ENABLED", False)
 HYBRID_CANDIDATE_LIMIT = env_int("HYBRID_CANDIDATE_LIMIT", 300)
+# Wire/query-param name stays "similarity_threshold" for API compatibility, but this
+# value is applied against the final relevance_score (semantic + bonuses - penalties),
+# not the raw semantic_score. Treat it as "Relevance threshold" everywhere in UI/docs.
 HYBRID_SIMILARITY_THRESHOLD = env_float("HYBRID_SIMILARITY_THRESHOLD", 0.72)
 QUERY_EMBEDDING_CACHE_TTL = env_int("QUERY_EMBEDDING_CACHE_TTL", 300)
+
+# Relevance score bonus/penalty constants. Single source of truth - both the SQL
+# CASE expressions (hybrid_vector_store.py) and the Python defensive recompute
+# (hybrid_relevance.py) read from here so the two formulas cannot drift apart.
+RELEVANCE_MC_INTENT_BONUS = env_float("RELEVANCE_MC_INTENT_BONUS", 0.18)
+RELEVANCE_CATEGORY_INTENT_BONUS = env_float("RELEVANCE_CATEGORY_INTENT_BONUS", 0.12)
+RELEVANCE_KEYWORD_BONUS = env_float("RELEVANCE_KEYWORD_BONUS", 0.08)
+RELEVANCE_MC_MISMATCH_PENALTY = env_float("RELEVANCE_MC_MISMATCH_PENALTY", 0.10)
+RELEVANCE_CATEGORY_MISMATCH_PENALTY = env_float("RELEVANCE_CATEGORY_MISMATCH_PENALTY", 0.22)

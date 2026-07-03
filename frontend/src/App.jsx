@@ -3341,7 +3341,10 @@ function SearchTestPage() {
     similarityThreshold: 0.72,
   });
   const [direct, setDirect] = useState({ data: [], meta: null, elapsed: null, error: null, loading: false });
-  const [hybrid, setHybrid] = useState({ data: [], meta: null, elapsed: null, error: null, loading: false, enabled: false, appliedThreshold: null });
+  const [hybrid, setHybrid] = useState({
+    data: [], meta: null, elapsed: null, error: null, loading: false, enabled: false,
+    appliedThreshold: null, minSemanticScore: null, minRelevanceScore: null,
+  });
 
   function runSearch(nextPage = 1, nextSearch = search) {
     const nextRequest = {
@@ -3352,7 +3355,10 @@ function SearchTestPage() {
     };
     setPage(nextPage);
     setDirect({ data: [], meta: null, elapsed: null, error: null, loading: true });
-    setHybrid({ data: [], meta: null, elapsed: null, error: null, loading: true, enabled: false, appliedThreshold: null });
+    setHybrid({
+      data: [], meta: null, elapsed: null, error: null, loading: true, enabled: false,
+      appliedThreshold: null, minSemanticScore: null, minRelevanceScore: null,
+    });
     setRequest(nextRequest);
   }
 
@@ -3385,13 +3391,22 @@ function SearchTestPage() {
         error: r.semantic_error || null,
         loading: false,
         enabled: !!r.hybrid_enabled,
-        appliedThreshold: r.applied_similarity_threshold,
+        appliedThreshold: r.applied_relevance_threshold ?? r.applied_similarity_threshold,
+        minSemanticScore: r.minimum_returned_semantic_score,
+        minRelevanceScore: r.minimum_returned_relevance_score,
       }))
-      .catch(e => setHybrid({ data: [], meta: null, elapsed: null, error: e.message, loading: false, enabled: false, appliedThreshold: null }));
+      .catch(e => setHybrid({
+        data: [], meta: null, elapsed: null, error: e.message, loading: false, enabled: false,
+        appliedThreshold: null, minSemanticScore: null, minRelevanceScore: null,
+      }));
   }, [request]);
 
-  function renderRows(items, isHybrid) {
-    if (!items.length) return <tr><td colSpan={9}><div className="empty-state">No results</div></td></tr>;
+  function fmtScore(value) {
+    return value === null || value === undefined ? "-" : Number(value).toFixed(4);
+  }
+
+  function renderDirectRows(items) {
+    if (!items.length) return <tr><td colSpan={7}><div className="empty-state">No results</div></td></tr>;
     return items.map((row, idx) => (
       <tr key={`${row.sku_name}-${idx}`}>
         <td title={row.sku_name}>{row.sku_name}</td>
@@ -3400,8 +3415,27 @@ function SearchTestPage() {
         <td>{row.manufacturer || "-"}</td>
         <td>{row.country || "-"}</td>
         <td>{row.import_count}</td>
-        <td>{isHybrid ? row.match_type : "direct"}</td>
-        <td>{isHybrid ? (row.semantic_score ?? "-") : "-"}</td>
+        <td>{row.import_type || "-"}</td>
+      </tr>
+    ));
+  }
+
+  function renderHybridRows(items) {
+    if (!items.length) return <tr><td colSpan={13}><div className="empty-state">No results</div></td></tr>;
+    return items.map((row, idx) => (
+      <tr key={`${row.sku_name}-${idx}`}>
+        <td title={row.sku_name}>{row.sku_name}</td>
+        <td>{row.mc || "-"}</td>
+        <td>{row.category || "-"}</td>
+        <td>{row.import_count}</td>
+        <td>{row.match_type}</td>
+        <td>{fmtScore(row.semantic_score)}</td>
+        <td>{fmtScore(row.relevance_score)}</td>
+        <td>{fmtScore(row.mc_intent_bonus)}</td>
+        <td>{fmtScore(row.category_intent_bonus)}</td>
+        <td>{fmtScore(row.best_keyword_bonus)}</td>
+        <td>{fmtScore(row.mc_mismatch_penalty)}</td>
+        <td>{fmtScore(row.category_mismatch_penalty)}</td>
         <td>{row.import_type || "-"}</td>
       </tr>
     ));
@@ -3423,15 +3457,17 @@ function SearchTestPage() {
             </div>
             <span className="count-label">Direct {direct.elapsed ?? "-"} ms</span>
             <span className="count-label">Hybrid {hybrid.elapsed ?? "-"} ms</span>
-            <span className="count-label">Applied {hybrid.appliedThreshold ?? "-"}</span>
+            <span className="count-label">Applied relevance threshold {hybrid.appliedThreshold ?? "-"}</span>
+            <span className="count-label">Min semantic {hybrid.minSemanticScore ?? "-"}</span>
+            <span className="count-label">Min relevance {hybrid.minRelevanceScore ?? "-"}</span>
             <span className="badge b-gray">{hybrid.enabled ? "semantic on" : "semantic off/fallback"}</span>
             <label className="count-label">Candidates</label>
             <input className="date-range-input" type="number" min="1" max="5000" value={candidateLimit} onChange={e => setCandidateLimit(Number(e.target.value) || 300)} style={{width:90}} />
-            <label className="count-label">Threshold</label>
+            <label className="count-label">Relevance threshold</label>
             <input className="date-range-input" type="number" min="0" max="1" step="0.01" value={similarityThreshold} onChange={e => setSimilarityThreshold(Number(e.target.value) || 0.72)} style={{width:90}} />
             <button className="upload-btn" onClick={() => runSearch(1)}>Search</button>
           </div>
-          <div className="notice">Only a small embedding sample may be loaded. Use this page for threshold checks, not final quality judgment.</div>
+          <div className="notice">Only a small embedding sample may be loaded. Use this page for relevance threshold checks, not final quality judgment.</div>
           <div className="filter-bar">
             {HYBRID_TEST_TERMS.map(term => (
               <button key={term} className={`pill${term === search ? " active" : ""}`} onClick={() => { setSearch(term); runSearch(1, term); }}>
@@ -3441,32 +3477,48 @@ function SearchTestPage() {
           </div>
           {hybrid.error && <div className="notice">Hybrid note: {hybrid.error}</div>}
         </div>
-        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, alignItems:"start"}}>
-          {[
-            ["Direct search", direct, false],
-            ["Hybrid search", hybrid, true],
-          ].map(([title, state, isHybrid]) => (
-            <div className="card" key={title}>
-              <div className="card-header">
-                <span className="card-title">{title}</span>
-                <span className="count-label">{state.meta ? `${state.meta.total.toLocaleString()} rows` : ""}</span>
-              </div>
-              {state.error && !isHybrid && <div className="error-box">{state.error}</div>}
-              <div className="table-wrap">
-                <table style={{minWidth:980}}>
-                  <thead>
-                    <tr>
-                      <th>Product</th><th>MC</th><th>Category</th><th>Manufacturer</th>
-                      <th>Country</th><th>Imports</th><th>Match</th><th>Score</th><th>Type</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.loading ? <SkeletonRows cols={9} rows={8}/> : renderRows(state.data, isHybrid)}
-                  </tbody>
-                </table>
-              </div>
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1.5fr", gap:12, alignItems:"start"}}>
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Direct search</span>
+              <span className="count-label">{direct.meta ? `${direct.meta.total.toLocaleString()} rows` : ""}</span>
             </div>
-          ))}
+            {direct.error && <div className="error-box">{direct.error}</div>}
+            <div className="table-wrap">
+              <table style={{minWidth:820}}>
+                <thead>
+                  <tr>
+                    <th>Product</th><th>MC</th><th>Category</th><th>Manufacturer</th>
+                    <th>Country</th><th>Imports</th><th>Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {direct.loading ? <SkeletonRows cols={7} rows={8}/> : renderDirectRows(direct.data)}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Hybrid search</span>
+              <span className="count-label">{hybrid.meta ? `${hybrid.meta.total.toLocaleString()} rows` : ""}</span>
+            </div>
+            <div className="table-wrap">
+              <table style={{minWidth:1560, tableLayout:"auto"}}>
+                <thead>
+                  <tr>
+                    <th>Product</th><th>MC</th><th>Category</th><th>Imports</th>
+                    <th>Match type</th><th>Semantic</th><th>Relevance</th>
+                    <th>MC bonus</th><th>Category bonus</th><th>Keyword bonus</th>
+                    <th>MC penalty</th><th>Category penalty</th><th>Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hybrid.loading ? <SkeletonRows cols={13} rows={8}/> : renderHybridRows(hybrid.data)}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
         <Pagination meta={hybrid.meta || direct.meta} page={page} setPage={(next) => {
           const nextPage = typeof next === "function" ? next(page) : next;
