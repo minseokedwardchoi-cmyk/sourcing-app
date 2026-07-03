@@ -486,7 +486,7 @@ const ALL_COLS = [
   { key:"sku_name",     label:"제품명",         w:200, filterKey:"sku_name", clickable:"sku" },
   { key:"import_type",  label:"OEM/수입",       w:92,  filterKey:"import_type"             },
   { key:"importer",     label:"수입업체",       w:118, filterKey:"importer"                },
-  { key:"factory",      label:"해외제조업소",   w:110, filterKey:"factory", clickable:"mfr" },
+  { key:"factory",      label:"해외제조업소",   w:230, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:105, filterKey:"country", clickable:"country" },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
   { key:"count_year3",  label:"",               w:78,  isYearCount:3                      },
@@ -677,7 +677,7 @@ function MainDashboard({ navigate }) {
           </div>
         </div>
       </div>
-      <div className="page">
+      <div className="page" style={{maxWidth:1520}}>
         <div className="card">
           <div className="sticky-panel-header" ref={stickyHeaderRef}>
           <div className="card-header">
