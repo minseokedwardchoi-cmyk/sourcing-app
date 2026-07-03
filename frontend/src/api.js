@@ -283,6 +283,11 @@ export function fetchCountryTopItems(country) {
   return request(`/api/countries/${encodeURIComponent(country)}/top-items`);
 }
 
+/** 품목명으로 검색 → 그 품목을 수입하는 국가 목록 (수입금액 내림차순) */
+export function fetchItemCountries(query) {
+  return request("/api/items/countries", { q: query });
+}
+
 /** 국가 상세: 제조사 목록 */
 export function fetchCountryManufacturers(country, { mc, query, sortBy, sortOrder, page, pageSize, dateFrom, dateTo } = {}) {
   return request(`/api/countries/${encodeURIComponent(country)}/manufacturers`, {

@@ -126,10 +126,17 @@ class TopItem:
 
 
 @dataclass
+class ItemAmount:
+    item_name: str
+    amount_usd_k: float
+
+
+@dataclass
 class FetchResult:
     year: str
     top20: list[CountryStat]
-    top_items: dict[str, list[TopItem]]    # country_code → items
+    top_items: dict[str, list[TopItem]]      # country_code → TOP 10 (국가별 페이지용)
+    all_items: dict[str, list[ItemAmount]]   # country_code → 전체 품목 (품목 검색용)
     errors: list[str] = field(default_factory=list)
 
 
@@ -177,12 +184,12 @@ async def _fetch_top20_httpx(client: httpx.AsyncClient, year: str) -> list[Count
     return result
 
 
-async def _fetch_country_top_items_httpx(
-    client: httpx.AsyncClient, year: str, top_n: int = 10
-) -> dict[str, list[TopItem]]:
+async def _fetch_country_items_httpx(
+    client: httpx.AsyncClient, year: str
+) -> dict[str, list[ItemAmount]]:
     """
     '월별 제조국가별 품목별 수입 현황' 화면(selectCFSBB01F050)에서 전체 국가의
-    품목별 연간 수입금액을 한 번에 가져와 국가별 TOP N을 계산한다.
+    품목별 연간 수입금액을 한 번에 가져온다 (국가당 전체 품목, 순위/상위 N 제한 없음).
 
     응답 각 행은 (국가, 대분류/중분류/소분류) 계층이며, 레벨마다 '소계' 행과
     국가 전체 '합계' 행이 함께 내려온다:
@@ -211,37 +218,41 @@ async def _fetch_country_top_items_httpx(
     data = resp.json()
     rows = data.get("dlt_DataList") or []
 
-    country_totals: dict[str, float] = {}
-    items_by_country: dict[str, list[tuple[str, float]]] = {}
+    items_by_country: dict[str, list[ItemAmount]] = {}
 
     for r in rows:
         code = str(r.get("ntncd") or "").strip()
         if not code:
             continue
-        tot = float(r.get("tot") or 0)
 
         if str(r.get("itmLclsCd")) == "0":
-            country_totals[code] = tot
-            continue
+            continue  # 국가 합계 행 — 품목이 아니므로 제외
 
         item_name = r.get("itmSclsNm")
         if not item_name or item_name == "소계":
-            continue
+            continue  # 대분류/중분류 소계 행 제외
 
-        items_by_country.setdefault(code, []).append((str(item_name).strip(), tot))
+        tot = float(r.get("tot") or 0)
+        items_by_country.setdefault(code, []).append(ItemAmount(str(item_name).strip(), tot))
 
+    log.info("품목별 수입현황 수집 (httpx): %d개국", len(items_by_country))
+    return items_by_country
+
+
+def _top_items_from_all(
+    all_items: dict[str, list[ItemAmount]], top_n: int = 10
+) -> dict[str, list[TopItem]]:
+    """국가별 전체 품목 목록에서 국가 전체 대비 비중 기준 TOP N을 뽑는다."""
     result: dict[str, list[TopItem]] = {}
-    for code, items in items_by_country.items():
-        total = country_totals.get(code) or sum(t for _, t in items)
+    for code, items in all_items.items():
+        total = sum(i.amount_usd_k for i in items)
         if not total:
             continue
-        ranked = sorted(items, key=lambda kv: kv[1], reverse=True)[:top_n]
+        ranked = sorted(items, key=lambda i: i.amount_usd_k, reverse=True)[:top_n]
         result[code] = [
-            TopItem(rank=i + 1, item_name=name, chart_rate=round(tot / total * 100, 2))
-            for i, (name, tot) in enumerate(ranked)
+            TopItem(rank=i + 1, item_name=item.item_name, chart_rate=round(item.amount_usd_k / total * 100, 2))
+            for i, item in enumerate(ranked)
         ]
-
-    log.info("품목별 수입현황 수집 (httpx): %d개국", len(result))
     return result
 
 
@@ -253,7 +264,7 @@ async def fetch_all_stats(year: str | None = None) -> FetchResult:
     if year is None:
         year = str(datetime.date.today().year - 1)  # 당해연도는 미완성이므로 전년도 사용
 
-    result = FetchResult(year=year, top20=[], top_items={})
+    result = FetchResult(year=year, top20=[], top_items={}, all_items={})
 
     async with httpx.AsyncClient(headers=_HEADERS, follow_redirects=True) as client:
         await _init_session(client)
@@ -265,7 +276,8 @@ async def fetch_all_stats(year: str | None = None) -> FetchResult:
             result.errors.append(f"top20 실패: {e}")
 
         try:
-            result.top_items = await _fetch_country_top_items_httpx(client, year)
+            result.all_items = await _fetch_country_items_httpx(client, year)
+            result.top_items = _top_items_from_all(result.all_items)
         except Exception as e:
             log.warning("품목별 수입현황 수집 실패: %s", e)
             result.errors.append(f"품목 수집 실패: {e}")
@@ -277,15 +289,16 @@ async def fetch_all_stats(year: str | None = None) -> FetchResult:
 
 async def upsert_stats_to_db(result: FetchResult, conn) -> dict:
     """
-    FetchResult를 country_import_stat / country_top_item 테이블에 upsert.
-    conn: SQLAlchemy AsyncConnection (engine.begin() 컨텍스트)
+    FetchResult를 country_import_stat / country_top_item / country_item_amount
+    테이블에 upsert. conn: SQLAlchemy AsyncConnection (engine.begin() 컨텍스트)
     """
     from sqlalchemy import text
 
     updated_countries = 0
     updated_items = 0
+    updated_item_amounts = 0
 
-    # ① 전체 삭제 후 재삽입 — 순위 밖으로 빠진 나라는 자동 제거됨
+    # 매번 전체 삭제 후 재삽입 — 이번엔 더 이상 안 나오는 국가/품목은 자동 제거됨
     await conn.execute(text("DELETE FROM country_import_stat"))
     for stat in result.top20:
         if not stat.country_ko or stat.amount_usd_k == 0:
@@ -296,14 +309,13 @@ async def upsert_stats_to_db(result: FetchResult, conn) -> dict:
         """), {"country": normalize_country_name(stat.country_ko), "amount": stat.amount_usd_k})
         updated_countries += 1
 
+    await conn.execute(text("DELETE FROM country_top_item"))
     for code, items in result.top_items.items():
         ko = COUNTRY_CODE_TO_KO.get(code, code)
         for item in items:
             await conn.execute(text("""
                 INSERT INTO country_top_item (country, rank, item_name, pct)
                 VALUES (:country, :rank, :item_name, :pct)
-                ON CONFLICT (country, rank)
-                DO UPDATE SET item_name = EXCLUDED.item_name, pct = EXCLUDED.pct
             """), {
                 "country":   normalize_country_name(ko),
                 "rank":      item.rank,
@@ -312,10 +324,29 @@ async def upsert_stats_to_db(result: FetchResult, conn) -> dict:
             })
             updated_items += 1
 
-    log.info("DB upsert 완료: 국가 %d개, 품목 %d건", updated_countries, updated_items)
+    await conn.execute(text("DELETE FROM country_item_amount"))
+    for code, items in result.all_items.items():
+        ko = COUNTRY_CODE_TO_KO.get(code, code)
+        for item in items:
+            await conn.execute(text("""
+                INSERT INTO country_item_amount (country, item_name, amount_usd_k)
+                VALUES (:country, :item_name, :amount)
+                ON CONFLICT (country, item_name) DO UPDATE SET amount_usd_k = EXCLUDED.amount_usd_k
+            """), {
+                "country":   normalize_country_name(ko),
+                "item_name": item.item_name,
+                "amount":    item.amount_usd_k,
+            })
+            updated_item_amounts += 1
+
+    log.info(
+        "DB upsert 완료: 국가 %d개, TOP10 품목 %d건, 전체 품목 %d건",
+        updated_countries, updated_items, updated_item_amounts,
+    )
     return {
-        "year":              result.year,
-        "countries_updated": updated_countries,
-        "items_updated":     updated_items,
-        "errors":            result.errors,
+        "year":                  result.year,
+        "countries_updated":     updated_countries,
+        "items_updated":         updated_items,
+        "item_amounts_updated":  updated_item_amounts,
+        "errors":                result.errors,
     }

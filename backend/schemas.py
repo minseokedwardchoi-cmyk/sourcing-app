@@ -198,6 +198,19 @@ class CountryAmountShareResponse(BaseModel):
     items: list[CountryAmountShareRow]
 
 
+# ─── 품목별 국가 검색 (국가별 지도 페이지) ─────────────────────────────────────
+class ItemCountryRow(BaseModel):
+    country:      str
+    amount_usd_k: float
+    pct:          float = Field(..., description="검색된 품목의 국가간 총 수입금액 대비 이 국가의 비중 (%)")
+
+
+class ItemCountriesResponse(BaseModel):
+    query:               str
+    total_amount_usd_k:  float
+    countries:           list[ItemCountryRow] = Field(default_factory=list)
+
+
 # ─── 공장별 보기 페이지 ───────────────────────────────────────────────────────
 class FactoryViewRow(BaseModel):
     category:      Optional[str]  = Field(None)
