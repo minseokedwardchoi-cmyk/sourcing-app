@@ -5,6 +5,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from country_utils import normalize_country_name
 
 
 CONTACT_FIELD_MAP = {
@@ -113,7 +114,7 @@ async def import_contacts(
 
     for _, row in df.iterrows():
         factory = clean_value(row.get("factory"))
-        country = clean_value(row.get("country"))
+        country = normalize_country_name(clean_value(row.get("country")))
 
         email = clean_value(row.get("email"))
         homepage = clean_value(row.get("homepage"))

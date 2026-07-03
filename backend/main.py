@@ -233,9 +233,8 @@ async def _startup_bg():
                 await conn.execute(text(sql))
         except Exception:
             pass
-
     try:
-        await _refresh_column_values_cache()
+        await refresh_mvs()
     except Exception:
         pass
     print("STARTUP BG COMPLETE")
@@ -267,11 +266,26 @@ async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        await _normalize_country_names(conn)
         await _seed_country_stats(conn)
 
     asyncio.create_task(_startup_bg())
 
 
+
+
+async def _normalize_country_names(conn):
+    """Keep legacy country labels aligned with current display/search labels."""
+    for table in ("import_history", "country_import_stat", "country_top_item"):
+        await conn.execute(text(f"""
+            UPDATE {table}
+            SET country = :new_country
+            WHERE country IN (:old_country_a, :old_country_b)
+        """), {
+            "new_country": "기타",
+            "old_country_a": "기타(ZZ)",
+            "old_country_b": "기타 (ZZ)",
+        })
 
 
 async def _seed_country_stats(conn):
@@ -456,11 +470,13 @@ async def get_column_values(
             params.update(in_keys)
 
     where_clause = " AND ".join(conds)
+    order_clause = f"CASE WHEN {col} = '기타' THEN 1 ELSE 0 END, {col}" if col == "country" else col
     r = await db.execute(text(f"""
-        SELECT DISTINCT {col}
+        SELECT {col}
         FROM {source_sql}
         WHERE {where_clause}
-        ORDER BY {col}
+        GROUP BY {col}
+        ORDER BY {order_clause}
     """), params)
     return [row[0] for row in r.fetchall()]
 

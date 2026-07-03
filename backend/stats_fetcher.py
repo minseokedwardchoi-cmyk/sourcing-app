@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from country_utils import normalize_country_name
 
 log = logging.getLogger(__name__)
 
@@ -193,7 +194,7 @@ async def _fetch_top20_httpx(client: httpx.AsyncClient, year: str) -> list[Count
         if not ko:
             continue
         result.append(CountryStat(
-            country_ko=ko,
+            country_ko=normalize_country_name(ko),
             country_code=KO_TO_CODE.get(ko, ""),
             amount_usd_k=amount,
             share_pct=pct,
@@ -306,7 +307,7 @@ async def _fetch_with_playwright(year: str) -> tuple[list[CountryStat], dict[str
                     ko = (r.get("ntnNm") or r.get("col1") or "").strip()
                     amt = _parse_amount(r.get("sumAmt") or r.get("col3") or "0")
                     top20.append(CountryStat(
-                        country_ko=ko,
+                        country_ko=normalize_country_name(ko),
                         country_code=KO_TO_CODE.get(ko, ""),
                         amount_usd_k=amt,
                         share_pct=round(amt / total_amt * 100, 1) if total_amt else 0.0,
@@ -422,7 +423,7 @@ async def upsert_stats_to_db(result: FetchResult, conn) -> dict:
         await conn.execute(text("""
             INSERT INTO country_import_stat (country, total_amount_usd_k)
             VALUES (:country, :amount)
-        """), {"country": stat.country_ko, "amount": stat.amount_usd_k})
+        """), {"country": normalize_country_name(stat.country_ko), "amount": stat.amount_usd_k})
         updated_countries += 1
 
     for code, items in result.top_items.items():
@@ -434,7 +435,7 @@ async def upsert_stats_to_db(result: FetchResult, conn) -> dict:
                 ON CONFLICT (country, rank)
                 DO UPDATE SET item_name = EXCLUDED.item_name, pct = EXCLUDED.pct
             """), {
-                "country":   ko,
+                "country":   normalize_country_name(ko),
                 "rank":      item.rank,
                 "item_name": item.item_name,
                 "pct":       item.chart_rate,

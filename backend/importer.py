@@ -15,6 +15,7 @@ from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from models import ImportHistory
+from country_utils import normalize_country_name
 
 # ─── 파일 1: 헤더 있는 경우의 컬럼명 → DB 필드명 매핑 ────────────────────────
 FIELD_MAP: dict[str, str] = {
@@ -391,7 +392,7 @@ async def import_dataframe(df: pd.DataFrame, db: AsyncSession) -> dict:
                 "import_type":  normalize_oem(getattr(row, "import_type", None)),
                 "factory":      safe_str(getattr(row, "factory", None)),
                 "manufacturer": normalize_name(getattr(row, "factory", None)),
-                "country":      safe_str(getattr(row, "country", None)),
+                "country":      normalize_country_name(safe_str(getattr(row, "country", None))),
                 "email":        safe_str(getattr(row, "email", None)) if hasattr(row, "email") else None,
                 "homepage":     safe_str(getattr(row, "homepage", None)) if hasattr(row, "homepage") else None,
                 "import_date":  safe_date(getattr(row, "import_date", None)) if hasattr(row, "import_date") else None,
