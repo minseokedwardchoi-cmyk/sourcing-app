@@ -10,7 +10,7 @@ os.environ.setdefault("EMBEDDING_DIMENSIONS", "384")
 import hybrid_search
 from hybrid_embeddings import EmbeddingResult
 from hybrid_relevance import clamp_relevance_score, compute_relevance_components, detect_intent
-from hybrid_vector_store import SemanticSql
+from hybrid_vector_store import PgVectorSearchRepository, SemanticSql
 
 
 # ─── A. relevance formula unit tests ────────────────────────────────────────
@@ -50,6 +50,49 @@ class RelevanceFormulaTest(unittest.TestCase):
         self.assertEqual(breakdown.best_keyword_bonus, 0.0, "category mismatch must suppress keyword bonus")
         self.assertAlmostEqual(relevance, 0.82)
         self.assertLess(relevance, 0.86)
+
+
+# ─── Regression guard: asyncpg silently resolves `CASE WHEN x THEN :bind
+# ELSE 0 END` to 0 even when the condition is true, because it cannot infer
+# the bind parameter's type from an untyped integer ELSE branch. Every
+# generated bonus/penalty CASE expression must explicitly CAST(:param AS
+# float) and use a float ELSE literal (0.0), never a bare `0`. This was a
+# real bug caught by running the generated SQL against actual Postgres+
+# pgvector: bonuses read as 0.0 in production despite matching MC/category.
+class GeneratedSqlAsyncpgCastTest(unittest.TestCase):
+    def test_bonus_case_expressions_cast_bind_params_to_float(self):
+        from hybrid_relevance import QueryIntent
+
+        intent = QueryIntent(
+            mc_intent="참치",
+            category_intent=("가공식품", "통조림"),
+            keyword_terms=("참치", "tuna"),
+        )
+        repo = PgVectorSearchRepository()
+        semantic_sql = repo.semantic_sql(
+            query_vector=[0.1] * 384,
+            model="intfloat/multilingual-e5-small",
+            dimensions=384,
+            candidate_limit=300,
+            similarity_threshold=0.72,
+            intent=intent,
+        )
+        for value_param in (
+            "mc_intent_bonus_value",
+            "mc_mismatch_penalty_value",
+            "category_intent_bonus_value",
+            "category_mismatch_penalty_value",
+            "best_keyword_bonus_value",
+        ):
+            self.assertIn(
+                f"CAST(:{value_param} AS float)",
+                semantic_sql.cte,
+                f"{value_param} must be explicitly cast to float in its CASE THEN branch",
+            )
+        self.assertNotIn(
+            "ELSE 0 END", semantic_sql.cte,
+            "bare integer ELSE 0 breaks asyncpg's bind-param type inference; use 0.0",
+        )
 
 
 # ─── Fakes for search_hybrid integration tests ──────────────────────────────

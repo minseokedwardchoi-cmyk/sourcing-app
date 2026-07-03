@@ -51,15 +51,20 @@ def _intent_sql_fragments(intent: QueryIntent, params: dict) -> dict[str, str]:
     params["category_mismatch_penalty_value"] = RELEVANCE_CATEGORY_MISMATCH_PENALTY
     params["best_keyword_bonus_value"] = RELEVANCE_KEYWORD_BONUS
 
+    # NOTE: the THEN branch bind param must be explicitly cast to float, and the
+    # ELSE branch must be a float literal (0.0, not bare 0). Without both, asyncpg
+    # cannot infer the bind parameter's type from an untyped integer ELSE branch
+    # and the CASE silently evaluates to 0 even when the WHEN condition is true.
     if intent.mc_intent:
         params["intent_mc"] = intent.mc_intent
-        mc_intent_bonus_case = "CASE WHEN mc_key = :intent_mc THEN :mc_intent_bonus_value ELSE 0 END"
+        mc_intent_bonus_case = "CASE WHEN mc_key = :intent_mc THEN CAST(:mc_intent_bonus_value AS float) ELSE 0.0 END"
         mc_mismatch_penalty_case = (
-            "CASE WHEN mc_key <> '' AND mc_key <> :intent_mc THEN :mc_mismatch_penalty_value ELSE 0 END"
+            "CASE WHEN mc_key <> '' AND mc_key <> :intent_mc "
+            "THEN CAST(:mc_mismatch_penalty_value AS float) ELSE 0.0 END"
         )
     else:
-        mc_intent_bonus_case = "0::float"
-        mc_mismatch_penalty_case = "0::float"
+        mc_intent_bonus_case = "0.0::float"
+        mc_mismatch_penalty_case = "0.0::float"
 
     if intent.category_intent:
         cat_param_names = []
@@ -69,15 +74,15 @@ def _intent_sql_fragments(intent: QueryIntent, params: dict) -> dict[str, str]:
             cat_param_names.append(f":{key}")
         in_list = ", ".join(cat_param_names)
         category_intent_bonus_case = (
-            f"CASE WHEN category_key IN ({in_list}) THEN :category_intent_bonus_value ELSE 0 END"
+            f"CASE WHEN category_key IN ({in_list}) THEN CAST(:category_intent_bonus_value AS float) ELSE 0.0 END"
         )
         category_mismatch_flag = f"(category_key <> '' AND category_key NOT IN ({in_list}))"
         category_mismatch_penalty_case = (
-            f"CASE WHEN {category_mismatch_flag} THEN :category_mismatch_penalty_value ELSE 0 END"
+            f"CASE WHEN {category_mismatch_flag} THEN CAST(:category_mismatch_penalty_value AS float) ELSE 0.0 END"
         )
     else:
-        category_intent_bonus_case = "0::float"
-        category_mismatch_penalty_case = "0::float"
+        category_intent_bonus_case = "0.0::float"
+        category_mismatch_penalty_case = "0.0::float"
         category_mismatch_flag = "FALSE"
 
     if intent.keyword_terms:
@@ -89,10 +94,10 @@ def _intent_sql_fragments(intent: QueryIntent, params: dict) -> dict[str, str]:
         kw_match_sql = "(" + " OR ".join(kw_conds) + ")"
         best_keyword_bonus_case = (
             f"CASE WHEN {kw_match_sql} AND NOT {category_mismatch_flag} "
-            f"THEN :best_keyword_bonus_value ELSE 0 END"
+            f"THEN CAST(:best_keyword_bonus_value AS float) ELSE 0.0 END"
         )
     else:
-        best_keyword_bonus_case = "0::float"
+        best_keyword_bonus_case = "0.0::float"
 
     return {
         "mc_intent_bonus_case": mc_intent_bonus_case,
