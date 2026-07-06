@@ -3333,12 +3333,12 @@ function SearchTestPage() {
   const [search, setSearch] = useState("참치캔");
   const [page, setPage] = useState(1);
   const [candidateLimit, setCandidateLimit] = useState(300);
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.72);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.90);
   const [request, setRequest] = useState({
     search: "참치캔",
     page: 1,
     candidateLimit: 300,
-    similarityThreshold: 0.72,
+    similarityThreshold: 0.90,
   });
   const [direct, setDirect] = useState({ data: [], meta: null, elapsed: null, error: null, loading: false });
   const [hybrid, setHybrid] = useState({
@@ -3464,7 +3464,7 @@ function SearchTestPage() {
             <label className="count-label">Candidates</label>
             <input className="date-range-input" type="number" min="1" max="5000" value={candidateLimit} onChange={e => setCandidateLimit(Number(e.target.value) || 300)} style={{width:90}} />
             <label className="count-label">Relevance threshold</label>
-            <input className="date-range-input" type="number" min="0" max="1" step="0.01" value={similarityThreshold} onChange={e => setSimilarityThreshold(Number(e.target.value) || 0.72)} style={{width:90}} />
+            <input className="date-range-input" type="number" min="0" max="1" step="0.01" value={similarityThreshold} onChange={e => setSimilarityThreshold(Number(e.target.value) || 0.90)} style={{width:90}} />
             <button className="upload-btn" onClick={() => runSearch(1)}>Search</button>
           </div>
           <div className="notice">Only a small embedding sample may be loaded. Use this page for relevance threshold checks, not final quality judgment.</div>

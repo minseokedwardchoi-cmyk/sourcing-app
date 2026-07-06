@@ -60,7 +60,7 @@ HYBRID_CANDIDATE_LIMIT = env_int("HYBRID_CANDIDATE_LIMIT", 300)
 # Wire/query-param name stays "similarity_threshold" for API compatibility, but this
 # value is applied against the final relevance_score (semantic + bonuses - penalties),
 # not the raw semantic_score. Treat it as "Relevance threshold" everywhere in UI/docs.
-HYBRID_SIMILARITY_THRESHOLD = env_float("HYBRID_SIMILARITY_THRESHOLD", 0.72)
+HYBRID_SIMILARITY_THRESHOLD = env_float("HYBRID_SIMILARITY_THRESHOLD", 0.90)
 QUERY_EMBEDDING_CACHE_TTL = env_int("QUERY_EMBEDDING_CACHE_TTL", 300)
 
 # Relevance score bonus/penalty constants. Single source of truth - both the SQL
