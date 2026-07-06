@@ -273,8 +273,17 @@ async def main():
                             await upsert_success(session, row, embedding_result.vector, text_value)
                             counters.succeeded += 1
                     except Exception as exc:
+                        # The failed embed/upsert may have left the session's
+                        # transaction aborted (e.g. a dropped DB connection
+                        # mid-batch); reusing the session without rolling
+                        # back first raises PendingRollbackError and kills
+                        # the whole run instead of just this chunk.
+                        await session.rollback()
                         for row in chunk:
-                            await mark_failed(session, row, str(exc))
+                            try:
+                                await mark_failed(session, row, str(exc))
+                            except Exception:
+                                await session.rollback()
                             counters.failed += 1
                     await session.commit()
                     print(
