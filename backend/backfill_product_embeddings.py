@@ -46,9 +46,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retry-failed", action="store_true", help="Retry rows currently marked failed for the same text hash.")
     parser.add_argument(
         "--sample-mode",
-        choices=["ordered", "random", "terms"],
+        choices=["ordered", "random", "terms", "popular"],
         default="ordered",
-        help="Candidate ordering for small validation runs.",
+        help="Candidate ordering for small validation runs. 'popular' processes "
+             "the highest import_count products first so real search traffic "
+             "benefits before the long tail finishes.",
     )
     parser.add_argument(
         "--price-per-1m-tokens",
@@ -99,17 +101,21 @@ async def load_candidates(
         order_sql = "md5(e.sku_name || '|' || coalesce(e.mc, '') || '|' || coalesce(e.category, ''))"
     elif sample_mode == "terms":
         order_sql = f"CASE WHEN ({term_conditions}) THEN 0 ELSE 1 END, md5(e.sku_name || '|' || coalesce(e.mc, '') || '|' || coalesce(e.category, ''))"
+    elif sample_mode == "popular":
+        order_sql = "e.import_count DESC, e.sku_name, e.mc, e.category"
     else:
         order_sql = "e.sku_name, e.mc, e.category"
 
     result = await session.execute(text(f"""
         WITH products AS (
-            SELECT DISTINCT
+            SELECT
                 trim(sku_name) AS sku_name,
                 nullif(trim(coalesce(mc, '')), '') AS mc,
-                nullif(trim(coalesce(category, '')), '') AS category
+                nullif(trim(coalesce(category, '')), '') AS category,
+                COUNT(*)::int AS import_count
             FROM import_history
             WHERE sku_name IS NOT NULL AND trim(sku_name) <> ''
+            GROUP BY trim(sku_name), nullif(trim(coalesce(mc, '')), ''), nullif(trim(coalesce(category, '')), '')
         ),
         enriched AS (
             SELECT
