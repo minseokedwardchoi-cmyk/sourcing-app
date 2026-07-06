@@ -625,10 +625,10 @@ function MainDashboard({ navigate }) {
   // 기간 필터 변경 시 1페이지로
   useEffect(()=>{ setPage(1); },[dateFrom,dateTo]);
 
-  // 데이터
+  // 데이터 (하이브리드 검색: HYBRID_SEARCH_ENABLED가 꺼져있으면 기존 정확검색과 동일하게 동작)
   useEffect(()=>{
     setLoading(true); setError(null);
-    fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50,colFilters,dateFrom,dateTo})
+    fetchHybridSearch({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50,colFilters,dateFrom,dateTo,candidateLimit:300,similarityThreshold:0.9})
       .then(r=>{setData(r.data);setMeta(r.meta);})
       .catch(e=>setError(e.message))
       .finally(()=>setLoading(false));
@@ -759,7 +759,7 @@ function MainDashboard({ navigate }) {
             <button className="icon-btn" onClick={async()=>{
               if(!meta||meta.total===0){downloadCSV(data,"sku_history.csv");return;}
               try{
-                const r=await fetchSkuHistory({search:debSearch,competitor,sortBy,sortDir,page:1,pageSize:meta.total,colFilters,dateFrom,dateTo});
+                const r=await fetchHybridSearch({search:debSearch,competitor,sortBy,sortDir,page:1,pageSize:meta.total,colFilters,dateFrom,dateTo,candidateLimit:300,similarityThreshold:0.9});
                 downloadCSV(r.data,"sku_history.csv");
               }catch{downloadCSV(data,"sku_history.csv");}
             }}>⬇ CSV</button>
