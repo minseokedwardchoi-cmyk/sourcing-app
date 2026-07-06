@@ -41,9 +41,9 @@ END $$;
 
 -- Verification
 SELECT
-    indexname,
+    indexrelname AS indexname,
     pg_size_pretty(pg_relation_size(indexrelid)) AS index_size
 FROM pg_stat_user_indexes
 WHERE relname = 'product_embedding'
-  AND indexname LIKE 'idx_product_embedding_hnsw_cosine_%'
-ORDER BY indexname;
+  AND indexrelname LIKE 'idx_product_embedding_hnsw_cosine_%'
+ORDER BY indexrelname;
