@@ -187,7 +187,9 @@ async def search_hybrid(
 
     intent = detect_intent(query)
 
-    if hybrid_enabled and query_embedding:
+    use_semantic = hybrid_enabled and bool(query_embedding)
+
+    if use_semantic:
         semantic_sql = vector_repository.semantic_sql(
             query_vector=query_embedding.vector,
             model=query_embedding.model,
@@ -205,76 +207,121 @@ async def search_hybrid(
         semantic_union = ""
         semantic_union_count = ""
 
-    data_sql = f"""
-        WITH source_rows AS (
-            SELECT * FROM {source_sql}
-        ),
-        filtered_source AS (
-            SELECT *
-            FROM source_rows
-            WHERE 1=1
-              {competitor_cond}
-              {col_filter_conds}
-        ),
-        {semantic_cte}
-        matched AS (
+    if use_semantic:
+        # Semantic candidates live in a separate vector table keyed by
+        # (sku_name, mc, category), so they need a join back onto
+        # filtered_source to pick up the aggregate columns (import_count,
+        # latest_import, ...). Exact matches already carry those columns,
+        # but they're funnelled through the same matched/deduped/thresholded
+        # pipeline so exact and semantic rows can be merged and deduped
+        # against each other before the single join below.
+        data_sql = f"""
+            WITH source_rows AS (
+                SELECT * FROM {source_sql}
+            ),
+            filtered_source AS (
+                SELECT *
+                FROM source_rows
+                WHERE 1=1
+                  {competitor_cond}
+                  {col_filter_conds}
+            ),
+            {semantic_cte}
+            matched AS (
+                SELECT
+                    category, mc, sku_name, import_type, importer, manufacturer, factory, country,
+                    'exact' AS match_type,
+                    NULL::float AS semantic_score,
+                    NULL::float AS relevance_score,
+                    NULL::float AS mc_intent_bonus,
+                    NULL::float AS category_intent_bonus,
+                    NULL::float AS best_keyword_bonus,
+                    NULL::float AS mc_mismatch_penalty,
+                    NULL::float AS category_mismatch_penalty
+                FROM filtered_source
+                WHERE 1=1
+                  {direct_search_cond}
+                {semantic_union}
+            ),
+            deduped AS (
+                SELECT
+                    category, mc, sku_name, import_type, importer, manufacturer, factory, country,
+                    CASE WHEN bool_or(match_type = 'exact') THEN 'exact' ELSE 'semantic' END AS match_type,
+                    MAX(semantic_score) AS semantic_score,
+                    MAX(relevance_score) AS relevance_score,
+                    MAX(mc_intent_bonus) AS mc_intent_bonus,
+                    MAX(category_intent_bonus) AS category_intent_bonus,
+                    MAX(best_keyword_bonus) AS best_keyword_bonus,
+                    MAX(mc_mismatch_penalty) AS mc_mismatch_penalty,
+                    MAX(category_mismatch_penalty) AS category_mismatch_penalty
+                FROM matched
+                GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+            ),
+            thresholded AS (
+                SELECT *
+                FROM deduped
+                WHERE match_type = 'exact'
+                   OR relevance_score >= :similarity_threshold
+            )
             SELECT
-                category, mc, sku_name, import_type, importer, manufacturer, factory, country,
-                'exact' AS match_type,
+                s.category, s.mc, s.sku_name, s.import_type, s.importer,
+                s.import_count, s.manufacturer, s.factory, s.country,
+                s.email, s.latest_import,
+                s.base_year, s.count_year1, s.count_year2, s.count_year3,
+                d.match_type, d.semantic_score, d.relevance_score,
+                d.mc_intent_bonus, d.category_intent_bonus, d.best_keyword_bonus,
+                d.mc_mismatch_penalty, d.category_mismatch_penalty,
+                COUNT(*) OVER() AS total_count
+            FROM filtered_source s
+            JOIN thresholded d
+              ON s.category IS NOT DISTINCT FROM d.category
+             AND s.mc IS NOT DISTINCT FROM d.mc
+             AND s.sku_name = d.sku_name
+             AND s.import_type IS NOT DISTINCT FROM d.import_type
+             AND s.importer IS NOT DISTINCT FROM d.importer
+             AND s.manufacturer IS NOT DISTINCT FROM d.manufacturer
+             AND s.factory IS NOT DISTINCT FROM d.factory
+             AND s.country IS NOT DISTINCT FROM d.country
+            ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
+            LIMIT :limit OFFSET :offset
+        """
+    else:
+        # No semantic candidates to merge in, so every row is already a
+        # complete, unique exact match straight out of filtered_source.
+        # Skip the matched/deduped/self-join pipeline entirely (it would
+        # otherwise regroup and self-join the whole table on every request,
+        # including plain browsing with no search term) and query
+        # filtered_source directly, exactly like the pre-hybrid endpoint did.
+        data_sql = f"""
+            WITH source_rows AS (
+                SELECT * FROM {source_sql}
+            ),
+            filtered_source AS (
+                SELECT *
+                FROM source_rows
+                WHERE 1=1
+                  {competitor_cond}
+                  {col_filter_conds}
+                  {direct_search_cond}
+            )
+            SELECT
+                category, mc, sku_name, import_type, importer,
+                import_count, manufacturer, factory, country,
+                email, latest_import,
+                base_year, count_year1, count_year2, count_year3,
+                'exact'::text AS match_type,
                 NULL::float AS semantic_score,
                 NULL::float AS relevance_score,
                 NULL::float AS mc_intent_bonus,
                 NULL::float AS category_intent_bonus,
                 NULL::float AS best_keyword_bonus,
                 NULL::float AS mc_mismatch_penalty,
-                NULL::float AS category_mismatch_penalty
+                NULL::float AS category_mismatch_penalty,
+                COUNT(*) OVER() AS total_count
             FROM filtered_source
-            WHERE 1=1
-              {direct_search_cond}
-            {semantic_union}
-        ),
-        deduped AS (
-            SELECT
-                category, mc, sku_name, import_type, importer, manufacturer, factory, country,
-                CASE WHEN bool_or(match_type = 'exact') THEN 'exact' ELSE 'semantic' END AS match_type,
-                MAX(semantic_score) AS semantic_score,
-                MAX(relevance_score) AS relevance_score,
-                MAX(mc_intent_bonus) AS mc_intent_bonus,
-                MAX(category_intent_bonus) AS category_intent_bonus,
-                MAX(best_keyword_bonus) AS best_keyword_bonus,
-                MAX(mc_mismatch_penalty) AS mc_mismatch_penalty,
-                MAX(category_mismatch_penalty) AS category_mismatch_penalty
-            FROM matched
-            GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
-        ),
-        thresholded AS (
-            SELECT *
-            FROM deduped
-            WHERE match_type = 'exact'
-               OR relevance_score >= :similarity_threshold
-        )
-        SELECT
-            s.category, s.mc, s.sku_name, s.import_type, s.importer,
-            s.import_count, s.manufacturer, s.factory, s.country,
-            s.email, s.latest_import,
-            s.base_year, s.count_year1, s.count_year2, s.count_year3,
-            d.match_type, d.semantic_score, d.relevance_score,
-            d.mc_intent_bonus, d.category_intent_bonus, d.best_keyword_bonus,
-            d.mc_mismatch_penalty, d.category_mismatch_penalty,
-            COUNT(*) OVER() AS total_count
-        FROM filtered_source s
-        JOIN thresholded d
-          ON s.category IS NOT DISTINCT FROM d.category
-         AND s.mc IS NOT DISTINCT FROM d.mc
-         AND s.sku_name = d.sku_name
-         AND s.import_type IS NOT DISTINCT FROM d.import_type
-         AND s.importer IS NOT DISTINCT FROM d.importer
-         AND s.manufacturer IS NOT DISTINCT FROM d.manufacturer
-         AND s.factory IS NOT DISTINCT FROM d.factory
-         AND s.country IS NOT DISTINCT FROM d.country
-        ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
-        LIMIT :limit OFFSET :offset
-    """
+            ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
+            LIMIT :limit OFFSET :offset
+        """
 
     try:
         rows_result = await db.execute(text(data_sql), params)
@@ -288,7 +335,7 @@ async def search_hybrid(
             total = rows[0]["total_count"]
         elif page == 1:
             total = 0
-        else:
+        elif use_semantic:
             count_sql = f"""
                 WITH source_rows AS (
                     SELECT * FROM {source_sql}
@@ -334,8 +381,25 @@ async def search_hybrid(
             """
             count_result = await db.execute(text(count_sql), params)
             total = count_result.scalar() or 0
+        else:
+            count_sql = f"""
+                WITH source_rows AS (
+                    SELECT * FROM {source_sql}
+                ),
+                filtered_source AS (
+                    SELECT *
+                    FROM source_rows
+                    WHERE 1=1
+                      {competitor_cond}
+                      {col_filter_conds}
+                      {direct_search_cond}
+                )
+                SELECT COUNT(*) FROM filtered_source
+            """
+            count_result = await db.execute(text(count_sql), params)
+            total = count_result.scalar() or 0
     except Exception as exc:
-        if hybrid_enabled:
+        if use_semantic:
             await db.rollback()
             return await search_hybrid(
                 db,
