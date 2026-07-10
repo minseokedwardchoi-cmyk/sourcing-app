@@ -46,11 +46,20 @@ class LocalSentenceTransformerEmbeddingProvider:
         async with self._model_lock:
             model = self._models.get(key)
             if model is None:
-                from sentence_transformers import SentenceTransformer
-
-                model = SentenceTransformer(model_name, device=device)
+                # First load (per process) downloads model files from the HF
+                # Hub and deserializes the weights - this can take many
+                # seconds. Run it in a thread so it doesn't block the event
+                # loop and freeze every other in-flight request (including
+                # unrelated ones and health checks) for the duration.
+                model = await asyncio.to_thread(self._load_model, model_name, device)
                 self._models[key] = model
             return model
+
+    @staticmethod
+    def _load_model(model_name: str, device: str):
+        from sentence_transformers import SentenceTransformer
+
+        return SentenceTransformer(model_name, device=device)
 
     def _validate(self, vector: list[float], expected_dimensions: int):
         if len(vector) != expected_dimensions:
