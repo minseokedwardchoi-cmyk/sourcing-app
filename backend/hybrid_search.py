@@ -125,6 +125,21 @@ def _passes_relevance_threshold(row: dict, threshold: float) -> bool:
     return relevance is not None and float(relevance) >= threshold
 
 
+async def warmup_embedding_model() -> None:
+    """Eagerly load the embedding model in the background at process
+    startup. Without this, the first real search request after a deploy or
+    restart pays for the model download + deserialize (many seconds) on the
+    event loop thread, which used to block the whole process - see
+    hybrid_embeddings.LocalSentenceTransformerEmbeddingProvider._get_model.
+    """
+    if not HYBRID_SEARCH_ENABLED:
+        return
+    try:
+        await _DEFAULT_EMBEDDING_PROVIDER.embed_query("warmup")
+    except Exception:
+        log.exception("hybrid embedding warmup failed")
+
+
 async def search_hybrid(
     db: AsyncSession,
     *,

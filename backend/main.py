@@ -54,7 +54,7 @@ from schemas import (
     ItemCountryRow, ItemCountriesResponse,
 )
 from hybrid_schemas import HybridSearchResponse
-from hybrid_search import search_hybrid
+from hybrid_search import search_hybrid, warmup_embedding_model
 
 load_dotenv()
 
@@ -273,6 +273,7 @@ async def startup():
         await _seed_country_stats(conn)
 
     asyncio.create_task(_startup_bg())
+    asyncio.create_task(warmup_embedding_model())
 
 
 
