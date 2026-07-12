@@ -7,6 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # every fresh deploy/restart (container disk is ephemeral) re-downloads the
 # weights over the network on the process's first search, which can take
 # long enough to look like an outage.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small')"
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2')"
 COPY . .
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
