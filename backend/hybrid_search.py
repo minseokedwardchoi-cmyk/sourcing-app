@@ -130,7 +130,7 @@ async def warmup_embedding_model() -> None:
     startup. Without this, the first real search request after a deploy or
     restart pays for the model download + deserialize (many seconds) on the
     event loop thread, which used to block the whole process - see
-    hybrid_embeddings.LocalSentenceTransformerEmbeddingProvider._get_model.
+    hybrid_embeddings.LocalOnnxEmbeddingProvider._get_model.
     """
     if not HYBRID_SEARCH_ENABLED:
         return
