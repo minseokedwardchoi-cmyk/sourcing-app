@@ -2022,8 +2022,6 @@ _IMPORT_HISTORY_INDEXES = [
     ("ix_mc",           "CREATE INDEX IF NOT EXISTS ix_mc ON import_history (mc)"),
     ("ix_country",      "CREATE INDEX IF NOT EXISTS ix_country ON import_history (country)"),
     ("ix_import_date",  "CREATE INDEX IF NOT EXISTS ix_import_date ON import_history (import_date)"),
-    ("ix_search_vector",
-     "CREATE INDEX IF NOT EXISTS ix_search_vector ON import_history USING gin (search_vector)"),
 ]
 
 
