@@ -21,14 +21,14 @@ async def main() -> None:
                 pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
                 pg_size_pretty(pg_relation_size(relid)) AS table_size,
                 pg_size_pretty(pg_total_relation_size(relid) - pg_relation_size(relid)) AS index_size,
-                n_live_tup AS approx_rows
-            FROM pg_catalog.pg_statio_user_tables t
-            JOIN pg_stat_user_tables s USING (relid)
+                n_live_tup AS approx_rows,
+                n_dead_tup AS approx_dead_rows
+            FROM pg_stat_user_tables
             ORDER BY pg_total_relation_size(relid) DESC
             LIMIT 20
         """))
         for r in rows.mappings():
-            print(f"{r['name']:30s} total={r['total_size']:>10s}  table={r['table_size']:>10s}  index={r['index_size']:>10s}  rows~={r['approx_rows']}")
+            print(f"{r['name']:30s} total={r['total_size']:>10s}  table={r['table_size']:>10s}  index={r['index_size']:>10s}  rows~={r['approx_rows']}  dead~={r['approx_dead_rows']}")
 
         print("\n=== product_embedding 모델별 행 수 (구모델 잔여분 확인) ===")
         rows2 = await session.execute(text("""
