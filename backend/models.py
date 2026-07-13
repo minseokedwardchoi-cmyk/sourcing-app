@@ -6,7 +6,6 @@ models.py — DB 테이블 정의
 from sqlalchemy import (
     Column, Integer, String, Date, Text, Index, UniqueConstraint, Numeric
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR
 from database import Base
 
 
@@ -56,9 +55,6 @@ class ImportHistory(Base):
     contact_status   = Column(String(100),  nullable=True,  comment="MD 컨택 상태 (컨택이력 없음/컨택 중/거래성사 등)")
     md_name          = Column(String(100),  nullable=True,  comment="담당 MD명")
 
-    # ── 전문 검색용 벡터 (PostgreSQL FTS) ─────────────────
-    search_vector    = Column(TSVECTOR,     nullable=True)
-
     __table_args__ = (
         # 집계 기준 복합 인덱스 (수입횟수 카운팅용)
         Index("ix_agg_key", "category", "mc", "sku_name", "import_type",
@@ -70,8 +66,6 @@ class ImportHistory(Base):
         Index("ix_mc",           "mc"),
         Index("ix_country",      "country"),
         Index("ix_import_date",  "import_date"),
-        # FTS 인덱스
-        Index("ix_search_vector", "search_vector", postgresql_using="gin"),
     )
 
 
