@@ -169,13 +169,27 @@ async def search_hybrid(
     effective_similarity_threshold = (
         HYBRID_SIMILARITY_THRESHOLD if similarity_threshold is None else similarity_threshold
     )
+    intent = detect_intent(query)
+
+    # Product vectors were embedded as "sku_name | mc | category". For known
+    # intents, give the short query the same shape so MiniLM compares like
+    # with like instead of over-weighting unrelated surface-level tokens.
+    semantic_query = query
+    if intent.mc_intent or intent.category_intent:
+        semantic_query = " | ".join(
+            (
+                query,
+                intent.mc_intent or "",
+                intent.category_intent[0] if intent.category_intent else "",
+            )
+        )
 
     if hybrid_enabled:
         if precomputed_embedding is not None:
             query_embedding = precomputed_embedding
         else:
             try:
-                query_embedding = await embedding_provider.embed_query(query)
+                query_embedding = await embedding_provider.embed_query(semantic_query)
             except Exception as exc:
                 semantic_error = str(exc)
                 hybrid_enabled = False
@@ -203,8 +217,6 @@ async def search_hybrid(
         )"""
         params["search"] = f"%{query}%"
         params["query_exact"] = query.lower()
-
-    intent = detect_intent(query)
 
     use_semantic = hybrid_enabled and bool(query_embedding)
 
