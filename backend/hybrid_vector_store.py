@@ -132,6 +132,12 @@ class PgVectorSearchRepository:
             "similarity_threshold": similarity_threshold,
         }
         frag = _intent_sql_fragments(intent, params)
+        # A detected MC intent is a high-confidence taxonomy signal. Keep the
+        # vector search broad enough to find lexical variants, but do not let
+        # superficially similar products from another MC leak into the final
+        # semantic results (for example candy/soybean paste for "참치캔").
+        # Exact text matches are built outside this CTE and remain unaffected.
+        intent_gate = "WHERE mc_key = :intent_mc" if intent.mc_intent else ""
 
         # No raw semantic_score threshold filter here: candidate_limit (ordered by
         # vector distance) controls the candidate pool size, while inclusion is
@@ -162,6 +168,7 @@ class PgVectorSearchRepository:
                     {frag['category_mismatch_penalty_case']} AS category_mismatch_penalty,
                     {frag['best_keyword_bonus_case']} AS best_keyword_bonus
                 FROM candidates
+                {intent_gate}
             ),
             semantic_products AS (
                 SELECT

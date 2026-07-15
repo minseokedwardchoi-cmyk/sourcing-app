@@ -235,6 +235,37 @@ class HybridThresholdTest(unittest.TestCase):
         self.assertEqual(kimchi_rows, [])
 
 
+class IntentGateSqlTest(unittest.TestCase):
+    def test_detected_mc_restricts_semantic_expansion(self):
+        from hybrid_relevance import QueryIntent
+        from hybrid_vector_store import PgVectorSearchRepository
+
+        sql = PgVectorSearchRepository().semantic_sql(
+            query_vector=[0.0, 0.0],
+            model="test-model",
+            dimensions=2,
+            candidate_limit=300,
+            similarity_threshold=0.9,
+            intent=QueryIntent(mc_intent="참치", category_intent=("가공식품",), keyword_terms=("참치",)),
+        )
+        self.assertIn("WHERE mc_key = :intent_mc", sql.cte)
+        self.assertEqual(sql.params["intent_mc"], "참치")
+
+    def test_unknown_mc_keeps_general_semantic_search(self):
+        from hybrid_relevance import NULL_INTENT
+        from hybrid_vector_store import PgVectorSearchRepository
+
+        sql = PgVectorSearchRepository().semantic_sql(
+            query_vector=[0.0, 0.0],
+            model="test-model",
+            dimensions=2,
+            candidate_limit=300,
+            similarity_threshold=0.9,
+            intent=NULL_INTENT,
+        )
+        self.assertNotIn("WHERE mc_key = :intent_mc", sql.cte)
+
+
 # ─── C. sort order tests ────────────────────────────────────────────────────
 class HybridSortOrderTest(unittest.TestCase):
     def test_high_relevance_does_not_force_row_to_top(self):
