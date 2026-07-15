@@ -72,7 +72,8 @@ class LocalSentenceTransformerEmbeddingProvider:
                 self._cache.move_to_end(cache_key)
                 return cached[1]
 
-        result = (await self._embed([f"query: {text_value}"]))[0]
+        model_text = f"query: {text_value}" if "e5" in model_name.lower() else text_value
+        result = (await self._embed([model_text]))[0]
         async with self._cache_lock:
             self._cache[cache_key] = (now, result)
             while len(self._cache) > self._max_cache_size:
@@ -80,8 +81,13 @@ class LocalSentenceTransformerEmbeddingProvider:
         return result
 
     async def embed_documents(self, texts: list[str]) -> list[EmbeddingResult]:
-        passages = [f"passage: {text_value}" for text_value in texts]
-        return await self._embed(passages)
+        model_name = embedding_model()
+        model_texts = (
+            [f"passage: {text_value}" for text_value in texts]
+            if "e5" in model_name.lower()
+            else texts
+        )
+        return await self._embed(model_texts)
 
     async def _embed(self, texts: list[str]) -> list[EmbeddingResult]:
         dims = embedding_dimensions_required()

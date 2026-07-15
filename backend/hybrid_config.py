@@ -28,7 +28,10 @@ def env_float(name: str, default: float) -> float:
 
 
 def embedding_model() -> str:
-    return os.getenv("LOCAL_EMBEDDING_MODEL", "intfloat/multilingual-e5-small").strip()
+    return os.getenv(
+        "LOCAL_EMBEDDING_MODEL",
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    ).strip()
 
 
 def embedding_provider() -> str:
@@ -56,14 +59,14 @@ def embedding_dimensions_required() -> int:
     if not raw:
         raise ValueError(
             "EMBEDDING_DIMENSIONS is required for hybrid search/backfill. "
-            "Use 384 for intfloat/multilingual-e5-small and keep the same value for migration, backfill, and search."
+            "Use 384 for the configured model and keep the same value for migration, backfill, and search."
         )
     try:
         value = int(raw)
     except ValueError as exc:
-        raise ValueError("EMBEDDING_DIMENSIONS must be an integer. Use 384 for intfloat/multilingual-e5-small.") from exc
+        raise ValueError("EMBEDDING_DIMENSIONS must be an integer. Use 384 for the configured model.") from exc
     if value not in ALLOWED_EMBEDDING_DIMENSIONS:
-        raise ValueError("EMBEDDING_DIMENSIONS must be 384 for intfloat/multilingual-e5-small.")
+        raise ValueError("EMBEDDING_DIMENSIONS must be 384 for the configured model.")
     return value
 
 

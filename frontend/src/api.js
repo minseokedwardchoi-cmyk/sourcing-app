@@ -15,11 +15,15 @@ async function embedSearchQuery(text) {
   if (!embeddingPipelinePromise) {
     embeddingPipelinePromise = import("@huggingface/transformers").then(({ env, pipeline }) => {
       env.backends.onnx.wasm.numThreads = 1;
-      return pipeline("feature-extraction", "Xenova/multilingual-e5-small", { dtype: "int8" });
+      return pipeline(
+        "feature-extraction",
+        "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+        { dtype: "int8" },
+      );
     });
   }
   const extractor = await embeddingPipelinePromise;
-  const output = await extractor(`query: ${normalized}`, { pooling: "mean", normalize: true });
+  const output = await extractor(normalized, { pooling: "mean", normalize: true });
   const vector = Array.from(output.data, value => Number(value));
   if (vector.length !== 384 || vector.some(value => !Number.isFinite(value))) {
     throw new Error("Invalid browser embedding result");
