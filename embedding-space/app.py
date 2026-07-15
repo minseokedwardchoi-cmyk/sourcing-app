@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import asyncio
 import hmac
+import json
 import os
-from contextlib import asynccontextmanager
+import threading
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 import onnxruntime as ort
-from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
 from tokenizers import Tokenizer
 
 
@@ -18,116 +18,131 @@ SERVICE_TOKEN = os.getenv("EMBEDDING_SERVICE_TOKEN", "").strip()
 MAX_BATCH_SIZE = int(os.getenv("MAX_EMBEDDING_BATCH_SIZE", "64"))
 MODEL_DIR = os.getenv("ONNX_MODEL_DIR", "/app/model")
 MODEL_FILE = os.getenv("ONNX_MODEL_FILE", os.path.join(MODEL_DIR, "onnx", "model_int8.onnx"))
-
-tokenizer: Tokenizer | None = None
-session: ort.InferenceSession | None = None
-model_lock = asyncio.Lock()
+PORT = int(os.getenv("PORT", "7860"))
 
 
-class QueryRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=2000)
+def _load_model() -> tuple[Tokenizer, ort.InferenceSession, frozenset[str]]:
+    tokenizer = Tokenizer.from_file(os.path.join(MODEL_DIR, "tokenizer.json"))
+    tokenizer.enable_truncation(max_length=512)
+    tokenizer.enable_padding()
+
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 1
+    options.inter_op_num_threads = 1
+    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    options.enable_cpu_mem_arena = False
+    options.enable_mem_pattern = False
+    # Render's free instance has a hard 512 MiB limit. Disabling graph rewrites
+    # and weight prepacking avoids the temporary second copy of model weights
+    # created while ONNX Runtime initializes a session.
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+    options.add_session_config_entry("session.disable_prepacking", "1")
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+    session = ort.InferenceSession(
+        MODEL_FILE,
+        sess_options=options,
+        providers=["CPUExecutionProvider"],
+    )
+    return tokenizer, session, frozenset(item.name for item in session.get_inputs())
 
 
-class DocumentsRequest(BaseModel):
-    texts: list[str] = Field(min_length=1, max_length=MAX_BATCH_SIZE)
+TOKENIZER, SESSION, INPUT_NAMES = _load_model()
+MODEL_LOCK = threading.Lock()
 
 
-class EmbeddingResponse(BaseModel):
-    vector: list[float]
-    model: str
-    dimensions: int
-
-
-class DocumentsResponse(BaseModel):
-    embeddings: list[EmbeddingResponse]
-
-
-def require_token(x_embedding_token: str | None = Header(default=None)) -> None:
-    if not SERVICE_TOKEN:
-        raise HTTPException(status_code=503, detail="EMBEDDING_SERVICE_TOKEN is not configured.")
-    if not x_embedding_token or not hmac.compare_digest(x_embedding_token, SERVICE_TOKEN):
-        raise HTTPException(status_code=401, detail="Invalid embedding service token.")
-
-
-def _encode(texts: list[str]) -> list[EmbeddingResponse]:
-    if tokenizer is None or session is None:
-        raise RuntimeError("Embedding model is not ready.")
-    encoded = tokenizer.encode_batch(texts)
-    input_ids = np.asarray([item.ids for item in encoded], dtype=np.int64)
+def _encode(texts: list[str]) -> list[dict[str, object]]:
+    encoded = TOKENIZER.encode_batch(texts)
     attention_mask = np.asarray([item.attention_mask for item in encoded], dtype=np.int64)
-    token_type_ids = np.asarray([item.type_ids for item in encoded], dtype=np.int64)
-    input_names = {item.name for item in session.get_inputs()}
     candidates = {
-        "input_ids": input_ids,
+        "input_ids": np.asarray([item.ids for item in encoded], dtype=np.int64),
         "attention_mask": attention_mask,
-        "token_type_ids": token_type_ids,
+        "token_type_ids": np.asarray([item.type_ids for item in encoded], dtype=np.int64),
     }
-    feeds = {key: value for key, value in candidates.items() if key in input_names}
-    hidden_state = session.run(None, feeds)[0].astype(np.float32, copy=False)
+    hidden_state = SESSION.run(None, {key: value for key, value in candidates.items() if key in INPUT_NAMES})[0]
     mask = attention_mask.astype(np.float32)[:, :, None]
     pooled = (hidden_state * mask).sum(axis=1) / np.clip(mask.sum(axis=1), 1e-9, None)
     embeddings = pooled / np.clip(np.linalg.norm(pooled, axis=1, keepdims=True), 1e-12, None)
-    results: list[EmbeddingResponse] = []
+    results: list[dict[str, object]] = []
     for embedding in embeddings:
         vector = [float(value) for value in embedding.tolist()]
         if len(vector) != DIMENSIONS:
             raise RuntimeError(
                 f"Embedding dimension mismatch: expected {DIMENSIONS}, received {len(vector)}."
             )
-        results.append(EmbeddingResponse(vector=vector, model=MODEL_NAME, dimensions=DIMENSIONS))
+        results.append({"vector": vector, "model": MODEL_NAME, "dimensions": DIMENSIONS})
     return results
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    global tokenizer, session
-    tokenizer = await asyncio.to_thread(
-        Tokenizer.from_file, os.path.join(MODEL_DIR, "tokenizer.json")
-    )
-    tokenizer.enable_truncation(max_length=512)
-    tokenizer.enable_padding()
-    options = ort.SessionOptions()
-    options.intra_op_num_threads = 1
-    options.inter_op_num_threads = 1
-    options.enable_cpu_mem_arena = False
-    options.enable_mem_pattern = False
-    # Basic constant folding is safe for the INT8 graph and reduces runtime
-    # work without enabling the aggressive LayerNorm fusion that broke FP16.
-    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
-    session = await asyncio.to_thread(
-        ort.InferenceSession,
-        MODEL_FILE,
-        sess_options=options,
-        providers=["CPUExecutionProvider"],
-    )
-    yield
-    session = None
-    tokenizer = None
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def _json(self, status: int, payload: object) -> None:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authorized(self) -> bool:
+        supplied = self.headers.get("X-Embedding-Token", "")
+        return bool(SERVICE_TOKEN and supplied and hmac.compare_digest(supplied, SERVICE_TOKEN))
+
+    def _payload(self) -> dict[str, object]:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0 or length > 512_000:
+            raise ValueError("Invalid request body size.")
+        value = json.loads(self.rfile.read(length))
+        if not isinstance(value, dict):
+            raise ValueError("JSON body must be an object.")
+        return value
+
+    def do_GET(self) -> None:
+        if self.path != "/health":
+            self._json(HTTPStatus.NOT_FOUND, {"detail": "Not found."})
+            return
+        self._json(
+            HTTPStatus.OK,
+            {"status": "ok", "model": MODEL_NAME, "dimensions": DIMENSIONS, "runtime": "onnx-int8"},
+        )
+
+    def do_POST(self) -> None:
+        if self.path not in {"/embed/query", "/embed/documents"}:
+            self._json(HTTPStatus.NOT_FOUND, {"detail": "Not found."})
+            return
+        if not self._authorized():
+            self._json(HTTPStatus.UNAUTHORIZED, {"detail": "Invalid embedding service token."})
+            return
+        try:
+            payload = self._payload()
+            if self.path == "/embed/query":
+                text = payload.get("text")
+                if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+                    raise ValueError("text must contain 1 to 2000 characters.")
+                with MODEL_LOCK:
+                    result = _encode([f"query: {text}"])[0]
+                self._json(HTTPStatus.OK, result)
+                return
+
+            texts = payload.get("texts")
+            if (
+                not isinstance(texts, list)
+                or not 1 <= len(texts) <= MAX_BATCH_SIZE
+                or any(not isinstance(text, str) or not text.strip() or len(text) > 2000 for text in texts)
+            ):
+                raise ValueError(f"texts must contain 1 to {MAX_BATCH_SIZE} strings of 1 to 2000 characters.")
+            with MODEL_LOCK:
+                results = _encode([f"passage: {text}" for text in texts])
+            self._json(HTTPStatus.OK, {"embeddings": results})
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._json(HTTPStatus.UNPROCESSABLE_ENTITY, {"detail": str(exc)})
+        except Exception:
+            self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"detail": "Embedding failed."})
+
+    def log_message(self, format: str, *args: object) -> None:
+        print(f"{self.address_string()} - {format % args}", flush=True)
 
 
-app = FastAPI(title="Sourcing E5 Embedding Service", version="1.0.0", lifespan=lifespan)
-
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok" if session is not None else "loading",
-        "model": MODEL_NAME,
-        "dimensions": DIMENSIONS,
-        "runtime": "onnx-int8" if "int8" in os.path.basename(MODEL_FILE) else "onnx",
-    }
-
-
-@app.post("/embed/query", response_model=EmbeddingResponse, dependencies=[Depends(require_token)])
-async def embed_query(payload: QueryRequest):
-    async with model_lock:
-        return (await asyncio.to_thread(_encode, [f"query: {payload.text}"]))[0]
-
-
-@app.post("/embed/documents", response_model=DocumentsResponse, dependencies=[Depends(require_token)])
-async def embed_documents(payload: DocumentsRequest):
-    if any(not text.strip() or len(text) > 2000 for text in payload.texts):
-        raise HTTPException(status_code=422, detail="Each text must contain 1 to 2000 characters.")
-    async with model_lock:
-        embeddings = await asyncio.to_thread(_encode, [f"passage: {text}" for text in payload.texts])
-    return DocumentsResponse(embeddings=embeddings)
+if __name__ == "__main__":
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
