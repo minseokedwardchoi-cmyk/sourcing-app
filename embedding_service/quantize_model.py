@@ -4,7 +4,7 @@ from onnxruntime.quantization import QuantType, quantize_dynamic
 
 
 MODEL_DIR = "/model"
-source = os.path.join(MODEL_DIR, "model_optimized.onnx")
+source = os.path.join(MODEL_DIR, "onnx", "model.onnx")
 destination = os.path.join(MODEL_DIR, "model_int8.onnx")
 
 quantize_dynamic(source, destination, weight_type=QuantType.QInt8)
