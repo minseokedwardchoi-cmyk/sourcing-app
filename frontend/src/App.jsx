@@ -628,7 +628,7 @@ function MainDashboard({ navigate }) {
   // 데이터 (하이브리드 검색: HYBRID_SEARCH_ENABLED가 꺼져있으면 기존 정확검색과 동일하게 동작)
   useEffect(()=>{
     setLoading(true); setError(null);
-    fetchHybridSearch({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50,colFilters,dateFrom,dateTo,candidateLimit:1000,similarityThreshold:0.9})
+    fetchHybridSearch({search:debSearch,competitor,sortBy,sortDir,page,pageSize:50,colFilters,dateFrom,dateTo,candidateLimit:3000,similarityThreshold:0.9})
       .then(r=>{setData(r.data);setMeta(r.meta);})
       .catch(e=>setError(e.message))
       .finally(()=>setLoading(false));
@@ -759,7 +759,7 @@ function MainDashboard({ navigate }) {
             <button className="icon-btn" onClick={async()=>{
               if(!meta||meta.total===0){downloadCSV(data,"sku_history.csv");return;}
               try{
-                const r=await fetchHybridSearch({search:debSearch,competitor,sortBy,sortDir,page:1,pageSize:meta.total,colFilters,dateFrom,dateTo,candidateLimit:1000,similarityThreshold:0.9});
+                const r=await fetchHybridSearch({search:debSearch,competitor,sortBy,sortDir,page:1,pageSize:meta.total,colFilters,dateFrom,dateTo,candidateLimit:3000,similarityThreshold:0.9});
                 downloadCSV(r.data,"sku_history.csv");
               }catch{downloadCSV(data,"sku_history.csv");}
             }}>⬇ CSV</button>
@@ -3332,12 +3332,12 @@ const HYBRID_TEST_TERMS = [
 function SearchTestPage() {
   const [search, setSearch] = useState("참치캔");
   const [page, setPage] = useState(1);
-  const [candidateLimit, setCandidateLimit] = useState(1000);
+  const [candidateLimit, setCandidateLimit] = useState(3000);
   const [similarityThreshold, setSimilarityThreshold] = useState(0.90);
   const [request, setRequest] = useState({
     search: "참치캔",
     page: 1,
-    candidateLimit: 1000,
+    candidateLimit: 3000,
     similarityThreshold: 0.90,
   });
   const [direct, setDirect] = useState({ data: [], meta: null, elapsed: null, error: null, loading: false });
@@ -3462,7 +3462,7 @@ function SearchTestPage() {
             <span className="count-label">Min relevance {hybrid.minRelevanceScore ?? "-"}</span>
             <span className="badge b-gray">{hybrid.enabled ? "semantic on" : "semantic off/fallback"}</span>
             <label className="count-label">Candidates</label>
-            <input className="date-range-input" type="number" min="1" max="5000" value={candidateLimit} onChange={e => setCandidateLimit(Number(e.target.value) || 1000)} style={{width:90}} />
+            <input className="date-range-input" type="number" min="1" max="5000" value={candidateLimit} onChange={e => setCandidateLimit(Number(e.target.value) || 3000)} style={{width:90}} />
             <label className="count-label">Relevance threshold</label>
             <input className="date-range-input" type="number" min="0" max="1" step="0.01" value={similarityThreshold} onChange={e => setSimilarityThreshold(Number(e.target.value) || 0.90)} style={{width:90}} />
             <button className="upload-btn" onClick={() => runSearch(1)}>Search</button>

@@ -76,7 +76,7 @@ def embedding_dimensions_required() -> int:
 
 
 HYBRID_SEARCH_ENABLED = env_bool("HYBRID_SEARCH_ENABLED", False)
-HYBRID_CANDIDATE_LIMIT = env_int("HYBRID_CANDIDATE_LIMIT", 1000)
+HYBRID_CANDIDATE_LIMIT = env_int("HYBRID_CANDIDATE_LIMIT", 3000)
 # Wire/query-param name stays "similarity_threshold" for API compatibility, but this
 # value is applied against the final relevance_score (semantic + bonuses - penalties),
 # not the raw semantic_score. Treat it as "Relevance threshold" everywhere in UI/docs.
