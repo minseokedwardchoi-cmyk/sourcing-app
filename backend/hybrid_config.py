@@ -35,7 +35,16 @@ def embedding_model() -> str:
 
 
 def embedding_provider() -> str:
+    # "local": load the model in this process (fine for offline/local use,
+    # e.g. the backfill script, where the whole machine's memory is free).
+    # "remote": call a separate embedding microservice over HTTP - use this
+    # in production, since this app also carries pandas/SQLAlchemy/openpyxl
+    # and a 512MB deployment doesn't have room left to also hold the model.
     return os.getenv("EMBEDDING_PROVIDER", "local").strip().lower()
+
+
+def embedding_service_url() -> str:
+    return os.getenv("EMBEDDING_SERVICE_URL", "").strip()
 
 
 def embedding_dimensions_required() -> int:
