@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hybrid_config import HYBRID_CANDIDATE_LIMIT, HYBRID_SEARCH_ENABLED, HYBRID_SIMILARITY_THRESHOLD
-from hybrid_embeddings import EmbeddingProvider, default_embedding_provider
+from hybrid_embeddings import EmbeddingProvider, EmbeddingResult, default_embedding_provider
 from hybrid_relevance import RelevanceBreakdown, clamp_relevance_score, detect_intent
 from hybrid_schemas import HybridSearchResponse, HybridSkuHistoryRow
 from hybrid_vector_store import PgVectorSearchRepository, VectorSearchRepository
@@ -141,6 +141,7 @@ async def search_hybrid(
     similarity_threshold: Optional[float] = None,
     embedding_provider: EmbeddingProvider = _DEFAULT_EMBEDDING_PROVIDER,
     vector_repository: VectorSearchRepository = _DEFAULT_VECTOR_REPOSITORY,
+    precomputed_embedding: Optional[EmbeddingResult] = None,
     _force_direct: bool = False,
     _semantic_error: Optional[str] = None,
 ) -> HybridSearchResponse:
@@ -155,11 +156,14 @@ async def search_hybrid(
     )
 
     if hybrid_enabled:
-        try:
-            query_embedding = await embedding_provider.embed_query(query)
-        except Exception as exc:
-            semantic_error = str(exc)
-            hybrid_enabled = False
+        if precomputed_embedding is not None:
+            query_embedding = precomputed_embedding
+        else:
+            try:
+                query_embedding = await embedding_provider.embed_query(query)
+            except Exception as exc:
+                semantic_error = str(exc)
+                hybrid_enabled = False
 
     params: dict = {
         "limit": page_size,

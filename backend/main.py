@@ -54,6 +54,8 @@ from schemas import (
     ItemCountryRow, ItemCountriesResponse,
 )
 from hybrid_schemas import HybridSearchResponse
+from hybrid_embeddings import EmbeddingResult
+from hybrid_config import embedding_dimensions_required, embedding_model
 from hybrid_search import search_hybrid
 
 load_dotenv()
@@ -67,6 +69,29 @@ def _parse_date_param(value: Optional[str], *, end_of_month: bool = False) -> Op
         day = monthrange(year, month)[1] if end_of_month else 1
         return date(year, month, day)
     return date.fromisoformat(value)
+
+
+def _parse_client_embedding(value: Optional[str]) -> Optional[EmbeddingResult]:
+    if not value:
+        return None
+    expected_dimensions = embedding_dimensions_required()
+    try:
+        vector = [float(item) for item in value.split(",")]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid query embedding.") from exc
+    if len(vector) != expected_dimensions or any(not math.isfinite(item) for item in vector):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Query embedding must contain {expected_dimensions} finite values.",
+        )
+    norm = math.sqrt(sum(item * item for item in vector))
+    if not 0.98 <= norm <= 1.02:
+        raise HTTPException(status_code=422, detail="Query embedding must be L2-normalized.")
+    return EmbeddingResult(
+        vector=vector,
+        model=embedding_model(),
+        dimensions=expected_dimensions,
+    )
 
 # ─── 앱 초기화 ───────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -656,6 +681,7 @@ async def get_search_hybrid(
     filter_sku_name:    Optional[List[str]] = Query(None),
     candidate_limit: Optional[int] = Query(None, ge=1, le=5000),
     similarity_threshold: Optional[float] = Query(None, ge=0, le=1),
+    query_embedding: Optional[str] = Query(None, max_length=8192),
     db: AsyncSession = Depends(get_db),
 ):
     return await search_hybrid(
@@ -670,6 +696,7 @@ async def get_search_hybrid(
         date_to=date_to,
         candidate_limit=candidate_limit,
         similarity_threshold=similarity_threshold,
+        precomputed_embedding=_parse_client_embedding(query_embedding),
         filters={
             "category": filter_category,
             "mc": filter_mc,

@@ -277,5 +277,38 @@ class HybridRegressionTest(unittest.TestCase):
         self.assertNotIn("냉동 참치 필렛", names)
 
 
+class ClientEmbeddingTest(unittest.TestCase):
+    def test_precomputed_embedding_skips_server_model(self):
+        class RaisingProvider:
+            async def embed_query(self, text):
+                raise AssertionError("server embedding provider must not be called")
+
+        hybrid_search.HYBRID_SEARCH_ENABLED = True
+        session = FakeSession()
+        response = asyncio.run(hybrid_search.search_hybrid(
+            session,
+            search="tuna",
+            competitor="all",
+            sort_by="import_count",
+            sort_dir="desc",
+            page=1,
+            page_size=30,
+            date_from=None,
+            date_to=None,
+            filters={},
+            candidate_limit=300,
+            similarity_threshold=0.5,
+            embedding_provider=RaisingProvider(),
+            vector_repository=FakeVectorRepository(),
+            precomputed_embedding=EmbeddingResult(
+                vector=[1.0] + [0.0] * 383,
+                model="intfloat/multilingual-e5-small",
+                dimensions=384,
+            ),
+        ))
+        self.assertTrue(response.hybrid_enabled)
+        self.assertIsNone(response.semantic_error)
+
+
 if __name__ == "__main__":
     unittest.main()

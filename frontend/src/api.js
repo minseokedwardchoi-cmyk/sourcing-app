@@ -5,6 +5,30 @@
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://sourcing-backend-ucp5.onrender.com";
 
+let embeddingPipelinePromise;
+const queryEmbeddingCache = new Map();
+
+async function embedSearchQuery(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return null;
+  if (queryEmbeddingCache.has(normalized)) return queryEmbeddingCache.get(normalized);
+  if (!embeddingPipelinePromise) {
+    embeddingPipelinePromise = import("@huggingface/transformers").then(({ env, pipeline }) => {
+      env.backends.onnx.wasm.numThreads = 1;
+      return pipeline("feature-extraction", "Xenova/multilingual-e5-small", { dtype: "int8" });
+    });
+  }
+  const extractor = await embeddingPipelinePromise;
+  const output = await extractor(`query: ${normalized}`, { pooling: "mean", normalize: true });
+  const vector = Array.from(output.data, value => Number(value));
+  if (vector.length !== 384 || vector.some(value => !Number.isFinite(value))) {
+    throw new Error("Invalid browser embedding result");
+  }
+  queryEmbeddingCache.set(normalized, vector);
+  if (queryEmbeddingCache.size > 64) queryEmbeddingCache.delete(queryEmbeddingCache.keys().next().value);
+  return vector;
+}
+
 async function request(path, params = {}) {
   const url = new URL(`${BASE_URL}${path}`, window.location.origin);
   Object.entries(params).forEach(([k, v]) => {
@@ -108,11 +132,20 @@ export async function fetchSkuHistory({ search, competitor, sortBy, sortDir, pag
 /** 행(그룹)별 월별 수입횟수 */
 export async function fetchHybridSearch({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {}, dateFrom, dateTo, candidateLimit, similarityThreshold }) {
   const url = new URL(`${BASE_URL}/api/search-hybrid`, window.location.origin);
+  let queryEmbedding;
+  if (String(search || "").trim()) {
+    try {
+      queryEmbedding = await embedSearchQuery(search);
+    } catch (error) {
+      console.warn("Browser embedding unavailable; using keyword fallback.", error);
+    }
+  }
   const params = {
     search, competitor, sort_by: sortBy, sort_dir: sortDir, page, page_size: pageSize,
     date_from: dateFrom, date_to: dateTo,
     candidate_limit: candidateLimit === null || candidateLimit === undefined || candidateLimit === "" ? undefined : Number(candidateLimit),
     similarity_threshold: similarityThreshold === null || similarityThreshold === undefined || similarityThreshold === "" ? undefined : Number(similarityThreshold),
+    query_embedding: queryEmbedding ? queryEmbedding.map(value => value.toFixed(7)).join(",") : undefined,
   };
   Object.entries(params).forEach(([k, v]) => {
     if (v !== null && v !== undefined && v !== "") url.searchParams.set(k, String(v));
