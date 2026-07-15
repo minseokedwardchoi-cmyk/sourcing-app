@@ -35,6 +35,11 @@ def embedding_model() -> str:
 
 
 def embedding_provider() -> str:
+    # A configured remote URL is authoritative in production. This also
+    # protects deployments where Render retains a stale masked value for
+    # EMBEDDING_PROVIDER while the remote service settings are already saved.
+    if os.getenv("EMBEDDING_SERVICE_URL", "").strip():
+        return "remote"
     return os.getenv("EMBEDDING_PROVIDER", "local").strip().lower()
 
 
