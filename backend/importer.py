@@ -9,13 +9,25 @@ OEM여부: 값이 있으면 'O' (OEM), 없으면 수입
 """
 from __future__ import annotations
 import re
-import pandas as pd
+from functools import lru_cache
 from io import BytesIO
 from datetime import date
+from typing import TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from models import ImportHistory
 from country_utils import normalize_country_name
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+
+@lru_cache(maxsize=1)
+def _pandas():
+    # Excel uploads are infrequent. Avoid loading pandas/numpy into every API
+    # process at startup merely because main.py imports COMPETITOR_MAP.
+    import pandas
+    return pandas
 
 # ─── 파일 1: 헤더 있는 경우의 컬럼명 → DB 필드명 매핑 ────────────────────────
 FIELD_MAP: dict[str, str] = {
@@ -112,7 +124,7 @@ _LEGAL = re.compile(r"[(（]?\s*주\s*[)）]|주식회사\s*|㈜\s*|농업회사
 
 
 def normalize_name(name) -> str | None:
-    if name is None or (isinstance(name, float) and pd.isna(name)):
+    if name is None or (isinstance(name, float) and _pandas().isna(name)):
         return None
     s = _LEGAL.sub("", str(name)).strip()
     s = re.sub(r"\s+", " ", s)
@@ -140,7 +152,7 @@ def normalize_importer(name) -> str | None:
 
 def normalize_oem(val) -> str:
     """OEM여부: 'O' 또는 값 있으면 'OEM', 없으면 '수입'"""
-    if val is None or (isinstance(val, float) and pd.isna(val)):
+    if val is None or (isinstance(val, float) and _pandas().isna(val)):
         return "수입"
     s = str(val).strip()
     return "OEM" if s else "수입"
@@ -149,18 +161,18 @@ def normalize_oem(val) -> str:
 def safe_date(val):
     """Excel 날짜 값을 Python date로 변환"""
     from datetime import date as date_type
-    if val is None or (isinstance(val, float) and pd.isna(val)):
+    if val is None or (isinstance(val, float) and _pandas().isna(val)):
         return None
     if isinstance(val, date_type):
         return val
     try:
-        return pd.to_datetime(str(val)).date()
+        return _pandas().to_datetime(str(val)).date()
     except Exception:
         return None
 
 
 def safe_str(val) -> str | None:
-    if val is None or (isinstance(val, float) and pd.isna(val)):
+    if val is None or (isinstance(val, float) and _pandas().isna(val)):
         return None
     s = str(val).strip()
     return s if s else None
@@ -170,7 +182,7 @@ def _date_like_ratio(series: pd.Series) -> float:
     values = series.dropna()
     if values.empty:
         return 0.0
-    parsed = pd.to_datetime(values, errors="coerce")
+    parsed = _pandas().to_datetime(values, errors="coerce")
     return float(parsed.notna().sum()) / float(len(values))
 
 
@@ -243,6 +255,7 @@ def read_excel_file(file_bytes: bytes) -> pd.DataFrame:
     Excel 파일을 읽어 표준 컬럼(DB 필드명)으로 변환한 DataFrame 반환.
     헤더 유무를 자동 감지해서 처리.
     """
+    pd = _pandas()
     df_raw = pd.read_excel(BytesIO(file_bytes), engine="openpyxl", header=None)
 
     # 완전히 빈 행/열 제거

@@ -35,6 +35,18 @@ def embedding_provider() -> str:
     return os.getenv("EMBEDDING_PROVIDER", "local").strip().lower()
 
 
+def embedding_service_url() -> str:
+    return os.getenv("EMBEDDING_SERVICE_URL", "").strip().rstrip("/")
+
+
+def embedding_service_token() -> str:
+    return os.getenv("EMBEDDING_SERVICE_TOKEN", "").strip()
+
+
+def embedding_service_timeout() -> float:
+    return env_float("EMBEDDING_SERVICE_TIMEOUT", 30.0)
+
+
 def local_embedding_device() -> str:
     return os.getenv("LOCAL_EMBEDDING_DEVICE", "cpu").strip()
 

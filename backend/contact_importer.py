@@ -2,7 +2,6 @@ from io import BytesIO
 import json
 from typing import Any
 
-import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from country_utils import normalize_country_name
@@ -59,6 +58,8 @@ CONTACT_FIELD_MAP = {
 
 
 def clean_value(v: Any) -> str | None:
+    import pandas as pd
+
     if pd.isna(v):
         return None
 
@@ -88,6 +89,8 @@ async def import_contacts(
     overwrite=True:
         기존 값이 있어도 엑셀 값으로 덮어씀
     """
+
+    import pandas as pd
 
     df = pd.read_excel(BytesIO(file_bytes), engine="openpyxl")
 

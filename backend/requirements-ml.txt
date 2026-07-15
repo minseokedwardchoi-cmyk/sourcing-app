@@ -1,0 +1,4 @@
+# Optional local embedding/backfill dependencies.
+# The Render API must install requirements.txt only so PyTorch stays out of its process.
+-r requirements.txt
+sentence-transformers>=3.0.0

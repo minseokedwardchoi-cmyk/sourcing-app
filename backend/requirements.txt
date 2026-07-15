@@ -11,4 +11,3 @@ openpyxl==3.1.5
 python-multipart==0.0.9
 python-dotenv==1.2.2
 pgvector==0.3.6
-sentence-transformers>=3.0.0

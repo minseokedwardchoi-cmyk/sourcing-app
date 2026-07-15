@@ -106,7 +106,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 컬럼당 고유값 개수는 원본 데이터 규모에 비해 훨씬 작으므로(수십~수천 개), 전체를
 # 서버 메모리에 캐싱해두고 데이터가 바뀔 때(=refresh_mvs 호출 시점)만 다시 계산한다.
 # 검색/필터 조건이 있는 요청은 캐시를 안 쓰고 기존처럼 그 자리에서 계산한다(정확성 유지).
-_COLUMN_VALUES_CACHEABLE_COLS = ["category", "mc", "import_type", "importer", "country", "factory", "email", "sku_name"]
+# Keep only small filter dimensions in process memory. High-cardinality SKU,
+# factory and email lists remain available through the existing DB query path.
+_COLUMN_VALUES_CACHEABLE_COLS = ["category", "mc", "import_type", "importer", "country"]
 _column_values_cache: dict[str, list] = {}
 
 
