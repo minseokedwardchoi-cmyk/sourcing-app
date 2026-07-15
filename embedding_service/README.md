@@ -5,6 +5,8 @@ sdk: docker
 app_port: 8000
 ---
 
-Standalone embedding microservice (fastembed / ONNX Runtime). See `main.py`.
+Private query-embedding microservice for the sourcing dashboard. It uses the
+same FastEmbed MiniLM pipeline that generated the stored product vectors.
 
-`POST /embed` with `{"texts": ["..."]}` returns `{"vectors": [[...]], "model": "...", "dimensions": 384}`.
+Configure the Space secret `EMBEDDING_SERVICE_TOKEN`, then call
+`POST /embed/query` with that value in the `X-Embedding-Token` header.
