@@ -350,6 +350,23 @@ class HybridRegressionTest(unittest.TestCase):
         self.assertEqual(len(exact_rows), 1)
         self.assertEqual(exact_rows[0].sku_name, "정어리 통조림")
 
+    def test_popular_taxonomy_rescue_ignores_semantic_threshold(self):
+        popular = _row(
+            "새치성게알", "참치", "수산물", 101, "popular", None,
+            relevance_score=None, total_count=1,
+        )
+        response, _ = run_search(0.99, rows=[popular])
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0].sku_name, "새치성게알")
+        self.assertEqual(response.data[0].match_type, "popular")
+
+    def test_popular_taxonomy_cte_is_limited_and_deduplicated(self):
+        response, session = run_search(0.90)
+        self.assertTrue(response.hybrid_enabled)
+        params = session.params_seen[0]
+        self.assertEqual(params["popularity_candidate_limit"], 300)
+        self.assertEqual(params["popular_intent_mc"], "참치")
+
     def test_bonus_lifts_low_semantic_score_above_threshold(self):
         # 동원 참치캔: semantic_score 0.60 alone would fail a 0.86 threshold,
         # but bonuses push relevance_score to 0.98.

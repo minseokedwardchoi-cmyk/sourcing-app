@@ -24,7 +24,7 @@ class HybridSkuHistoryRow(BaseModel):
     count_year1: int = 0
     count_year2: int = 0
     count_year3: int = 0
-    match_type: str = Field("exact", description="exact or semantic")
+    match_type: str = Field("exact", description="exact, semantic, or popular taxonomy rescue")
     semantic_score: Optional[float] = None
     relevance_score: Optional[float] = None
     mc_intent_bonus: Optional[float] = None

@@ -10,7 +10,12 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hybrid_config import HYBRID_CANDIDATE_LIMIT, HYBRID_SEARCH_ENABLED, HYBRID_SIMILARITY_THRESHOLD
+from hybrid_config import (
+    HYBRID_CANDIDATE_LIMIT,
+    HYBRID_POPULARITY_CANDIDATE_LIMIT,
+    HYBRID_SEARCH_ENABLED,
+    HYBRID_SIMILARITY_THRESHOLD,
+)
 from hybrid_embeddings import EmbeddingProvider, EmbeddingResult, default_embedding_provider
 from hybrid_relevance import (
     QueryIntent,
@@ -129,7 +134,7 @@ def _recompute_relevance(row: dict) -> dict:
 
 
 def _passes_relevance_threshold(row: dict, threshold: float) -> bool:
-    if row["match_type"] == "exact":
+    if row["match_type"] in {"exact", "popular"}:
         return True
     relevance = row.get("relevance_score")
     return relevance is not None and float(relevance) >= threshold
@@ -332,10 +337,52 @@ async def search_hybrid(
         semantic_union = semantic_sql.union
         semantic_union_count = semantic_sql.union_count
         params.update(semantic_sql.params)
+        if intent.mc_intent:
+            params["popular_intent_mc"] = intent.mc_intent
+            params["popularity_candidate_limit"] = HYBRID_POPULARITY_CANDIDATE_LIMIT
+            popularity_cte = """
+            popular_taxonomy AS (
+                SELECT *
+                FROM filtered_source
+                WHERE lower(trim(coalesce(mc, ''))) = :popular_intent_mc
+                ORDER BY import_count DESC, latest_import DESC
+                LIMIT :popularity_candidate_limit
+            ),
+            """
+            popularity_union = """
+                UNION ALL
+                SELECT
+                    category, mc, sku_name, import_type, importer, manufacturer, factory, country,
+                    'popular' AS match_type,
+                    NULL::float AS semantic_score,
+                    NULL::float AS relevance_score,
+                    NULL::float AS mc_intent_bonus,
+                    NULL::float AS category_intent_bonus,
+                    NULL::float AS best_keyword_bonus,
+                    NULL::float AS mc_mismatch_penalty,
+                    NULL::float AS category_mismatch_penalty
+                FROM popular_taxonomy
+            """
+            popularity_union_count = """
+                UNION ALL
+                SELECT
+                    category, mc, sku_name, import_type, importer, manufacturer, factory, country,
+                    'popular' AS match_type,
+                    NULL::float AS semantic_score,
+                    NULL::float AS relevance_score
+                FROM popular_taxonomy
+            """
+        else:
+            popularity_cte = ""
+            popularity_union = ""
+            popularity_union_count = ""
     else:
         semantic_cte = ""
         semantic_union = ""
         semantic_union_count = ""
+        popularity_cte = ""
+        popularity_union = ""
+        popularity_union_count = ""
 
     if use_semantic:
         # Semantic candidates live in a separate vector table keyed by
@@ -356,6 +403,7 @@ async def search_hybrid(
                   {competitor_cond}
                   {col_filter_conds}
             ),
+            {popularity_cte}
             {semantic_cte}
             matched AS (
                 SELECT
@@ -371,12 +419,17 @@ async def search_hybrid(
                 FROM filtered_source
                 WHERE 1=1
                   {direct_search_cond}
+                {popularity_union}
                 {semantic_union}
             ),
             deduped AS (
                 SELECT
                     category, mc, sku_name, import_type, importer, manufacturer, factory, country,
-                    CASE WHEN bool_or(match_type = 'exact') THEN 'exact' ELSE 'semantic' END AS match_type,
+                    CASE
+                        WHEN bool_or(match_type = 'exact') THEN 'exact'
+                        WHEN bool_or(match_type = 'popular') THEN 'popular'
+                        ELSE 'semantic'
+                    END AS match_type,
                     MAX(semantic_score) AS semantic_score,
                     MAX(relevance_score) AS relevance_score,
                     MAX(mc_intent_bonus) AS mc_intent_bonus,
@@ -390,7 +443,7 @@ async def search_hybrid(
             thresholded AS (
                 SELECT *
                 FROM deduped
-                WHERE match_type = 'exact'
+                WHERE match_type IN ('exact', 'popular')
                    OR relevance_score >= :similarity_threshold
             )
             SELECT
@@ -477,6 +530,7 @@ async def search_hybrid(
                       {competitor_cond}
                       {col_filter_conds}
                 ),
+                {popularity_cte}
                 {semantic_cte}
                 matched AS (
                     SELECT
@@ -487,12 +541,17 @@ async def search_hybrid(
                     FROM filtered_source
                     WHERE 1=1
                       {direct_search_cond}
+                    {popularity_union_count}
                     {semantic_union_count}
                 ),
                 deduped AS (
                     SELECT
                         category, mc, sku_name, import_type, importer, manufacturer, factory, country,
-                        CASE WHEN bool_or(match_type = 'exact') THEN 'exact' ELSE 'semantic' END AS match_type,
+                        CASE
+                            WHEN bool_or(match_type = 'exact') THEN 'exact'
+                            WHEN bool_or(match_type = 'popular') THEN 'popular'
+                            ELSE 'semantic'
+                        END AS match_type,
                         MAX(semantic_score) AS semantic_score,
                         MAX(relevance_score) AS relevance_score
                     FROM matched
@@ -501,7 +560,7 @@ async def search_hybrid(
                 thresholded AS (
                     SELECT *
                     FROM deduped
-                    WHERE match_type = 'exact'
+                    WHERE match_type IN ('exact', 'popular')
                        OR relevance_score >= :similarity_threshold
                 )
                 SELECT COUNT(*) FROM (
