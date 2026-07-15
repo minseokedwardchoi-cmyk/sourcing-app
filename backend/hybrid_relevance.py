@@ -16,6 +16,29 @@ def normalize_key(value: Optional[str]) -> str:
     return " ".join((value or "").strip().lower().split())
 
 
+# High-confidence lexical aliases complement semantic similarity. Keep this
+# list for true interchangeable product terms only; broad related concepts
+# should continue to be handled by embeddings and taxonomy inference.
+PRODUCT_SYNONYM_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("어묵", "오뎅"),
+)
+
+
+def expand_query_terms(query: str) -> tuple[str, ...]:
+    normalized = normalize_key(query)
+    if not normalized:
+        return ()
+    expanded = [normalized]
+    for group in PRODUCT_SYNONYM_GROUPS:
+        normalized_group = tuple(normalize_key(term) for term in group)
+        if not any(term in normalized for term in normalized_group):
+            continue
+        for term in normalized_group:
+            if term not in expanded:
+                expanded.append(term)
+    return tuple(expanded)
+
+
 @dataclass(frozen=True)
 class IntentRule:
     triggers: tuple[str, ...]

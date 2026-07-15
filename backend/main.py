@@ -255,6 +255,8 @@ async def _startup_bg():
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_gin_sku       ON import_history USING gin (sku_name      gin_trgm_ops)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_gin_factory   ON import_history USING gin (factory       gin_trgm_ops)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_gin_importer  ON import_history USING gin (importer      gin_trgm_ops)",
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pe_mc_search ON product_embedding (mc_norm_key, status, model, embedding_dimensions)",
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pe_gin_sku_norm ON product_embedding USING gin (sku_name_norm_key gin_trgm_ops)",
     ]
     ac_engine = engine.execution_options(isolation_level="AUTOCOMMIT")
     for sql in index_sqls:

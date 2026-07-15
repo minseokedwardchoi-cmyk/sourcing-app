@@ -171,6 +171,9 @@ class FakeResult:
     def all(self):
         return self._rows
 
+    def first(self):
+        return self._rows[0] if self._rows else None
+
     def scalar(self):
         return 0
 
@@ -248,7 +251,13 @@ class IntentGateSqlTest(unittest.TestCase):
             similarity_threshold=0.9,
             intent=QueryIntent(mc_intent="참치", category_intent=("가공식품",), keyword_terms=("참치",)),
         )
-        self.assertIn("WHERE mc_key = :intent_mc", sql.cte)
+        gate = "AND mc_norm_key = :intent_mc"
+        self.assertIn(gate, sql.cte)
+        self.assertLess(
+            sql.cte.index(gate),
+            sql.cte.index("candidates AS"),
+            "MC must be filtered before the candidate LIMIT",
+        )
         self.assertEqual(sql.params["intent_mc"], "참치")
 
     def test_unknown_mc_keeps_general_semantic_search(self):
@@ -263,7 +272,58 @@ class IntentGateSqlTest(unittest.TestCase):
             similarity_threshold=0.9,
             intent=NULL_INTENT,
         )
-        self.assertNotIn("WHERE mc_key = :intent_mc", sql.cte)
+        self.assertNotIn("= :intent_mc", sql.cte.split("candidates AS")[0])
+
+
+class DynamicIntentInferenceTest(unittest.TestCase):
+    def setUp(self):
+        hybrid_search._DYNAMIC_INTENT_CACHE.clear()
+
+    def test_product_name_match_infers_mc(self):
+        from hybrid_relevance import NULL_INTENT
+
+        class MappingRows:
+            def first(self):
+                return {"mc_key": "beef", "matched_products": 12, "exact_mc": 0}
+
+        class Result:
+            def mappings(self):
+                return MappingRows()
+
+        class Session:
+            async def execute(self, statement, params=None):
+                self.params = params
+                return Result()
+
+            async def rollback(self):
+                raise AssertionError("successful inference must not roll back")
+
+        session = Session()
+        intent = asyncio.run(
+            hybrid_search._resolve_dynamic_intent(session, "beef steak", NULL_INTENT)
+        )
+        self.assertEqual(intent.mc_intent, "beef")
+        self.assertEqual(intent.keyword_terms, ("beef steak", "beef", "steak"))
+        self.assertEqual(session.params["taxonomy_contains_0"], "%beef steak%")
+
+    def test_fish_cake_aliases_expand_bidirectionally(self):
+        from hybrid_relevance import expand_query_terms
+
+        self.assertEqual(expand_query_terms("어묵"), ("어묵", "오뎅"))
+        self.assertEqual(expand_query_terms("오뎅"), ("오뎅", "어묵"))
+
+    def test_static_mc_skips_database_lookup(self):
+        from hybrid_relevance import QueryIntent
+
+        class Session:
+            async def execute(self, statement, params=None):
+                raise AssertionError("static MC intent must skip dynamic lookup")
+
+        static = QueryIntent(mc_intent="tuna", category_intent=(), keyword_terms=("tuna",))
+        resolved = asyncio.run(
+            hybrid_search._resolve_dynamic_intent(Session(), "tuna can", static)
+        )
+        self.assertIs(resolved, static)
 
 
 # ─── C. sort order tests ────────────────────────────────────────────────────

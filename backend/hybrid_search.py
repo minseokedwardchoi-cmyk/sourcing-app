@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hybrid_config import HYBRID_CANDIDATE_LIMIT, HYBRID_SEARCH_ENABLED, HYBRID_SIMILARITY_THRESHOLD
 from hybrid_embeddings import EmbeddingProvider, EmbeddingResult, default_embedding_provider
-from hybrid_relevance import RelevanceBreakdown, clamp_relevance_score, detect_intent
+from hybrid_relevance import (
+    QueryIntent,
+    RelevanceBreakdown,
+    clamp_relevance_score,
+    detect_intent,
+    expand_query_terms,
+    normalize_key,
+)
 from hybrid_schemas import HybridSearchResponse, HybridSkuHistoryRow
 from hybrid_vector_store import PgVectorSearchRepository, VectorSearchRepository
 from importer import COMPETITOR_MAP
@@ -22,6 +29,9 @@ from schemas import PaginationMeta
 _DEFAULT_EMBEDDING_PROVIDER = default_embedding_provider()
 _DEFAULT_VECTOR_REPOSITORY = PgVectorSearchRepository()
 log = logging.getLogger(__name__)
+_DYNAMIC_INTENT_CACHE: dict[str, tuple[float, QueryIntent]] = {}
+_DYNAMIC_INTENT_CACHE_TTL_SECONDS = 3600
+_DYNAMIC_INTENT_CACHE_MAX_SIZE = 256
 
 
 def normalize_text(value: Optional[str]) -> str:
@@ -125,6 +135,93 @@ def _passes_relevance_threshold(row: dict, threshold: float) -> bool:
     return relevance is not None and float(relevance) >= threshold
 
 
+async def _resolve_dynamic_intent(
+    db: AsyncSession,
+    query: str,
+    detected: QueryIntent,
+) -> QueryIntent:
+    """Infer an MC from exact/contained product-name matches when no static
+    rule supplied one.
+
+    The lookup uses the unique product embedding table rather than the much
+    larger import-history table. Results are cached because product taxonomy is
+    stable across searches. Static rules still win for known ambiguous intents.
+    """
+    if detected.mc_intent:
+        return detected
+
+    query_key = normalize_key(query)
+    if len(query_key) < 2:
+        return detected
+
+    cached = _DYNAMIC_INTENT_CACHE.get(query_key)
+    now = time.monotonic()
+    if cached and now - cached[0] < _DYNAMIC_INTENT_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    lookup_terms = expand_query_terms(query_key)
+    lookup_conditions: list[str] = []
+    lookup_params: dict[str, str] = {}
+    exact_params: list[str] = []
+    for index, term in enumerate(lookup_terms):
+        exact_name = f"taxonomy_exact_{index}"
+        contains_name = f"taxonomy_contains_{index}"
+        lookup_params[exact_name] = term
+        lookup_params[contains_name] = f"%{term}%"
+        exact_params.append(f":{exact_name}")
+        lookup_conditions.append(
+            f"(mc_norm_key = :{exact_name} OR sku_name_norm_key LIKE :{contains_name})"
+        )
+    exact_list = ", ".join(exact_params)
+    lookup_where = " OR ".join(lookup_conditions)
+
+    try:
+        result = await db.execute(
+            text(
+                f"""
+                SELECT
+                    mc_norm_key AS mc_key,
+                    COUNT(*)::int AS matched_products,
+                    MAX(
+                        CASE WHEN mc_norm_key IN ({exact_list})
+                             THEN 1 ELSE 0 END
+                    )::int AS exact_mc
+                FROM product_embedding
+                WHERE status = 'completed'
+                  AND mc_norm_key <> ''
+                  AND ({lookup_where})
+                GROUP BY mc_norm_key
+                ORDER BY exact_mc DESC, matched_products DESC
+                LIMIT 1
+                """
+            ),
+            lookup_params,
+        )
+        row = result.mappings().first()
+    except Exception:
+        await db.rollback()
+        log.exception("dynamic product intent inference failed for query=%r", query)
+        return detected
+
+    if not row or not row.get("mc_key"):
+        return detected
+
+    keyword_terms = tuple(dict.fromkeys((
+        *detected.keyword_terms,
+        *lookup_terms,
+        *(p for p in query_key.split() if len(p) >= 2),
+    )))
+    resolved = QueryIntent(
+        mc_intent=str(row["mc_key"]),
+        category_intent=detected.category_intent,
+        keyword_terms=keyword_terms,
+    )
+    if len(_DYNAMIC_INTENT_CACHE) >= _DYNAMIC_INTENT_CACHE_MAX_SIZE:
+        _DYNAMIC_INTENT_CACHE.pop(next(iter(_DYNAMIC_INTENT_CACHE)))
+    _DYNAMIC_INTENT_CACHE[query_key] = (now, resolved)
+    return resolved
+
+
 async def warmup_embedding_model() -> None:
     """Eagerly load the embedding model in the background at process
     startup. Without this, the first real search request after a deploy or
@@ -169,16 +266,17 @@ async def search_hybrid(
     effective_similarity_threshold = (
         HYBRID_SIMILARITY_THRESHOLD if similarity_threshold is None else similarity_threshold
     )
-    intent = detect_intent(query)
+    intent = await _resolve_dynamic_intent(db, query, detect_intent(query))
 
     # Product vectors were embedded as "sku_name | mc | category". For known
     # intents, give the short query the same shape so MiniLM compares like
     # with like instead of over-weighting unrelated surface-level tokens.
     semantic_query = query
     if intent.mc_intent or intent.category_intent:
+        expanded_query = " ".join(dict.fromkeys((query, *intent.keyword_terms)))
         semantic_query = " | ".join(
             (
-                query,
+                expanded_query,
                 intent.mc_intent or "",
                 intent.category_intent[0] if intent.category_intent else "",
             )
@@ -207,15 +305,16 @@ async def search_hybrid(
 
     direct_search_cond = ""
     if query:
-        direct_search_cond = """AND (
-            sku_name ILIKE :search OR
-            factory ILIKE :search OR
-            manufacturer ILIKE :search OR
-            importer ILIKE :search OR
-            country ILIKE :search OR
-            mc ILIKE :search
-        )"""
-        params["search"] = f"%{query}%"
+        direct_term_groups: list[str] = []
+        for index, term in enumerate(expand_query_terms(query)):
+            key = f"search_{index}"
+            params[key] = f"%{term}%"
+            direct_term_groups.append(f"""(
+                sku_name ILIKE :{key} OR factory ILIKE :{key} OR
+                manufacturer ILIKE :{key} OR importer ILIKE :{key} OR
+                country ILIKE :{key} OR mc ILIKE :{key}
+            )""")
+        direct_search_cond = "AND (" + " OR ".join(direct_term_groups) + ")"
         params["query_exact"] = query.lower()
 
     use_semantic = hybrid_enabled and bool(query_embedding)

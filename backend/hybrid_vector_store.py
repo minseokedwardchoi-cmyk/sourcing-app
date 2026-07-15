@@ -132,12 +132,15 @@ class PgVectorSearchRepository:
             "similarity_threshold": similarity_threshold,
         }
         frag = _intent_sql_fragments(intent, params)
-        # A detected MC intent is a high-confidence taxonomy signal. Keep the
-        # vector search broad enough to find lexical variants, but do not let
-        # superficially similar products from another MC leak into the final
-        # semantic results (for example candy/soybean paste for "참치캔").
-        # Exact text matches are built outside this CTE and remain unaffected.
-        intent_gate = "WHERE mc_key = :intent_mc" if intent.mc_intent else ""
+        # Apply a high-confidence MC intent before vector scoring and LIMIT.
+        # Previously the query selected the global top-K first and filtered by
+        # MC afterwards, so popular products in the right MC could never enter
+        # the candidate pool. Exact text matches are built outside this CTE and
+        # remain unaffected.
+        scored_intent_gate = (
+            "AND mc_norm_key = :intent_mc"
+            if intent.mc_intent else ""
+        )
 
         # No raw semantic_score threshold filter here: candidate_limit (ordered by
         # vector distance) controls the candidate pool size, while inclusion is
@@ -146,15 +149,16 @@ class PgVectorSearchRepository:
         cte = f"""
             scored AS (
                 SELECT
-                    lower(trim(sku_name)) AS sku_key,
-                    lower(trim(coalesce(mc, ''))) AS mc_key,
-                    lower(trim(coalesce(category, ''))) AS category_key,
+                    sku_name_norm_key AS sku_key,
+                    mc_norm_key AS mc_key,
+                    category_norm_key AS category_key,
                     (1 - ({embedding_expr} <=> {query_expr}))::float AS semantic_score,
                     ({embedding_expr} <=> {query_expr}) AS distance
                 FROM product_embedding
                 WHERE status = 'completed'
                   AND model = :embedding_model
                   AND embedding_dimensions = :embedding_dimensions
+                  {scored_intent_gate}
             ),
             candidates AS (
                 SELECT * FROM scored ORDER BY distance LIMIT :candidate_limit
@@ -168,7 +172,6 @@ class PgVectorSearchRepository:
                     {frag['category_mismatch_penalty_case']} AS category_mismatch_penalty,
                     {frag['best_keyword_bonus_case']} AS best_keyword_bonus
                 FROM candidates
-                {intent_gate}
             ),
             semantic_products AS (
                 SELECT
