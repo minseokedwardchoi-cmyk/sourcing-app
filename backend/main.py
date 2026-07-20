@@ -11,6 +11,8 @@ main.py — FastAPI 앱 진입점
 """
 from __future__ import annotations
 import os
+import csv
+import io
 import json
 import math
 from calendar import monthrange
@@ -26,6 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func, select
 from dotenv import load_dotenv
@@ -1942,6 +1945,38 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
         "importers":            row.get("importers", 0),
         "with_contact":         row.get("with_contact", 0),
     }
+
+
+# ─── 수입이력 전체 raw 데이터 CSV 내보내기 ───────────────────────────────────
+# 수십만 행이 될 수 있어 전체를 메모리에 올리지 않고 서버 사이드 커서로
+# 스트리밍한다 (Render 소규모 인스턴스에서도 안전하게 동작하도록).
+# 엑셀에서 한글이 깨지지 않도록 UTF-8 BOM을 앞에 붙인다.
+@app.get("/api/export/import-history.csv")
+async def export_import_history_csv(db: AsyncSession = Depends(get_db)):
+    columns = [c.name for c in ImportHistory.__table__.columns]
+
+    async def row_generator():
+        yield "﻿"
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(columns)
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+
+        result = await db.stream(text(f"SELECT {', '.join(columns)} FROM import_history ORDER BY id"))
+        async for row in result:
+            writer.writerow(["" if v is None else v for v in row])
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+
+    return StreamingResponse(
+        row_generator(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=import_history_export.csv"},
+    )
+
 
 # ─── 경쟁사별 해외제조업체 수 통계 ───────────────────────────────────────────
 @app.get("/api/competitor-stats")
