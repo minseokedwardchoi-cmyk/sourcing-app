@@ -1629,6 +1629,25 @@ async def migrate_email_crawl_columns(db: AsyncSession = Depends(get_db)):
     return {"message": "email_source, email_crawled_at 컬럼 및 인덱스 적용 완료 (이미 있었다면 변경 없음)"}
 
 
+# GitHub Actions 로그는 대용량 실행 시 앞부분이 잘려서 조회 도구로 다시 볼 수
+# 없는 경우가 있어, "실제로 몇 건이 채워졌는지"를 DB 기준으로 바로 확인할 수
+# 있는 집계 엔드포인트를 둔다.
+@app.get("/api/manufacturer/email-crawl-stats")
+async def get_email_crawl_stats(db: AsyncSession = Depends(get_db)):
+    row_r = await db.execute(text("""
+        SELECT
+            COUNT(DISTINCT (manufacturer, factory))                                            AS total_manufacturers,
+            COUNT(DISTINCT (manufacturer, factory)) FILTER (WHERE email IS NOT NULL AND email <> '')      AS with_email,
+            COUNT(DISTINCT (manufacturer, factory)) FILTER (WHERE email_source = 'crawled')               AS crawled_email,
+            COUNT(DISTINCT (manufacturer, factory)) FILTER (WHERE email IS NULL OR email = '')            AS missing_email,
+            COUNT(DISTINCT (manufacturer, factory)) FILTER (
+                WHERE (email IS NULL OR email = '') AND email_crawled_at IS NOT NULL
+            )                                                                                    AS attempted_not_found
+        FROM import_history
+    """))
+    return dict(row_r.mappings().first())
+
+
 # ─── 3-1-1. 제조사 대표 이메일 크롤링 대상 조회 ───────────────────────────────
 # 이메일이 없는 제조사는 홈페이지 유무와 무관하게 전부 대상에 포함한다
 # (홈페이지가 없으면 스크립트가 알리바바/Made-in-China 등에서 찾아본다).
