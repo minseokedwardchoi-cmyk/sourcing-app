@@ -94,7 +94,13 @@ _MAJOR_DISTRIBUTORS = {
     "RT-Mart":        ["rt-mart", "大润发"],
 }
 
-_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; SourcingAppResearchBot/0.1)"}
+# User-Agent를 봇으로 밝히면 DuckDuckGo/일부 홈페이지가 결과를 다르게 주거나
+# 차단하는 경우가 있어, 일반 브라우저와 동일한 UA를 사용한다.
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9,ko;q=0.8",
+}
 
 
 def _find_col(fieldnames: list[str], candidates: list[str]) -> str | None:
