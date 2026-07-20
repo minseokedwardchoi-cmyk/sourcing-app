@@ -386,14 +386,39 @@ async def crawl_one(client: httpx.AsyncClient, sem: asyncio.Semaphore, target: d
         return {**target, "email": email}
 
 
+BACKEND_RETRIES = 5
+BACKEND_RETRY_BACKOFF = 5  # 초, 시도마다 배로 증가
+
+
+async def _call_backend_with_retry(fn):
+    """백엔드 재배포 중 502/503처럼 일시적인 오류가 나면 잠깐 쉬었다가 재시도.
+    재배포는 보통 몇 십 초 안에 끝나므로, 여기서 죽으면 배치 전체(최대 300건
+    분량의 크롤링 결과)가 그대로 유실된다."""
+    last_err = None
+    for attempt in range(1, BACKEND_RETRIES + 1):
+        try:
+            return await fn()
+        except (httpx.HTTPStatusError, httpx.TransportError) as e:
+            last_err = e
+            if attempt < BACKEND_RETRIES:
+                wait = BACKEND_RETRY_BACKOFF * attempt
+                log.warning("백엔드 호출 실패 (%d/%d), %d초 후 재시도: %s",
+                            attempt, BACKEND_RETRIES, wait, e)
+                await asyncio.sleep(wait)
+    raise last_err
+
+
 async def fetch_targets(client: httpx.AsyncClient, limit: int) -> list[dict]:
-    resp = await client.get(
-        f"{BACKEND_URL}/api/manufacturer/email-crawl-targets",
-        params={"limit": limit},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()["targets"]
+    async def _do():
+        resp = await client.get(
+            f"{BACKEND_URL}/api/manufacturer/email-crawl-targets",
+            params={"limit": limit},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()["targets"]
+
+    return await _call_backend_with_retry(_do)
 
 
 async def submit_results(client: httpx.AsyncClient, results: list[dict]) -> dict:
@@ -408,13 +433,17 @@ async def submit_results(client: httpx.AsyncClient, results: list[dict]) -> dict
             for r in results
         ]
     }
-    resp = await client.post(
-        f"{BACKEND_URL}/api/manufacturer/email-crawl-result",
-        json=payload,
-        timeout=60,
-    )
-    resp.raise_for_status()
-    return resp.json()
+
+    async def _do():
+        resp = await client.post(
+            f"{BACKEND_URL}/api/manufacturer/email-crawl-result",
+            json=payload,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    return await _call_backend_with_retry(_do)
 
 
 async def main_async(limit: int, dry_run: bool):
