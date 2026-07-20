@@ -11,6 +11,7 @@ main.py — FastAPI 앱 진입점
 """
 from __future__ import annotations
 import os
+import json
 import math
 from calendar import monthrange
 from datetime import date
@@ -422,6 +423,35 @@ class ContactBulkUploadResponse(BaseModel):
     total_rows: int
     matched_rows: int
     skipped: int
+    message: str
+
+
+class EmailCrawlTarget(BaseModel):
+    manufacturer: str
+    factory: str
+    country: Optional[str] = None
+    homepage: Optional[str] = None  # 없으면 스크립트가 B2B 디렉토리에서 탐색
+
+
+class EmailCrawlTargetsResponse(BaseModel):
+    targets: list[EmailCrawlTarget]
+
+
+class EmailCrawlResultItem(BaseModel):
+    manufacturer: str
+    factory: str
+    country: Optional[str] = None
+    email: Optional[str] = None  # None이면 "찾지 못함" — crawled_at만 갱신하고 재시도 주기를 늦춤
+
+
+class EmailCrawlResultRequest(BaseModel):
+    results: list[EmailCrawlResultItem]
+
+
+class EmailCrawlResultResponse(BaseModel):
+    attempted: int
+    found: int
+    updated_rows: int
     message: str
 
 class DateBulkUploadResponse(BaseModel):
@@ -1578,6 +1608,106 @@ async def update_manufacturer_contact(
         updated_rows=updated_rows,
         message=f"연락처 저장 완료: {updated_rows}개 수입 이력에 반영됨",
     )
+
+# ─── 3-1-1. 제조사 대표 이메일 크롤링 대상 조회 ───────────────────────────────
+# 이메일이 없는 제조사는 홈페이지 유무와 무관하게 전부 대상에 포함한다
+# (홈페이지가 없으면 스크립트가 알리바바/Made-in-China 등에서 찾아본다).
+# 재크롤링 폭주를 막기 위해, 이메일이 이미 있거나(성공) 최근에 시도했던 건은
+# recrawl_after_days가 지나야 다시 대상에 포함된다.
+@app.get("/api/manufacturer/email-crawl-targets", response_model=EmailCrawlTargetsResponse)
+async def get_email_crawl_targets(
+    limit:              int = Query(200, ge=1, le=2000),
+    recrawl_after_days: int = Query(30,  ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+):
+    rows_r = await db.execute(
+        text("""
+            SELECT DISTINCT ON (manufacturer, factory)
+                manufacturer, factory, country, homepage
+            FROM import_history
+            WHERE (email IS NULL OR email = '')
+              AND (
+                    email_crawled_at IS NULL
+                    OR email_crawled_at < now() - make_interval(days => :days)
+                  )
+            ORDER BY manufacturer, factory, COALESCE(import_date, process_date) DESC NULLS LAST
+            LIMIT :limit
+        """),
+        {"days": recrawl_after_days, "limit": limit},
+    )
+    rows = rows_r.mappings().all()
+    return EmailCrawlTargetsResponse(
+        targets=[
+            EmailCrawlTarget(
+                manufacturer=r["manufacturer"],
+                factory=r["factory"],
+                country=r["country"],
+                homepage=r["homepage"],
+            )
+            for r in rows
+        ]
+    )
+
+
+# ─── 3-1-2. 제조사 대표 이메일 크롤링 결과 반영 ───────────────────────────────
+@app.post("/api/manufacturer/email-crawl-result", response_model=EmailCrawlResultResponse)
+async def submit_email_crawl_result(
+    payload: EmailCrawlResultRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    if not payload.results:
+        raise HTTPException(status_code=400, detail="results가 비어 있습니다.")
+
+    items = [
+        {
+            "manufacturer": r.manufacturer,
+            "factory":      r.factory,
+            "country":      r.country,
+            "email":        r.email,
+        }
+        for r in payload.results
+    ]
+
+    # email은 그 사이 수기로 채워졌을 수 있어 비어있는 경우에만 채우고,
+    # email_crawled_at은 시도 여부와 무관하게 항상 갱신해 재크롤링 폭주를 막는다.
+    sql = """
+        WITH input AS (
+            SELECT *
+            FROM jsonb_to_recordset(CAST(:payload AS jsonb)) AS i(
+                manufacturer text,
+                factory text,
+                country text,
+                email text
+            )
+        )
+        UPDATE import_history AS ih
+        SET
+            email = CASE
+                WHEN i.email IS NOT NULL AND (ih.email IS NULL OR ih.email = '')
+                THEN i.email ELSE ih.email
+            END,
+            email_source = CASE
+                WHEN i.email IS NOT NULL AND (ih.email IS NULL OR ih.email = '')
+                THEN 'crawled' ELSE ih.email_source
+            END,
+            email_crawled_at = now()
+        FROM input AS i
+        WHERE ih.manufacturer = i.manufacturer
+          AND ih.factory = i.factory
+          AND (i.country IS NULL OR ih.country = i.country)
+    """
+    result = await db.execute(text(sql), {"payload": json.dumps(items, ensure_ascii=False)})
+    await db.commit()
+
+    found = sum(1 for r in payload.results if r.email)
+    updated_rows = result.rowcount or 0
+    return EmailCrawlResultResponse(
+        attempted=len(payload.results),
+        found=found,
+        updated_rows=updated_rows,
+        message=f"크롤링 결과 반영 완료: {len(payload.results)}개 시도, {found}개 이메일 발견, {updated_rows}행 갱신",
+    )
+
 
 # ─── 3-2. 제조사 연락처/인증서 Excel 일괄 보강 ───────────────────────────────
 @app.post("/api/upload-contacts", response_model=ContactBulkUploadResponse)

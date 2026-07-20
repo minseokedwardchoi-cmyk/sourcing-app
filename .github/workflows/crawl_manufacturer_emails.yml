@@ -1,0 +1,47 @@
+name: 제조사 대표 이메일 자동 수집
+
+on:
+  schedule:
+    - cron: '0 18 * * 0'   # 매주 일요일 03:00 KST (UTC 18:00, 전주 토요일)
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: '한 배치당 처리할 제조사 수'
+        required: false
+        default: '300'
+      max_batches:
+        description: '최대 배치 반복 횟수 (대상이 없어지면 그 전에 종료)'
+        required: false
+        default: '20'
+
+jobs:
+  crawl-emails:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: pip install -r scripts/requirements-email-crawl.txt
+
+      - name: 이메일 크롤링 (대상이 없어질 때까지 배치 반복)
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          LIMIT="${{ github.event.inputs.limit || '300' }}"
+          MAX_BATCHES="${{ github.event.inputs.max_batches || '20' }}"
+
+          for i in $(seq 1 "$MAX_BATCHES"); do
+            echo "=== 배치 $i / $MAX_BATCHES (limit=$LIMIT) ==="
+            out=$(python3 scripts/crawl_manufacturer_emails.py --limit "$LIMIT")
+            echo "$out"
+            if echo "$out" | grep -q "크롤링할 대상이 없습니다"; then
+              echo "남은 대상 없음 — 종료"
+              break
+            fi
+          done

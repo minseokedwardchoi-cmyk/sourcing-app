@@ -4,7 +4,7 @@ models.py — DB 테이블 정의
 실제 Excel 컬럼명이 달라질 경우 FIELD_MAP(importer.py)만 수정하면 됨.
 """
 from sqlalchemy import (
-    Column, Integer, String, Date, Text, Index, UniqueConstraint, Numeric
+    Column, Integer, String, Date, DateTime, Text, Index, UniqueConstraint, Numeric
 )
 from database import Base
 
@@ -36,6 +36,8 @@ class ImportHistory(Base):
     # ── 연락처 ────────────────────────────────────────────
     email            = Column(String(300),  nullable=True,  comment="이메일 (복수 시 콤마 구분)")
     homepage         = Column(String(500),  nullable=True,  comment="홈페이지 URL")
+    email_source     = Column(String(20),   nullable=True,  comment="이메일 출처 (manual/crawled)")
+    email_crawled_at = Column(DateTime,     nullable=True,  comment="홈페이지 이메일 크롤링 마지막 시도 시각")
 
     # ── 날짜 ──────────────────────────────────────────────
     import_date      = Column(Date,         nullable=True,  comment="수입일자")
