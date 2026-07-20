@@ -159,6 +159,43 @@ async def refresh_mvs(db: AsyncSession = None):
     await _refresh_column_values_cache()
 
 
+_refresh_mvs_lock = None  # lazily created on the running event loop (see _refresh_mvs_safe)
+
+
+async def _refresh_mvs_safe(db: AsyncSession = None, retries: int = 1):
+    """Wrapper for every refresh_mvs() call site.
+
+    Two problems this fixes:
+    1. Callers fire this via `asyncio.create_task(_refresh_mvs_safe())` and never look
+       at the result, so a failed refresh (e.g. REFRESH CONCURRENTLY erroring out
+       because another refresh is already running) silently leaves
+       _column_values_cache stuck on stale data - filter dropdowns then miss
+       values that are already visible in the table until the process restarts.
+    2. Several call sites can fire close together (e.g. rapid upload chunks),
+       and Postgres rejects a second concurrent REFRESH CONCURRENTLY on the same
+       view while one is in flight - that's exactly the transient failure this
+       swallowed. A lock serializes them instead of racing.
+    """
+    import asyncio
+    import traceback
+
+    global _refresh_mvs_lock
+    if _refresh_mvs_lock is None:
+        _refresh_mvs_lock = asyncio.Lock()
+
+    async with _refresh_mvs_lock:
+        for attempt in range(retries + 1):
+            try:
+                await refresh_mvs(db)
+                return
+            except Exception:
+                if attempt < retries:
+                    await asyncio.sleep(5)
+                else:
+                    print("refresh_mvs failed after retries - _column_values_cache may be stale:")
+                    traceback.print_exc()
+
+
 _MV_INDEXES = [
     # sku_history_mv 인덱스
     "CREATE INDEX IF NOT EXISTS idx_mv_import_count ON sku_history_mv (import_count DESC)",
@@ -265,10 +302,7 @@ async def _startup_bg():
                 await conn.execute(text(sql))
         except Exception:
             pass
-    try:
-        await refresh_mvs()
-    except Exception:
-        pass
+    await _refresh_mvs_safe()
     print("STARTUP BG COMPLETE")
 
 _SKU_HISTORY_MV_SQL = """
@@ -1566,7 +1600,7 @@ async def upload_contacts(
 
         # 연락처 보강 결과를 목록/필터용 캐시에 반영하되, 업로드 응답은 막지 않는다.
         import asyncio
-        asyncio.create_task(refresh_mvs())
+        asyncio.create_task(_refresh_mvs_safe())
 
         return ContactBulkUploadResponse(**result)
 
@@ -1595,7 +1629,7 @@ async def upload_excel(
     content = await file.read()
     result  = await import_excel(content, db)
     await db.commit()
-    asyncio.create_task(refresh_mvs())
+    asyncio.create_task(_refresh_mvs_safe())
     print("UPLOAD_RESULT:", result)
 
     return UploadResponse(
@@ -1659,7 +1693,7 @@ async def upload_json(payload: JsonUploadRequest, db: AsyncSession = Depends(get
 
     if payload.refresh:
         import asyncio
-        asyncio.create_task(refresh_mvs())
+        asyncio.create_task(_refresh_mvs_safe())
 
     return {"inserted": inserted, "skipped": skipped}
 
@@ -1693,7 +1727,7 @@ async def clear_all_data(
     await db.commit()
 
     # MV refresh는 오래 걸리므로 백그라운드에서 실행
-    asyncio.create_task(refresh_mvs())
+    asyncio.create_task(_refresh_mvs_safe())
 
     return ClearDataResponse(
         deleted_rows=deleted_rows,
@@ -2033,7 +2067,7 @@ async def get_factory_view_monthly(
 # ─── MV 수동 갱신 ────────────────────────────────────────────────────────────
 @app.post("/api/refresh-mv")
 async def refresh_mv(db: AsyncSession = Depends(get_db)):
-    await refresh_mvs(db)
+    await _refresh_mvs_safe(db)
     await db.commit()
     return {"status": "ok", "message": "MV 갱신 완료"}
 
@@ -2107,7 +2141,7 @@ async def backfill_mc(db: AsyncSession = Depends(get_db)):
     """))
     await db.commit()
 
-    asyncio.create_task(refresh_mvs())
+    asyncio.create_task(_refresh_mvs_safe())
 
     return {
         "status": "ok",
@@ -2143,7 +2177,7 @@ async def backfill_mc_loose(db: AsyncSession = Depends(get_db)):
     """))
     await db.commit()
 
-    asyncio.create_task(refresh_mvs())
+    asyncio.create_task(_refresh_mvs_safe())
 
     return {
         "status": "ok",
@@ -2176,7 +2210,7 @@ async def backfill_mc_by_name(db: AsyncSession = Depends(get_db)):
     """))
     await db.commit()
 
-    asyncio.create_task(refresh_mvs())
+    asyncio.create_task(_refresh_mvs_safe())
 
     return {
         "status": "ok",
@@ -2250,7 +2284,7 @@ async def _crawl_task(start_date: str, end_date: str):
 
         # MV 갱신 — 데이터 적재와 분리해서 실패해도 크롤링 결과는 보존
         try:
-            await refresh_mvs(db)
+            await _refresh_mvs_safe(db)
             await db.commit()
             print("MV REFRESH COMPLETE", flush=True)
         except Exception as e:
