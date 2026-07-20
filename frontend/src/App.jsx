@@ -539,6 +539,7 @@ function MainDashboard({ navigate }) {
     () => searchActive ? localFilterValues(data, ["category","mc","sku_name","import_type","importer","factory","country"]) : null,
     [searchActive, data]
   );
+  const [showCompCards, setShowCompCards] = useState(true);
 
   function cellKey(colKey, i) { return `${colKey}:${i}`; }
 
@@ -734,28 +735,37 @@ function MainDashboard({ navigate }) {
 
           {/* 경쟁사 카드 */}
           <div style={{padding:"12px 14px 0"}}>
-            <div className="competitor-cards">
-              {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡"].map(name => {
-                const theme = CARD_THEMES[name];
-                const isActive = competitor === name;
-                const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375 };
-                const count = FIXED_COUNTS[name];
-                return (
-                  <button
-                    key={name}
-                    className={`comp-card${isActive ? " active" : ""}`}
-                    style={{ background: isActive ? theme.active : theme.bg, borderColor: isActive ? theme.active : "#e2e8f0" }}
-                    onClick={() => { setCompetitor(name); setPage(1); }}
-                  >
-                    <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151", fontSize:"15px"}}>{name}</span>
-                    <span className="comp-card-num"  style={{color: isActive ? "#fff" : "#1a1a2e"}}>
-                      {typeof count === "number" ? count.toLocaleString() : count}
-                    </span>
-                    <span className="comp-card-label">해외제조업체</span>
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              className="icon-btn"
+              style={{marginBottom:6, fontSize:12, padding:"4px 10px"}}
+              onClick={() => setShowCompCards(v => !v)}
+            >
+              {showCompCards ? "▲ 유통사필터 접기" : "▼ 유통사필터 펼치기"}
+            </button>
+            {showCompCards && (
+              <div className="competitor-cards">
+                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡"].map(name => {
+                  const theme = CARD_THEMES[name];
+                  const isActive = competitor === name;
+                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375 };
+                  const count = FIXED_COUNTS[name];
+                  return (
+                    <button
+                      key={name}
+                      className={`comp-card${isActive ? " active" : ""}`}
+                      style={{ background: isActive ? theme.active : theme.bg, borderColor: isActive ? theme.active : "#e2e8f0" }}
+                      onClick={() => { setCompetitor(name); setPage(1); }}
+                    >
+                      <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151", fontSize:"15px"}}>{name}</span>
+                      <span className="comp-card-num"  style={{color: isActive ? "#fff" : "#1a1a2e"}}>
+                        {typeof count === "number" ? count.toLocaleString() : count}
+                      </span>
+                      <span className="comp-card-label">해외제조업체</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* 검색 툴바 */}
@@ -2835,6 +2845,7 @@ function FactoryViewDashboard({ navigate }) {
     () => searchActive ? localFilterValues(data, ["category","mc","sku_name","import_type","importer","factory","country"]) : null,
     [searchActive, data]
   );
+  const [showCompCards, setShowCompCards] = useState(true);
 
   function cellKey(colKey, i) { return `${colKey}:${i}`; }
 
@@ -3017,23 +3028,32 @@ function FactoryViewDashboard({ navigate }) {
 
           {/* 경쟁사 카드 */}
           <div style={{padding:"12px 14px 0"}}>
-            <div className="competitor-cards">
-              {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡"].map(name => {
-                const theme = CARD_THEMES[name];
-                const isActive = competitor === name;
-                const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375 };
-                const count = FIXED_COUNTS[name];
-                return (
-                  <button key={name} className={`comp-card${isActive ? " active" : ""}`}
-                    style={{ background: isActive ? theme.active : theme.bg, borderColor: isActive ? theme.active : "#e2e8f0" }}
-                    onClick={() => { setCompetitor(name); setPage(1); }}>
-                    <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151", fontSize:"15px"}}>{name}</span>
-                    <span className="comp-card-num"  style={{color: isActive ? "#fff" : "#1a1a2e"}}>{typeof count === "number" ? count.toLocaleString() : count}</span>
-                    <span className="comp-card-label">해외제조업체</span>
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              className="icon-btn"
+              style={{marginBottom:6, fontSize:12, padding:"4px 10px"}}
+              onClick={() => setShowCompCards(v => !v)}
+            >
+              {showCompCards ? "▲ 유통사필터 접기" : "▼ 유통사필터 펼치기"}
+            </button>
+            {showCompCards && (
+              <div className="competitor-cards">
+                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡"].map(name => {
+                  const theme = CARD_THEMES[name];
+                  const isActive = competitor === name;
+                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375 };
+                  const count = FIXED_COUNTS[name];
+                  return (
+                    <button key={name} className={`comp-card${isActive ? " active" : ""}`}
+                      style={{ background: isActive ? theme.active : theme.bg, borderColor: isActive ? theme.active : "#e2e8f0" }}
+                      onClick={() => { setCompetitor(name); setPage(1); }}>
+                      <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151", fontSize:"15px"}}>{name}</span>
+                      <span className="comp-card-num"  style={{color: isActive ? "#fff" : "#1a1a2e"}}>{typeof count === "number" ? count.toLocaleString() : count}</span>
+                      <span className="comp-card-label">해외제조업체</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* 검색 툴바 */}
