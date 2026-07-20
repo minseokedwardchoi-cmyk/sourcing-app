@@ -36,10 +36,25 @@ jobs:
           LIMIT="${{ github.event.inputs.limit || '300' }}"
           MAX_BATCHES="${{ github.event.inputs.max_batches || '20' }}"
 
+          FAILURES=0
           for i in $(seq 1 "$MAX_BATCHES"); do
             echo "=== 배치 $i / $MAX_BATCHES (limit=$LIMIT) ==="
+            set +e
             out=$(python3 scripts/crawl_manufacturer_emails.py --limit "$LIMIT")
+            status=$?
+            set -e
             echo "$out"
+
+            if [ "$status" -ne 0 ]; then
+              FAILURES=$((FAILURES + 1))
+              echo "배치 $i 실패 (누적 실패 $FAILURES회) — 다음 배치로 계속 진행"
+              if [ "$FAILURES" -ge 5 ]; then
+                echo "연속/누적 실패가 너무 많음 — 중단"
+                exit 1
+              fi
+              continue
+            fi
+
             if echo "$out" | grep -q "크롤링할 대상이 없습니다"; then
               echo "남은 대상 없음 — 종료"
               break
