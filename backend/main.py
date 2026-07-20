@@ -34,7 +34,7 @@ from sqlalchemy import text, func, select
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from database import get_db, engine, Base
+from database import get_db, engine, Base, AsyncSessionLocal
 from models import ImportHistory
 from schemas import (
     SkuHistoryResponse, SkuHistoryRow, PaginationMeta,
@@ -1951,8 +1951,15 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 # 수십만 행이 될 수 있어 전체를 메모리에 올리지 않고 서버 사이드 커서로
 # 스트리밍한다 (Render 소규모 인스턴스에서도 안전하게 동작하도록).
 # 엑셀에서 한글이 깨지지 않도록 UTF-8 BOM을 앞에 붙인다.
+#
+# Depends(get_db) 세션을 쓰지 않는 이유: FastAPI는 경로 함수가 return하는
+# 순간 Depends의 정리(cleanup)를 실행해 세션을 닫아버린다. StreamingResponse는
+# 응답 바디를 실제로 보낼 때(경로 함수가 이미 반환된 뒤) 제너레이터를 도는데,
+# 그 시점엔 세션이 이미 닫혀 있어 아무 행도 못 읽고 빈 파일이 나갔다.
+# 그래서 제너레이터 안에서 직접 세션을 열고 닫아, 세션 수명이 스트리밍
+# 전체와 같이 가도록 한다.
 @app.get("/api/export/import-history.csv")
-async def export_import_history_csv(db: AsyncSession = Depends(get_db)):
+async def export_import_history_csv():
     columns = [c.name for c in ImportHistory.__table__.columns]
 
     async def row_generator():
@@ -1964,12 +1971,13 @@ async def export_import_history_csv(db: AsyncSession = Depends(get_db)):
         buf.seek(0)
         buf.truncate(0)
 
-        result = await db.stream(text(f"SELECT {', '.join(columns)} FROM import_history ORDER BY id"))
-        async for row in result:
-            writer.writerow(["" if v is None else v for v in row])
-            yield buf.getvalue()
-            buf.seek(0)
-            buf.truncate(0)
+        async with AsyncSessionLocal() as session:
+            result = await session.stream(text(f"SELECT {', '.join(columns)} FROM import_history ORDER BY id"))
+            async for row in result:
+                writer.writerow(["" if v is None else v for v in row])
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate(0)
 
     return StreamingResponse(
         row_generator(),
