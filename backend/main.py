@@ -430,7 +430,7 @@ class EmailCrawlTarget(BaseModel):
     manufacturer: str
     factory: str
     country: Optional[str] = None
-    homepage: str
+    homepage: Optional[str] = None  # 없으면 스크립트가 B2B 디렉토리에서 탐색
 
 
 class EmailCrawlTargetsResponse(BaseModel):
@@ -1610,9 +1610,10 @@ async def update_manufacturer_contact(
     )
 
 # ─── 3-1-1. 제조사 대표 이메일 크롤링 대상 조회 ───────────────────────────────
-# 홈페이지는 등록돼 있지만 이메일이 없는 제조사만 뽑아 스크립트(scripts/
-# crawl_manufacturer_emails.py)에 넘긴다. 재크롤링 폭주를 막기 위해 이미
-# 시도했던 건은 recrawl_after_days가 지나야 다시 대상에 포함된다.
+# 이메일이 없는 제조사는 홈페이지 유무와 무관하게 전부 대상에 포함한다
+# (홈페이지가 없으면 스크립트가 알리바바/Made-in-China 등에서 찾아본다).
+# 재크롤링 폭주를 막기 위해, 이메일이 이미 있거나(성공) 최근에 시도했던 건은
+# recrawl_after_days가 지나야 다시 대상에 포함된다.
 @app.get("/api/manufacturer/email-crawl-targets", response_model=EmailCrawlTargetsResponse)
 async def get_email_crawl_targets(
     limit:              int = Query(200, ge=1, le=2000),
@@ -1624,8 +1625,7 @@ async def get_email_crawl_targets(
             SELECT DISTINCT ON (manufacturer, factory)
                 manufacturer, factory, country, homepage
             FROM import_history
-            WHERE homepage IS NOT NULL AND homepage <> ''
-              AND (email IS NULL OR email = '')
+            WHERE (email IS NULL OR email = '')
               AND (
                     email_crawled_at IS NULL
                     OR email_crawled_at < now() - make_interval(days => :days)
