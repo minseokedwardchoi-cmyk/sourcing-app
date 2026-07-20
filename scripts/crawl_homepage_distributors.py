@@ -156,11 +156,12 @@ def discover_homepage(company_name: str) -> str | None:
     """DuckDuckGo HTML 결과 페이지를 스크래핑해서 회사 공식 홈페이지로 보이는
     첫 번째 후보 URL을 추정한다. 검색 API가 아니라 페이지 스크래핑이라
     차단/구조변경에 취약하다 — 실패하면 None."""
-    query = quote_plus(f"{company_name} official website")
+    query = quote_plus(company_name)
     soup = fetch_page(f"https://duckduckgo.com/html/?q={query}")
     if soup is None:
         return None
-    for a in soup.find_all("a", href=True):
+
+    def _resolve(a) -> str | None:
         href = a["href"]
         parsed = urlparse(href)
         if parsed.netloc == "duckduckgo.com" and parsed.path == "/l/":
@@ -168,8 +169,26 @@ def discover_homepage(company_name: str) -> str | None:
             parsed = urlparse(href)
         domain = parsed.netloc.lower()
         if not domain or any(bad in domain for bad in _BLOCKED_DOMAINS):
-            continue
+            return None
         return href
+
+    # 1순위: DDG HTML 검색결과 페이지의 실제 결과 제목 링크(class="result__a").
+    # 페이지 전체 <a href>를 다 훑으면 내비게이션/설정 등 검색결과가 아닌
+    # 링크를 먼저 집을 수 있어서, 결과 링크로 먼저 좁힌다.
+    for a in soup.select("a.result__a[href]"):
+        resolved = _resolve(a)
+        if resolved:
+            return resolved
+
+    # 2순위: 위 클래스가 안 잡히면(페이지 구조가 바뀐 경우) /l/ 리다이렉트를
+    # 거치는 링크만 대상으로 한다 — DDG는 광고/사이트 내비게이션이 아닌
+    # 실제 검색결과만 이 리다이렉트를 거친다.
+    for a in soup.find_all("a", href=True):
+        parsed = urlparse(a["href"])
+        if parsed.netloc == "duckduckgo.com" and parsed.path == "/l/":
+            resolved = _resolve(a)
+            if resolved:
+                return resolved
     return None
 
 
