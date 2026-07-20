@@ -1609,6 +1609,26 @@ async def update_manufacturer_contact(
         message=f"연락처 저장 완료: {updated_rows}개 수입 이력에 반영됨",
     )
 
+# ─── 3-1-0. 제조사 이메일 크롤링용 컬럼 마이그레이션 ─────────────────────────
+# Base.metadata.create_all(startup())은 없는 테이블만 새로 만들 뿐, 이미 있는
+# import_history 테이블에 컬럼을 추가해주지는 않는다. DB에 psql/Shell로 직접
+# 접근하기 어려운 배포 환경(예: Render 유료 Shell 미사용)에서도 마이그레이션을
+# 적용할 수 있도록, /api/refresh-country-stats처럼 HTTP 호출 한 번으로 실행되는
+# 엔드포인트를 둔다. ADD COLUMN IF NOT EXISTS라 여러 번 호출해도 안전하다.
+@app.post("/api/manufacturer/email-crawl-migrate")
+async def migrate_email_crawl_columns(db: AsyncSession = Depends(get_db)):
+    await db.execute(text("""
+        ALTER TABLE import_history
+            ADD COLUMN IF NOT EXISTS email_source     VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS email_crawled_at TIMESTAMP
+    """))
+    await db.execute(text("""
+        CREATE INDEX IF NOT EXISTS ix_email_crawled_at ON import_history (email_crawled_at)
+    """))
+    await db.commit()
+    return {"message": "email_source, email_crawled_at 컬럼 및 인덱스 적용 완료 (이미 있었다면 변경 없음)"}
+
+
 # ─── 3-1-1. 제조사 대표 이메일 크롤링 대상 조회 ───────────────────────────────
 # 이메일이 없는 제조사는 홈페이지 유무와 무관하게 전부 대상에 포함한다
 # (홈페이지가 없으면 스크립트가 알리바바/Made-in-China 등에서 찾아본다).
