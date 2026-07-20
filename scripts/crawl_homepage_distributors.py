@@ -94,6 +94,50 @@ _MAJOR_DISTRIBUTORS = {
     "RT-Mart":        ["rt-mart", "大润发"],
 }
 
+# 결과에 같이 보여줄 한 줄 설명 (규모/국가 감을 바로 잡을 수 있도록)
+_DISTRIBUTOR_DESCRIPTIONS = {
+    "Walmart": "미국 최대 소매유통사 (매출 기준 세계 1위 소매업체)",
+    "Costco": "미국 대형 멤버십 창고형 마트",
+    "Kroger": "미국 최대급 슈퍼마켓 체인",
+    "Target": "미국 대형 종합소매 체인",
+    "Sam's Club": "월마트 계열 멤버십 창고형 마트",
+    "Trader Joe's": "미국 프리미엄 식료품 전문 체인",
+    "Whole Foods": "미국 유기농/프리미엄 식료품 체인 (아마존 계열)",
+    "Albertsons/Safeway": "미국 대형 슈퍼마켓 체인",
+    "Publix": "미국 남동부 대형 슈퍼마켓 체인",
+    "Carrefour": "프랑스계 세계적 대형 유통사",
+    "Tesco": "영국 최대 소매유통사",
+    "Aldi": "독일계 글로벌 디스카운트 슈퍼마켓 체인",
+    "Lidl": "독일계 글로벌 디스카운트 슈퍼마켓 체인",
+    "Metro": "독일계 글로벌 도소매(캐시앤캐리) 유통사",
+    "Auchan": "프랑스 대형 유통사",
+    "Rewe": "독일 상위권 슈퍼마켓 체인",
+    "Ahold Delhaize": "네덜란드/벨기에계 글로벌 유통 그룹",
+    "AEON": "일본 최대 종합유통 그룹",
+    "Seven & i (세븐일레븐/이토요카도)": "일본 유통 그룹 (세븐일레븐·이토요카도 모회사)",
+    "Life Corporation": "일본 대형 슈퍼마켓 체인",
+    "Don Quijote/PPIH": "일본 디스카운트 잡화점 체인",
+    "Alibaba/Tmall": "중국 최대 이커머스 플랫폼",
+    "JD.com": "중국 대형 이커머스 플랫폼",
+    "Hema": "알리바바 계열 신선식품 중심 유통 체인",
+    "Yonghui": "중국 대형 슈퍼마켓 체인",
+    "RT-Mart": "중국 대형 대형마트 체인",
+}
+
+
+def _alias_pattern(alias: str) -> re.Pattern:
+    # 영문/숫자 별칭은 단어 경계(\b)로 감싸서 "brewery" 안의 "rewe"처럼 다른
+    # 단어의 일부로 우연히 매칭되는 걸 막는다. CJK 별칭은 \b가 제대로 동작하지
+    # 않아 그냥 부분일치로 둔다 (짧은 한자/가나 표기는 우연 충돌 위험이 낮음).
+    if alias.isascii():
+        return re.compile(r"\b" + re.escape(alias) + r"\b", re.IGNORECASE)
+    return re.compile(re.escape(alias))
+
+
+_ALIAS_PATTERNS = {
+    name: [_alias_pattern(a) for a in aliases] for name, aliases in _MAJOR_DISTRIBUTORS.items()
+}
+
 # User-Agent를 봇으로 밝히면 DuckDuckGo/일부 홈페이지가 결과를 다르게 주거나
 # 차단하는 경우가 있어, 일반 브라우저와 동일한 UA를 사용한다.
 _HEADERS = {
@@ -228,7 +272,10 @@ def research_one(manufacturer: str, homepage: str) -> dict:
         _record_matches(searchable_text(sub_soup), sub_url, evidence_by_distributor)
 
     return {
-        "matched": [f"{name} ({url})" for name, url in evidence_by_distributor.items()],
+        "matched": [
+            f"{name} — {_DISTRIBUTOR_DESCRIPTIONS.get(name, '')} ({url})"
+            for name, url in evidence_by_distributor.items()
+        ],
         "pages_checked": pages_checked,
         "error": "",
         "homepage_used": homepage,
@@ -237,13 +284,11 @@ def research_one(manufacturer: str, homepage: str) -> dict:
 
 
 def _record_matches(text: str, page_url: str, evidence_by_distributor: dict[str, str]) -> None:
-    for name, aliases in _MAJOR_DISTRIBUTORS.items():
+    for name, patterns in _ALIAS_PATTERNS.items():
         if name in evidence_by_distributor:
             continue
-        for alias in aliases:
-            if alias in text:
-                evidence_by_distributor[name] = page_url
-                break
+        if any(p.search(text) for p in patterns):
+            evidence_by_distributor[name] = page_url
 
 
 def main():
