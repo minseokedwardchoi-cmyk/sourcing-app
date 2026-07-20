@@ -481,6 +481,18 @@ function yearLabel(offset, baseYear) {
   return `${y}년`;
 }
 
+// 검색어가 있을 때 필터 드롭다운 옵션은 서버에 다시 물어보지 않고 이미 받아온
+// 결과(hybrid search가 exact+semantic까지 반영해 골라낸 행들)에서 직접 뽑는다.
+// 검색 중엔 /api/column-values가 ILIKE만으로 재계산해서 semantic으로만 걸린
+// 값이 누락되고, 그때마다 느린 쿼리가 추가로 도는 문제를 둘 다 해결한다.
+function localFilterValues(data, filterKeys) {
+  const out = {};
+  for (const key of filterKeys) {
+    out[key] = Array.from(new Set((data || []).map(r => r[key]).filter(Boolean))).sort();
+  }
+  return out;
+}
+
 const ALL_COLS = [
   { key:"category",     label:"구분",           w:118, filterKey:"category"               },
   { key:"mc",           label:"MC",             w:105, filterKey:"mc",      isMc:true      },
@@ -522,6 +534,11 @@ function MainDashboard({ navigate }) {
   const [modalChartFrom, setModalChartFrom] = useState("");
   const [modalChartTo,   setModalChartTo]   = useState("");
   const colMenuRef = useRef(null);
+  const searchActive = !!(debSearch && debSearch.trim());
+  const localColValues = useMemo(
+    () => searchActive ? localFilterValues(data, ["category","mc","sku_name","import_type","importer","factory","country"]) : null,
+    [searchActive, data]
+  );
 
   function cellKey(colKey, i) { return `${colKey}:${i}`; }
 
@@ -795,7 +812,8 @@ function MainDashboard({ navigate }) {
                       <div className="th-inner">
                         <span className="th-label">{c.label}</span>
                         <ColumnFilter
-                          colKey={c.filterKey || null}
+                          colKey={(!searchActive && c.filterKey) || null}
+                          localValues={searchActive && c.filterKey ? (localColValues[c.filterKey] || []) : null}
                           isNumeric={!!c.isNumeric}
                           activeValues={c.filterKey ? (colFilters[c.filterKey] || null) : null}
                           activeSortCol={sortBy === c.key}
@@ -807,7 +825,7 @@ function MainDashboard({ navigate }) {
                               setPage(1);
                             }
                           }}
-                          contextParams={c.filterKey ? {
+                          contextParams={!searchActive && c.filterKey ? {
                             search: debSearch, competitor, dateFrom, dateTo,
                             colFilters: Object.fromEntries(Object.entries(colFilters).filter(([k]) => k !== c.filterKey)),
                           } : null}
@@ -2812,6 +2830,11 @@ function FactoryViewDashboard({ navigate }) {
   const [modalChartFrom, setModalChartFrom] = useState("");
   const [modalChartTo,   setModalChartTo]   = useState("");
   const colMenuRef = useRef(null);
+  const searchActive = !!(debSearch && debSearch.trim());
+  const localColValues = useMemo(
+    () => searchActive ? localFilterValues(data, ["category","mc","sku_name","import_type","importer","factory","country"]) : null,
+    [searchActive, data]
+  );
 
   function cellKey(colKey, i) { return `${colKey}:${i}`; }
 
@@ -3066,7 +3089,8 @@ function FactoryViewDashboard({ navigate }) {
                       <div className="th-inner">
                         <span className="th-label">{c.label}</span>
                         <ColumnFilter
-                          colKey={c.filterKey || null}
+                          colKey={(!searchActive && c.filterKey) || null}
+                          localValues={searchActive && c.filterKey ? (localColValues[c.filterKey] || []) : null}
                           isNumeric={!!c.isNumeric}
                           activeValues={c.filterKey ? (colFilters[c.filterKey] || null) : null}
                           activeSortCol={sortBy === c.key}
@@ -3078,7 +3102,7 @@ function FactoryViewDashboard({ navigate }) {
                               setPage(1);
                             }
                           }}
-                          contextParams={c.filterKey ? {
+                          contextParams={!searchActive && c.filterKey ? {
                             search: debSearch, competitor, dateFrom, dateTo,
                             colFilters: Object.fromEntries(Object.entries(colFilters).filter(([k]) => k !== c.filterKey)),
                           } : null}
