@@ -1653,6 +1653,11 @@ async def get_email_crawl_stats(db: AsyncSession = Depends(get_db)):
 # (홈페이지가 없으면 스크립트가 알리바바/Made-in-China 등에서 찾아본다).
 # 재크롤링 폭주를 막기 위해, 이메일이 이미 있거나(성공) 최근에 시도했던 건은
 # recrawl_after_days가 지나야 다시 대상에 포함된다.
+#
+# 전체 제조사 수(수만 건)에 비해 한 번에 처리 가능한 배치는 한정적이라,
+# SKU 히스토리 화면에서 실제로 MD들 눈에 띄는 제조사(최근 거래·취급 SKU 많음)
+# 부터 우선 크롤링하도록 정렬한다 — 전체 커버리지는 낮아도 화면에 노출되는
+# 제조사 기준 커버리지는 훨씬 빨리 올라간다.
 @app.get("/api/manufacturer/email-crawl-targets", response_model=EmailCrawlTargetsResponse)
 async def get_email_crawl_targets(
     limit:              int = Query(200, ge=1, le=2000),
@@ -1661,15 +1666,21 @@ async def get_email_crawl_targets(
 ):
     rows_r = await db.execute(
         text("""
-            SELECT DISTINCT ON (manufacturer, factory)
-                manufacturer, factory, country, homepage
-            FROM import_history
-            WHERE (email IS NULL OR email = '')
-              AND (
-                    email_crawled_at IS NULL
-                    OR email_crawled_at < now() - make_interval(days => :days)
-                  )
-            ORDER BY manufacturer, factory, COALESCE(import_date, process_date) DESC NULLS LAST
+            SELECT manufacturer, factory, country, homepage
+            FROM (
+                SELECT DISTINCT ON (manufacturer, factory)
+                    manufacturer, factory, country, homepage,
+                    COUNT(*) OVER (PARTITION BY manufacturer, factory)                             AS import_count,
+                    MAX(COALESCE(import_date, process_date)) OVER (PARTITION BY manufacturer, factory) AS latest_import
+                FROM import_history
+                WHERE (email IS NULL OR email = '')
+                  AND (
+                        email_crawled_at IS NULL
+                        OR email_crawled_at < now() - make_interval(days => :days)
+                      )
+                ORDER BY manufacturer, factory, COALESCE(import_date, process_date) DESC NULLS LAST
+            ) t
+            ORDER BY latest_import DESC NULLS LAST, import_count DESC
             LIMIT :limit
         """),
         {"days": recrawl_after_days, "limit": limit},
