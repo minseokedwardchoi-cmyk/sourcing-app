@@ -2132,7 +2132,7 @@ async def export_manufacturers_csv():
 # ─── 경쟁사별 해외제조업체 수 통계 ───────────────────────────────────────────
 @app.get("/api/competitor-stats")
 async def get_competitor_stats(db: AsyncSession = Depends(get_db)):
-    competitors = ["이마트", "홈플러스", "롯데마트", "쿠팡", "코스트코"]
+    competitors = ["이마트", "홈플러스", "롯데마트", "쿠팡", "코스트코", "이랜드팜앤푸드"]
     total_r = await db.execute(text(
         "SELECT COUNT(DISTINCT factory) FROM import_history WHERE factory IS NOT NULL"
     ))
