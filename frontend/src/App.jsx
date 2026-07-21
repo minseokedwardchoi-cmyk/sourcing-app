@@ -834,7 +834,8 @@ function MainDashboard({ navigate }) {
 
           {/* AI 요약: 지금 테이블에 뜬 검색 결과(같은 similarity_threshold로 걸러진 matched
               집합)를 그대로 재집계한 것이므로, 유사도 기준을 조여 결과가 좁아지면 이 요약도
-              같이 바뀐다. CR4는 별도 작업에서 채워지는 대로 top_products[].cr4_pct에 노출 예정. */}
+              같이 바뀐다. market_status/cr4_pct는 (manufacturer, sku_name) 그룹 안에서 수입량이
+              가장 큰 factory/country 조합 기준 대표값(search_summary.py 참고). */}
           {searchActive && (summaryLoading || summary) && (
             <div className="ai-summary-card" style={{margin:"12px 14px 0", padding:"14px 16px", background:"#f4f8ff", border:"1px solid #d6e4ff", borderRadius:10}}>
               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,fontWeight:600,fontSize:13,color:"#1a3a6b"}}>
@@ -849,11 +850,16 @@ function MainDashboard({ navigate }) {
                     <b>{summary.top_products[0].manufacturer}</b>의 <b>{summary.top_products[0].sku_name}</b>
                     {summary.top_products[0].country ? ` (${summary.top_products[0].country})` : ""}
                     로, {summary.top_products[0].import_count.toLocaleString()}건 수입되었습니다.
+                    {" "}
+                    {summary.top_products[0].market_status && (
+                      <>상위 4개 수입업체가 최근 1년 수입량의 {summary.top_products[0].cr4_pct}%를 차지해 <b>{summary.top_products[0].market_status}</b> 상태입니다.</>
+                    )}
                   </div>
                   <ol style={{fontSize:12.5,color:"#374151",paddingLeft:18,margin:0,display:"flex",flexDirection:"column",gap:4}}>
                     {summary.top_products.map((p,i)=>(
                       <li key={`${p.manufacturer}-${p.sku_name}-${i}`}>
                         <b>{p.manufacturer}</b> — {p.sku_name}{p.country?` (${p.country})`:""}: {p.import_count.toLocaleString()}건
+                        {p.market_status && <>{" "}· <MarketStatusBadge status={p.market_status} cr4={p.cr4_pct}/></>}
                       </li>
                     ))}
                   </ol>

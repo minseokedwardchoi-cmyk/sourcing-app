@@ -55,8 +55,11 @@ class SearchSummaryTopProduct(BaseModel):
     country: Optional[str] = None
     import_count: int
     distinct_importer_count: int
+    market_status: Optional[str] = Field(
+        None, description="시장 과점도: 독점/과점/진입가능 (해당 그룹 내 수입량 최대 factory/country 조합 기준)"
+    )
     cr4_pct: Optional[float] = Field(
-        None, description="상위 4개 수입업체 점유율(%) - 별도 작업에서 채워질 예정, 현재는 항상 null"
+        None, description="상위 4개 수입업체 합산 점유율(%) (해당 그룹 내 수입량 최대 factory/country 조합 기준)"
     )
 
 

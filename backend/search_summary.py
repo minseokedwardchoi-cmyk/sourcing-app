@@ -9,9 +9,11 @@ similarity_threshold를 조여서 테이블 결과가 더 좁아져도 요약은
 요약이 따로 노는 상황이 생긴다. 이 함수는 search_hybrid와 항상 같은 매칭 집합을
 보고 계산하므로, 임계값을 조정하면 요약도 같이 바뀐다.
 
-CR4(상위 4개 수입업체 점유율)는 다른 작업에서 별도로 계산 중이라 아직 값을 채우지
-않는다. SearchSummaryTopProduct.cr4_pct는 항상 None으로 내려가며, 그 계산이 끝나면
-top_products를 만드는 아래 루프에 채워 넣기만 하면 된다.
+market_status/cr4_pct는 market_status_mv에서 (category, mc, sku_name, import_type,
+factory, country) 단위로 계산되어 search_hybrid 각 행에 이미 붙어 나온다(main.py의
+_MARKET_STATUS_MV_SQL 참고). 이 요약은 그보다 넓은 (manufacturer, sku_name) 단위로
+묶으므로, 묶인 그룹 안에서 수입량이 가장 많은 factory/country 조합의 값을 대표값으로
+사용한다.
 """
 from __future__ import annotations
 
@@ -70,26 +72,38 @@ async def compute_search_summary(
             continue
         key = (row.manufacturer, row.sku_name)
         bucket = grouped.setdefault(
-            key, {"import_count": 0, "importers": set(), "countries": {}}
+            key,
+            {
+                "import_count": 0,
+                "importers": set(),
+                "best_sub_import_count": -1,
+                "country": None,
+                "market_status": None,
+                "cr4_pct": None,
+            },
         )
         bucket["import_count"] += row.import_count
         if row.importer:
             bucket["importers"].add(row.importer)
-        if row.country:
-            bucket["countries"][row.country] = (
-                bucket["countries"].get(row.country, 0) + row.import_count
-            )
+        # market_status/cr4_pct는 (factory, country) 단위로 계산된 값이므로, 이
+        # (manufacturer, sku_name) 그룹 안에서 수입량이 가장 큰 factory/country
+        # 조합의 값을 대표값으로 쓴다.
+        if row.import_count > bucket["best_sub_import_count"]:
+            bucket["best_sub_import_count"] = row.import_count
+            bucket["country"] = row.country
+            bucket["market_status"] = row.market_status
+            bucket["cr4_pct"] = row.cr4_pct
 
     ranked = sorted(grouped.items(), key=lambda kv: kv[1]["import_count"], reverse=True)
     top_products = [
         SearchSummaryTopProduct(
             manufacturer=manufacturer,
             sku_name=sku_name,
-            country=max(bucket["countries"].items(), key=lambda kv: kv[1])[0]
-            if bucket["countries"]
-            else None,
+            country=bucket["country"],
             import_count=bucket["import_count"],
             distinct_importer_count=len(bucket["importers"]),
+            market_status=bucket["market_status"],
+            cr4_pct=bucket["cr4_pct"],
         )
         for (manufacturer, sku_name), bucket in ranked[:TOP_PRODUCTS_LIMIT]
     ]
