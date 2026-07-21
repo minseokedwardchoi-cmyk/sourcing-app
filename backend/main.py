@@ -803,6 +803,7 @@ async def get_search_hybrid(
     filter_factory:     Optional[List[str]] = Query(None),
     filter_email:       Optional[List[str]] = Query(None),
     filter_sku_name:    Optional[List[str]] = Query(None),
+    filter_market_status: Optional[List[str]] = Query(None),
     candidate_limit: Optional[int] = Query(None, ge=1, le=5000),
     similarity_threshold: Optional[float] = Query(None, ge=0, le=1),
     query_embedding: Optional[str] = Query(None, max_length=8192),
@@ -821,6 +822,7 @@ async def get_search_hybrid(
         candidate_limit=candidate_limit,
         similarity_threshold=similarity_threshold,
         precomputed_embedding=_parse_client_embedding(query_embedding),
+        market_status_filter=filter_market_status,
         filters={
             "category": filter_category,
             "mc": filter_mc,
@@ -2165,6 +2167,7 @@ async def get_factory_view(
     filter_factory:     Optional[List[str]] = Query(None),
     filter_email:       Optional[List[str]] = Query(None),
     filter_sku_name:    Optional[List[str]] = Query(None),
+    filter_market_status: Optional[List[str]] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     allowed_sort = {
@@ -2244,6 +2247,15 @@ async def get_factory_view(
 
     having_full = f"HAVING 1=1 {having_conds}" if having_conds else ""
 
+    # market_status는 grouped 안에 없는 계산 컬럼(market_status_mv 조인 결과)이라
+    # where_col_conds/having_conds와 달리 조인 이후에만 걸 수 있다.
+    market_status_cond = ""
+    if filter_market_status:
+        in_keys = {f"cf_market_status_{i}": v for i, v in enumerate(filter_market_status)}
+        in_clause = ", ".join(f":cf_market_status_{i}" for i in range(len(filter_market_status)))
+        market_status_cond = f"AND ms.market_status IN ({in_clause})"
+        params.update(in_keys)
+
     sort_expr = sort_by if sort_by != "import_type" else "import_type"
 
     # COUNT(*) OVER()로 전체 그룹 수를 데이터 쿼리에 함께 실어, 동일한 GROUP BY
@@ -2285,6 +2297,7 @@ async def get_factory_view(
          AND g.import_type IS NOT DISTINCT FROM ms.import_type
          AND g.factory IS NOT DISTINCT FROM ms.factory
          AND g.country IS NOT DISTINCT FROM ms.country
+        WHERE 1=1 {market_status_cond}
         ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
         LIMIT :limit OFFSET :offset
     """
@@ -2300,7 +2313,7 @@ async def get_factory_view(
         # 요청 페이지가 마지막 페이지를 넘어가 빈 결과가 온 경우에만 별도로 COUNT 조회
         count_sql = f"""
             SELECT COUNT(*) FROM (
-                SELECT 1
+                SELECT category, mc, sku_name, import_type, factory, country
                 FROM {source_sql}
                 WHERE 1=1
                     {search_cond}
@@ -2308,6 +2321,14 @@ async def get_factory_view(
                 GROUP BY category, mc, sku_name, import_type, manufacturer, factory, country
                 {having_full}
             ) AS _grouped
+            LEFT JOIN market_status_mv ms
+              ON _grouped.category IS NOT DISTINCT FROM ms.category
+             AND _grouped.mc IS NOT DISTINCT FROM ms.mc
+             AND _grouped.sku_name = ms.sku_name
+             AND _grouped.import_type IS NOT DISTINCT FROM ms.import_type
+             AND _grouped.factory IS NOT DISTINCT FROM ms.factory
+             AND _grouped.country IS NOT DISTINCT FROM ms.country
+            WHERE 1=1 {market_status_cond}
         """
         count_r = await db.execute(text(count_sql), params)
         total = count_r.scalar() or 0

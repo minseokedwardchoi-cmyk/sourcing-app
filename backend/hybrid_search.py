@@ -82,6 +82,18 @@ def _column_filters(filters: dict[str, Optional[list[str]]], params: dict) -> st
     return conds
 
 
+def _market_status_in_clause(market_status: Optional[list[str]], params: dict) -> Optional[str]:
+    """market_status_mv 조인 후 걸어야 하는 필터라 _column_filters()로는 처리 못 함.
+    호출부 두 군데(base_result 바깥 WHERE, count_sql의 ms 조인)가 컬럼 접두사만
+    다르게 써야 해서, bind param 등록만 여기서 하고 IN절 텍스트는 호출부가 조립한다.
+    """
+    if not market_status:
+        return None
+    keys = {f"ms_status_{i}": v for i, v in enumerate(market_status)}
+    params.update(keys)
+    return ", ".join(f":{k}" for k in keys)
+
+
 def _source_sql(date_from: Optional[str], date_to: Optional[str], params: dict) -> str:
     if date_from or date_to:
         params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
@@ -254,6 +266,7 @@ async def search_hybrid(
     date_from: Optional[str],
     date_to: Optional[str],
     filters: dict[str, Optional[list[str]]],
+    market_status_filter: Optional[list[str]] = None,
     candidate_limit: Optional[int] = None,
     similarity_threshold: Optional[float] = None,
     embedding_provider: EmbeddingProvider = _DEFAULT_EMBEDDING_PROVIDER,
@@ -304,16 +317,16 @@ async def search_hybrid(
         "similarity_threshold": effective_similarity_threshold,
     }
     sort_expr, sort_dir_sql = _sort_sql(sort_by, sort_dir)
-    # import_type용 CASE 표현식은 컬럼명이 bare("import_type")라, market_status_mv
-    # 조인 이후로는 s/fs와 ms 양쪽에 동명 컬럼이 생겨 그대로 두면 ambiguous column
-    # reference 에러가 난다. ORDER BY의 단순 컬럼명(예: "category")은 출력 컬럼명이
-    # 우선이라 안전하지만, CASE 안에 감싸인 경우는 예외라 여기서만 별도로 테이블
-    # alias를 붙여 나눈다.
-    sort_expr_semantic = sort_expr.replace("import_type", "s.import_type") if sort_by == "import_type" else sort_expr
-    sort_expr_direct = sort_expr.replace("import_type", "fs.import_type") if sort_by == "import_type" else sort_expr
     col_filter_conds = _column_filters(filters, params)
     competitor_cond = _competitor_condition(competitor)
     source_sql = _source_sql(date_from, date_to, params)
+    # market_status는 원본 테이블에 없는 계산 컬럼(그룹별 CR4 판정)이라 filtered_source
+    # 단계에서 걸러낼 수 없다 — market_status_mv 조인 결과를 base_result CTE로 한 번 더
+    # 평평하게 만든 뒤, 그 바깥 SELECT에서 걸러야 컬럼명이 하나뿐이라 ambiguous 에러도
+    # 없고 필터도 걸 수 있다.
+    ms_in = _market_status_in_clause(market_status_filter, params)
+    market_status_cond = f"AND market_status IN ({ms_in})" if ms_in else ""
+    market_status_cond_ms = f"AND ms.market_status IN ({ms_in})" if ms_in else ""
 
     direct_search_cond = ""
     if query:
@@ -452,35 +465,39 @@ async def search_hybrid(
                 FROM deduped
                 WHERE match_type IN ('exact', 'popular')
                    OR relevance_score >= :similarity_threshold
+            ),
+            base_result AS (
+                SELECT
+                    s.category, s.mc, s.sku_name, s.import_type, s.importer,
+                    s.import_count, s.manufacturer, s.factory, s.country,
+                    s.email, s.latest_import,
+                    s.base_year, s.count_year1, s.count_year2, s.count_year3,
+                    d.match_type, d.semantic_score, d.relevance_score,
+                    d.mc_intent_bonus, d.category_intent_bonus, d.best_keyword_bonus,
+                    d.mc_mismatch_penalty, d.category_mismatch_penalty,
+                    ms.market_status, ms.cr4_pct
+                FROM filtered_source s
+                JOIN thresholded d
+                  ON s.category IS NOT DISTINCT FROM d.category
+                 AND s.mc IS NOT DISTINCT FROM d.mc
+                 AND s.sku_name = d.sku_name
+                 AND s.import_type IS NOT DISTINCT FROM d.import_type
+                 AND s.importer IS NOT DISTINCT FROM d.importer
+                 AND s.manufacturer IS NOT DISTINCT FROM d.manufacturer
+                 AND s.factory IS NOT DISTINCT FROM d.factory
+                 AND s.country IS NOT DISTINCT FROM d.country
+                LEFT JOIN market_status_mv ms
+                  ON s.category IS NOT DISTINCT FROM ms.category
+                 AND s.mc IS NOT DISTINCT FROM ms.mc
+                 AND s.sku_name = ms.sku_name
+                 AND s.import_type IS NOT DISTINCT FROM ms.import_type
+                 AND s.factory IS NOT DISTINCT FROM ms.factory
+                 AND s.country IS NOT DISTINCT FROM ms.country
             )
-            SELECT
-                s.category, s.mc, s.sku_name, s.import_type, s.importer,
-                s.import_count, s.manufacturer, s.factory, s.country,
-                s.email, s.latest_import,
-                s.base_year, s.count_year1, s.count_year2, s.count_year3,
-                d.match_type, d.semantic_score, d.relevance_score,
-                d.mc_intent_bonus, d.category_intent_bonus, d.best_keyword_bonus,
-                d.mc_mismatch_penalty, d.category_mismatch_penalty,
-                ms.market_status, ms.cr4_pct,
-                COUNT(*) OVER() AS total_count
-            FROM filtered_source s
-            JOIN thresholded d
-              ON s.category IS NOT DISTINCT FROM d.category
-             AND s.mc IS NOT DISTINCT FROM d.mc
-             AND s.sku_name = d.sku_name
-             AND s.import_type IS NOT DISTINCT FROM d.import_type
-             AND s.importer IS NOT DISTINCT FROM d.importer
-             AND s.manufacturer IS NOT DISTINCT FROM d.manufacturer
-             AND s.factory IS NOT DISTINCT FROM d.factory
-             AND s.country IS NOT DISTINCT FROM d.country
-            LEFT JOIN market_status_mv ms
-              ON s.category IS NOT DISTINCT FROM ms.category
-             AND s.mc IS NOT DISTINCT FROM ms.mc
-             AND s.sku_name = ms.sku_name
-             AND s.import_type IS NOT DISTINCT FROM ms.import_type
-             AND s.factory IS NOT DISTINCT FROM ms.factory
-             AND s.country IS NOT DISTINCT FROM ms.country
-            ORDER BY {sort_expr_semantic} {sort_dir_sql} NULLS LAST, latest_import DESC
+            SELECT *, COUNT(*) OVER() AS total_count
+            FROM base_result
+            WHERE 1=1 {market_status_cond}
+            ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
             LIMIT :limit OFFSET :offset
         """
     else:
@@ -501,31 +518,35 @@ async def search_hybrid(
                   {competitor_cond}
                   {col_filter_conds}
                   {direct_search_cond}
+            ),
+            base_result AS (
+                SELECT
+                    fs.category, fs.mc, fs.sku_name, fs.import_type, importer,
+                    import_count, manufacturer, fs.factory, fs.country,
+                    email, latest_import,
+                    base_year, count_year1, count_year2, count_year3,
+                    'exact'::text AS match_type,
+                    NULL::float AS semantic_score,
+                    NULL::float AS relevance_score,
+                    NULL::float AS mc_intent_bonus,
+                    NULL::float AS category_intent_bonus,
+                    NULL::float AS best_keyword_bonus,
+                    NULL::float AS mc_mismatch_penalty,
+                    NULL::float AS category_mismatch_penalty,
+                    ms.market_status, ms.cr4_pct
+                FROM filtered_source fs
+                LEFT JOIN market_status_mv ms
+                  ON fs.category IS NOT DISTINCT FROM ms.category
+                 AND fs.mc IS NOT DISTINCT FROM ms.mc
+                 AND fs.sku_name = ms.sku_name
+                 AND fs.import_type IS NOT DISTINCT FROM ms.import_type
+                 AND fs.factory IS NOT DISTINCT FROM ms.factory
+                 AND fs.country IS NOT DISTINCT FROM ms.country
             )
-            SELECT
-                fs.category, fs.mc, fs.sku_name, fs.import_type, importer,
-                import_count, manufacturer, fs.factory, fs.country,
-                email, latest_import,
-                base_year, count_year1, count_year2, count_year3,
-                'exact'::text AS match_type,
-                NULL::float AS semantic_score,
-                NULL::float AS relevance_score,
-                NULL::float AS mc_intent_bonus,
-                NULL::float AS category_intent_bonus,
-                NULL::float AS best_keyword_bonus,
-                NULL::float AS mc_mismatch_penalty,
-                NULL::float AS category_mismatch_penalty,
-                ms.market_status, ms.cr4_pct,
-                COUNT(*) OVER() AS total_count
-            FROM filtered_source fs
-            LEFT JOIN market_status_mv ms
-              ON fs.category IS NOT DISTINCT FROM ms.category
-             AND fs.mc IS NOT DISTINCT FROM ms.mc
-             AND fs.sku_name = ms.sku_name
-             AND fs.import_type IS NOT DISTINCT FROM ms.import_type
-             AND fs.factory IS NOT DISTINCT FROM ms.factory
-             AND fs.country IS NOT DISTINCT FROM ms.country
-            ORDER BY {sort_expr_direct} {sort_dir_sql} NULLS LAST, latest_import DESC
+            SELECT *, COUNT(*) OVER() AS total_count
+            FROM base_result
+            WHERE 1=1 {market_status_cond}
+            ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
             LIMIT :limit OFFSET :offset
         """
 
@@ -587,8 +608,16 @@ async def search_hybrid(
                        OR relevance_score >= :similarity_threshold
                 )
                 SELECT COUNT(*) FROM (
-                    SELECT category, mc, sku_name, import_type, importer, manufacturer, factory, country
-                    FROM thresholded
+                    SELECT t.category, t.mc, t.sku_name, t.import_type, t.importer, t.manufacturer, t.factory, t.country
+                    FROM thresholded t
+                    LEFT JOIN market_status_mv ms
+                      ON t.category IS NOT DISTINCT FROM ms.category
+                     AND t.mc IS NOT DISTINCT FROM ms.mc
+                     AND t.sku_name = ms.sku_name
+                     AND t.import_type IS NOT DISTINCT FROM ms.import_type
+                     AND t.factory IS NOT DISTINCT FROM ms.factory
+                     AND t.country IS NOT DISTINCT FROM ms.country
+                    WHERE 1=1 {market_status_cond_ms}
                 ) AS counted
             """
             count_result = await db.execute(text(count_sql), params)
@@ -606,7 +635,15 @@ async def search_hybrid(
                       {col_filter_conds}
                       {direct_search_cond}
                 )
-                SELECT COUNT(*) FROM filtered_source
+                SELECT COUNT(*) FROM filtered_source fs
+                LEFT JOIN market_status_mv ms
+                  ON fs.category IS NOT DISTINCT FROM ms.category
+                 AND fs.mc IS NOT DISTINCT FROM ms.mc
+                 AND fs.sku_name = ms.sku_name
+                 AND fs.import_type IS NOT DISTINCT FROM ms.import_type
+                 AND fs.factory IS NOT DISTINCT FROM ms.factory
+                 AND fs.country IS NOT DISTINCT FROM ms.country
+                WHERE 1=1 {market_status_cond_ms}
             """
             count_result = await db.execute(text(count_sql), params)
             total = count_result.scalar() or 0
@@ -624,6 +661,7 @@ async def search_hybrid(
                 date_from=date_from,
                 date_to=date_to,
                 filters=filters,
+                market_status_filter=market_status_filter,
                 candidate_limit=effective_candidate_limit,
                 similarity_threshold=effective_similarity_threshold,
                 _force_direct=True,
