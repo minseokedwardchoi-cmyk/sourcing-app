@@ -24,7 +24,7 @@ class HybridSkuHistoryRow(BaseModel):
     count_year1: int = 0
     count_year2: int = 0
     count_year3: int = 0
-    market_status: Optional[str] = Field(None, description="시장 과점도: 독점/과점/진입가능 (최근 365일 CR4 기준)")
+    market_status: Optional[str] = Field(None, description="시장 과점도: 독점/과점/진입가능 (해당 그룹 마지막 거래일 기준 최근 365일 CR4)")
     cr4_pct: Optional[float] = Field(None, description="동일 제품(구분+MC+제품명+OEM/수입+해외제조업소+제조국) 그룹 내 상위 4개 수입업체 합산 점유율(%)")
     match_type: str = Field("exact", description="exact, semantic, or popular taxonomy rescue")
     semantic_score: Optional[float] = None
