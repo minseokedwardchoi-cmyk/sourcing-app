@@ -106,24 +106,43 @@ COMPETITOR_MAP: dict[str, list[str]] = {
         "코스트코홀세일코리아",
     ],
     # 이랜드 계열사는 "(주)이랜드팜앤푸드", "(주)이랜드 팜앤푸드", "(주)이랜드리테일",
-    # "(주)이랜드이츠" 등 "(주)이랜드" 뒤에 계열사명이 다양하게 붙어 들어온다. 법인
-    # 표기(주/주식회사/㈜)는 normalize_importer가 비교 전에 이미 제거하므로, 정규화된
-    # 값과 원본 값 양쪽에서 공통 부분인 "이랜드"만으로 부분일치시키면 계열사 표기와
-    # 무관하게 전부 걸린다.
-    "이랜드": ["이랜드"],
+    # "(주)이랜드이츠" 등 "(주)이랜드" 뒤에 계열사명이 다양하게 붙어 들어온다. 그렇다고
+    # "이랜드"를 아무 위치에서나 부분일치시키면 "하이랜드푸드", "스카이랜드 푸드",
+    # "어스플레이랜드"처럼 그냥 이름 안에 "이랜드"가 섞여 있을 뿐인 무관한 업체까지
+    # 잡힌다. "^" 접두는 문자열 "시작" 위치로 고정하라는 표시(아래 competitor_ilike_clause,
+    # normalize_importer 참고) — 법인 표기(주/주식회사/㈜)는 비교 전에 이미 제거되므로
+    # "이랜드"로 시작하는지만 보면 계열사명과 무관하게 이랜드 계열사만 걸린다.
+    "이랜드": ["^이랜드"],
 }
 
 _COMPETITOR_LOOKUP: dict[str, str] = {
-    alias.lower(): canonical
+    alias.lstrip("^").lower(): canonical
     for canonical, aliases in COMPETITOR_MAP.items()
     for alias in aliases
 }
 
-# 부분 매칭용 (긴 키워드 우선)
-_COMPETITOR_KEYWORDS: list[tuple[str, str]] = sorted(
-    [(kw.lower(), canonical) for canonical, aliases in COMPETITOR_MAP.items() for kw in aliases],
+# 부분 매칭용 (긴 키워드 우선). anchored=True면 문자열 시작 위치에서만 매치.
+_COMPETITOR_KEYWORDS: list[tuple[str, bool, str]] = sorted(
+    [
+        (kw.lstrip("^").lower(), kw.startswith("^"), canonical)
+        for canonical, aliases in COMPETITOR_MAP.items() for kw in aliases
+    ],
     key=lambda x: len(x[0]), reverse=True,
 )
+
+
+def competitor_ilike_clause(aliases: list[str], column: str = "importer") -> str:
+    """COMPETITOR_MAP 별칭 목록으로 'importer ILIKE ... OR ...' SQL 조각을 만든다.
+    '^' 접두 별칭은 문자열 시작 위치로 고정해 매치한다(예: 별칭이 "이랜드"처럼
+    일반적인 이름 일부와 겹칠 수 있는 경우, 아무 데서나 포함되면 매치하는 대신
+    이름이 그 별칭으로 "시작"할 때만 매치해 오탐을 막는다)."""
+    parts = []
+    for alias in aliases:
+        if alias.startswith("^"):
+            parts.append(f"{column} ILIKE '{alias[1:]}%'")
+        else:
+            parts.append(f"{column} ILIKE '%{alias}%'")
+    return " OR ".join(parts)
 
 # 법인 표기 정규화 패턴
 _LEGAL = re.compile(r"[(（]?\s*주\s*[)）]|주식회사\s*|㈜\s*|농업회사법인\s*", re.IGNORECASE)
@@ -149,9 +168,14 @@ def normalize_importer(name) -> str | None:
     if raw_lower in _COMPETITOR_LOOKUP:
         return _COMPETITOR_LOOKUP[raw_lower]
 
-    # 2) 부분 포함 (긴 키워드 우선)
-    for keyword, canonical in _COMPETITOR_KEYWORDS:
-        if keyword in lower or keyword in raw_lower:
+    # 2) 부분 포함 (긴 키워드 우선). anchored 키워드는 raw_lower에 남아있는 법인
+    # 표기("(주)" 등) 때문에 시작 위치가 어긋나므로, 이미 법인 표기를 제거한
+    # lower만 대상으로 시작 위치를 검사한다.
+    for keyword, anchored, canonical in _COMPETITOR_KEYWORDS:
+        if anchored:
+            if lower.startswith(keyword):
+                return canonical
+        elif keyword in lower or keyword in raw_lower:
             return canonical
 
     return cleaned

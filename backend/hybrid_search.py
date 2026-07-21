@@ -27,7 +27,7 @@ from hybrid_relevance import (
 )
 from hybrid_schemas import HybridSearchResponse, HybridSkuHistoryRow
 from hybrid_vector_store import PgVectorSearchRepository, VectorSearchRepository
-from importer import COMPETITOR_MAP
+from importer import COMPETITOR_MAP, competitor_ilike_clause
 from schemas import PaginationMeta
 
 
@@ -55,7 +55,7 @@ def _competitor_condition(competitor: Optional[str]) -> str:
     if not competitor or competitor == "전체":
         return ""
     aliases = COMPETITOR_MAP.get(competitor, [competitor])
-    conditions = " OR ".join(f"importer ILIKE '%{a}%'" for a in aliases)
+    conditions = competitor_ilike_clause(aliases)
     return f"AND ({conditions})"
 
 
