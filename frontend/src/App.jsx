@@ -18,7 +18,7 @@ import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
 import worldGeoData from "world-atlas/countries-50m.json";
 
 // ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
-const COMPETITORS = ["전체", "홈플러스", "이마트", "롯데마트", "쿠팡", "코스트코", "이랜드팜앤푸드"];
+const COMPETITORS = ["전체", "홈플러스", "이마트", "롯데마트", "쿠팡", "코스트코", "이랜드"];
 const CARD_THEMES = {
 
   전체:    { bg: "#E8F5E9", active: "#2E7D32" },   // 초록
@@ -27,7 +27,7 @@ const CARD_THEMES = {
   롯데마트: { bg: "#FDECEA", active: "#C8001E" },   // 롯데 빨강
   홈플러스: { bg: "#E8F4FD", active: "#7B2FBE" },   // 보라
   쿠팡:   { bg: "#FFF3E0", active: "#FF6000" },   // 쿠팡 오렌지
-  이랜드팜앤푸드: { bg: "#EAF7F0", active: "#0F8A5F" },   // 그린틸
+  이랜드: { bg: "#EAF7F0", active: "#0F8A5F" },   // 그린틸
 };
 // ─── 공통 CSS ────────────────────────────────────────────────────────────────
 const styles = `
@@ -772,10 +772,10 @@ function MainDashboard({ navigate }) {
             </button>
             {showCompCards && (
               <div className="competitor-cards">
-                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡","이랜드팜앤푸드"].map(name => {
+                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡","이랜드"].map(name => {
                   const theme = CARD_THEMES[name];
                   const isActive = competitor === name;
-                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375, "이랜드팜앤푸드": "-" };
+                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375, "이랜드": "-" };
                   const count = FIXED_COUNTS[name];
                   return (
                     <button
@@ -3105,10 +3105,10 @@ function FactoryViewDashboard({ navigate }) {
             </button>
             {showCompCards && (
               <div className="competitor-cards">
-                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡","이랜드팜앤푸드"].map(name => {
+                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡","이랜드"].map(name => {
                   const theme = CARD_THEMES[name];
                   const isActive = competitor === name;
-                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375, "이랜드팜앤푸드": "-" };
+                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375, "이랜드": "-" };
                   const count = FIXED_COUNTS[name];
                   return (
                     <button key={name} className={`comp-card${isActive ? " active" : ""}`}
