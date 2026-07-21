@@ -399,6 +399,16 @@ function GradeBadge({ grade }) {
   return <span className="badge b-gray">{value}</span>;
 }
 
+// 시장 과점도 배지 — 동일 제품(구분+MC+제품명+OEM/수입+해외제조업소+제조국)을 나눠 갖는
+// 국내 수입업체들의 최근 365일 CR4(상위 4개사 합산 점유율) 기준 판정.
+// 독점(수입업체 1곳) / 과점(CR4 60%↑) / 진입가능(CR4 60%↓)
+function MarketStatusBadge({ status, cr4 }) {
+  if (!status) return <span style={{color:"#9ca3af",fontSize:12}}>-</span>;
+  const cls = status === "독점" ? "b-red" : status === "과점" ? "b-orange" : "b-green";
+  const title = cr4 != null ? `상위 4개사 점유율(CR4) ${cr4}%` : status;
+  return <span className={`badge ${cls}`} title={title}>{status}</span>;
+}
+
 function SortIcon({ col, sortCol, sortDir }) {
   if (sortCol !== col) return <span className="sort-icon">↕</span>;
   return <span className="sort-icon">{sortDir === "asc" ? "↑" : "↓"}</span>;
@@ -501,6 +511,7 @@ const ALL_COLS = [
   { key:"importer",     label:"수입업체",       w:118, filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:230, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:105, filterKey:"country", clickable:"country" },
+  { key:"market_status",label:"시장구조",       w:82,  isMarketStatus:true                  },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
   { key:"count_year3",  label:"",               w:78,  isYearCount:3                      },
   { key:"count_year2",  label:"",               w:78,  isYearCount:2                      },
@@ -982,6 +993,8 @@ function MainDashboard({ navigate }) {
                             ? renderTrunc("category", row[c.key], 6, i, { badgeClass:"b-cat" })
                             : c.key==="importer"
                             ? renderTrunc("importer", row[c.key], 6, i)
+                            : c.isMarketStatus
+                            ? <MarketStatusBadge status={row.market_status} cr4={row.cr4_pct}/>
                             : row[c.key]||"-"}
                         </td>
                       ))}
@@ -3269,6 +3282,8 @@ function FactoryViewDashboard({ navigate }) {
                                   </div>
                                 );
                               })()
+                            : c.isMarketStatus
+                            ? <MarketStatusBadge status={row.market_status} cr4={row.cr4_pct}/>
                             : row[c.key]||"-"}
                         </td>
                       ))}

@@ -304,6 +304,13 @@ async def search_hybrid(
         "similarity_threshold": effective_similarity_threshold,
     }
     sort_expr, sort_dir_sql = _sort_sql(sort_by, sort_dir)
+    # import_type용 CASE 표현식은 컬럼명이 bare("import_type")라, market_status_mv
+    # 조인 이후로는 s/fs와 ms 양쪽에 동명 컬럼이 생겨 그대로 두면 ambiguous column
+    # reference 에러가 난다. ORDER BY의 단순 컬럼명(예: "category")은 출력 컬럼명이
+    # 우선이라 안전하지만, CASE 안에 감싸인 경우는 예외라 여기서만 별도로 테이블
+    # alias를 붙여 나눈다.
+    sort_expr_semantic = sort_expr.replace("import_type", "s.import_type") if sort_by == "import_type" else sort_expr
+    sort_expr_direct = sort_expr.replace("import_type", "fs.import_type") if sort_by == "import_type" else sort_expr
     col_filter_conds = _column_filters(filters, params)
     competitor_cond = _competitor_condition(competitor)
     source_sql = _source_sql(date_from, date_to, params)
@@ -454,6 +461,7 @@ async def search_hybrid(
                 d.match_type, d.semantic_score, d.relevance_score,
                 d.mc_intent_bonus, d.category_intent_bonus, d.best_keyword_bonus,
                 d.mc_mismatch_penalty, d.category_mismatch_penalty,
+                ms.market_status, ms.cr4_pct,
                 COUNT(*) OVER() AS total_count
             FROM filtered_source s
             JOIN thresholded d
@@ -465,7 +473,14 @@ async def search_hybrid(
              AND s.manufacturer IS NOT DISTINCT FROM d.manufacturer
              AND s.factory IS NOT DISTINCT FROM d.factory
              AND s.country IS NOT DISTINCT FROM d.country
-            ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
+            LEFT JOIN market_status_mv ms
+              ON s.category IS NOT DISTINCT FROM ms.category
+             AND s.mc IS NOT DISTINCT FROM ms.mc
+             AND s.sku_name = ms.sku_name
+             AND s.import_type IS NOT DISTINCT FROM ms.import_type
+             AND s.factory IS NOT DISTINCT FROM ms.factory
+             AND s.country IS NOT DISTINCT FROM ms.country
+            ORDER BY {sort_expr_semantic} {sort_dir_sql} NULLS LAST, latest_import DESC
             LIMIT :limit OFFSET :offset
         """
     else:
@@ -488,8 +503,8 @@ async def search_hybrid(
                   {direct_search_cond}
             )
             SELECT
-                category, mc, sku_name, import_type, importer,
-                import_count, manufacturer, factory, country,
+                fs.category, fs.mc, fs.sku_name, fs.import_type, importer,
+                import_count, manufacturer, fs.factory, fs.country,
                 email, latest_import,
                 base_year, count_year1, count_year2, count_year3,
                 'exact'::text AS match_type,
@@ -500,9 +515,17 @@ async def search_hybrid(
                 NULL::float AS best_keyword_bonus,
                 NULL::float AS mc_mismatch_penalty,
                 NULL::float AS category_mismatch_penalty,
+                ms.market_status, ms.cr4_pct,
                 COUNT(*) OVER() AS total_count
-            FROM filtered_source
-            ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
+            FROM filtered_source fs
+            LEFT JOIN market_status_mv ms
+              ON fs.category IS NOT DISTINCT FROM ms.category
+             AND fs.mc IS NOT DISTINCT FROM ms.mc
+             AND fs.sku_name = ms.sku_name
+             AND fs.import_type IS NOT DISTINCT FROM ms.import_type
+             AND fs.factory IS NOT DISTINCT FROM ms.factory
+             AND fs.country IS NOT DISTINCT FROM ms.country
+            ORDER BY {sort_expr_direct} {sort_dir_sql} NULLS LAST, latest_import DESC
             LIMIT :limit OFFSET :offset
         """
 

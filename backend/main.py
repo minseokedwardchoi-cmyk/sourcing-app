@@ -161,6 +161,7 @@ async def refresh_mvs(db: AsyncSession = None):
     async with engine.execution_options(isolation_level="AUTOCOMMIT").connect() as conn:
         await conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_history_mv"))
         await conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_factory_mv"))
+        await conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY market_status_mv"))
     await _refresh_column_values_cache()
 
 
@@ -270,6 +271,10 @@ async def _startup_bg():
             FROM import_history
             GROUP BY sku_name, factory, manufacturer, country, mc
         """))
+        await conn.execute(text(
+            _MARKET_STATUS_MV_SQL.replace("CREATE MATERIALIZED VIEW",
+                                           "CREATE MATERIALIZED VIEW IF NOT EXISTS")
+        ))
 
         # UNIQUE 인덱스 (CONCURRENTLY refresh 필수)
         for sql in [
@@ -277,6 +282,8 @@ async def _startup_bg():
                (sku_name, import_type, importer, manufacturer, factory, country, category, mc)""",
             """CREATE UNIQUE INDEX IF NOT EXISTS idx_sfmv_unique_key ON sku_factory_mv
                (sku_name, factory, manufacturer, country, mc)""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_market_status_mv_unique_key ON market_status_mv
+               (category, mc, sku_name, import_type, factory, country)""",
         ]:
             try:
                 await conn.execute(text(sql))
@@ -328,6 +335,53 @@ _SKU_HISTORY_MV_SQL = """
               THEN 1 END)::int                  AS count_year3
     FROM import_history
     GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+"""
+
+# 시장 과점도(CR4) — "구분+MC+제품명+OEM/수입+해외제조업소+제조국"이 같으면 같은 제품으로
+# 묶어, 그 그룹을 나눠 갖는 국내 수입업체들의 최근 365일 수입횟수 점유율로 판정한다.
+# 수입업체 1곳뿐이면 독점, 상위 4개사 합산 점유율(CR4)이 60% 이상이면 과점, 그 미만이면
+# 진입가능으로 분류한다. count_year1/2/3처럼 CURRENT_DATE 기준으로 계산되므로 refresh_mvs()
+# 호출 시점(=업로드 시점)의 스냅샷이며, 매 요청마다 재계산하지 않고 sku_history_mv/
+# factory-view 조회 결과에 그룹 키로 LEFT JOIN해서 붙인다.
+_MARKET_STATUS_MV_SQL = """
+    CREATE MATERIALIZED VIEW market_status_mv AS
+    WITH importer_365d AS (
+        SELECT
+            category, mc, sku_name, import_type, factory, country, importer,
+            COUNT(*)::int AS count_365d
+        FROM import_history
+        WHERE COALESCE(import_date, process_date) >= CURRENT_DATE - INTERVAL '365 days'
+          AND importer IS NOT NULL
+        GROUP BY category, mc, sku_name, import_type, factory, country, importer
+    ),
+    ranked AS (
+        SELECT *,
+            ROW_NUMBER() OVER (
+                PARTITION BY category, mc, sku_name, import_type, factory, country
+                ORDER BY count_365d DESC
+            ) AS importer_rank
+        FROM importer_365d
+    ),
+    group_agg AS (
+        SELECT
+            category, mc, sku_name, import_type, factory, country,
+            COUNT(*)::int                                          AS importer_count,
+            SUM(count_365d)::int                                   AS total_365d,
+            SUM(count_365d) FILTER (WHERE importer_rank <= 4)::int AS top4_365d
+        FROM ranked
+        GROUP BY category, mc, sku_name, import_type, factory, country
+    )
+    SELECT
+        category, mc, sku_name, import_type, factory, country,
+        importer_count,
+        total_365d,
+        ROUND((top4_365d::numeric / NULLIF(total_365d, 0)) * 100, 1) AS cr4_pct,
+        CASE
+            WHEN importer_count <= 1 THEN '독점'
+            WHEN (top4_365d::numeric / NULLIF(total_365d, 0)) >= 0.6 THEN '과점'
+            ELSE '진입가능'
+        END AS market_status
+    FROM group_agg
 """
 
 @app.on_event("startup")
@@ -2194,25 +2248,43 @@ async def get_factory_view(
 
     # COUNT(*) OVER()로 전체 그룹 수를 데이터 쿼리에 함께 실어, 동일한 GROUP BY
     # 집계를 데이터/COUNT 쿼리로 두 번 반복 실행하던 것을 한 번으로 줄인다.
+    # market_status_mv 조인은 grouped CTE 바깥의 별도 SELECT에서 붙인다 — grouped 안에서
+    # 바로 조인하면 category/mc/sku_name/import_type/factory/country가 양쪽에 다 있어
+    # GROUP BY/집계 컬럼과 충돌하고, sort_expr(예: "country")도 어느 테이블 걸 가리키는지
+    # 모호해진다. g.*로 감싸면 출력 컬럼명이 하나뿐이라 ORDER BY가 항상 그쪽을 가리킨다.
     data_sql = f"""
+        WITH grouped AS (
+            SELECT
+                category, mc, sku_name, import_type,
+                SUM(import_count)::int                                                AS import_count,
+                manufacturer, factory, country,
+                MIN(email)                                                             AS email,
+                MAX(latest_import)                                                     AS latest_import,
+                MAX(base_year)                                                         AS base_year,
+                SUM(count_year1)::int                                                  AS count_year1,
+                SUM(count_year2)::int                                                  AS count_year2,
+                SUM(count_year3)::int                                                  AS count_year3,
+                array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)       AS importers
+            FROM {source_sql}
+            WHERE 1=1
+                {search_cond}
+                {where_col_conds}
+            GROUP BY category, mc, sku_name, import_type, manufacturer, factory, country
+            {having_full}
+        )
         SELECT
-            category, mc, sku_name, import_type,
-            SUM(import_count)::int                                                AS import_count,
-            manufacturer, factory, country,
-            MIN(email)                                                             AS email,
-            MAX(latest_import)                                                     AS latest_import,
-            MAX(base_year)                                                         AS base_year,
-            SUM(count_year1)::int                                                  AS count_year1,
-            SUM(count_year2)::int                                                  AS count_year2,
-            SUM(count_year3)::int                                                  AS count_year3,
-            array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)       AS importers,
-            COUNT(*) OVER()                                                        AS total_count
-        FROM {source_sql}
-        WHERE 1=1
-            {search_cond}
-            {where_col_conds}
-        GROUP BY category, mc, sku_name, import_type, manufacturer, factory, country
-        {having_full}
+            g.*,
+            ms.market_status,
+            ms.cr4_pct,
+            COUNT(*) OVER() AS total_count
+        FROM grouped g
+        LEFT JOIN market_status_mv ms
+          ON g.category IS NOT DISTINCT FROM ms.category
+         AND g.mc IS NOT DISTINCT FROM ms.mc
+         AND g.sku_name = ms.sku_name
+         AND g.import_type IS NOT DISTINCT FROM ms.import_type
+         AND g.factory IS NOT DISTINCT FROM ms.factory
+         AND g.country IS NOT DISTINCT FROM ms.country
         ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
         LIMIT :limit OFFSET :offset
     """
@@ -2258,6 +2330,8 @@ async def get_factory_view(
                 count_year1   = r["count_year1"] or 0,
                 count_year2   = r["count_year2"] or 0,
                 count_year3   = r["count_year3"] or 0,
+                market_status = r["market_status"],
+                cr4_pct       = r["cr4_pct"],
             )
             for r in rows
         ],
