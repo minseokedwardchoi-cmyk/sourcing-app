@@ -21,6 +21,8 @@ services:
   embedding:
     build: ./embedding_service
     restart: always
+    environment:
+      EMBEDDING_SERVICE_TOKEN: ${EMBEDDING_SERVICE_TOKEN:-local-dev-token}
     ports:
       - "8001:8000"
 
@@ -35,6 +37,7 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
       EMBEDDING_PROVIDER: remote
       EMBEDDING_SERVICE_URL: http://embedding:8000
+      EMBEDDING_SERVICE_TOKEN: ${EMBEDDING_SERVICE_TOKEN:-local-dev-token}
     ports:
       - "8000:8000"
 
