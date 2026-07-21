@@ -49,7 +49,7 @@ export function fetchColumnValues(col, contextParams = {}) {
   const colMap = {
     category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
     importer: "filter_importer", country: "filter_country", factory: "filter_factory",
-    email: "filter_email", sku_name: "filter_sku_name",
+    email: "filter_email", sku_name: "filter_sku_name", market_status: "filter_market_status",
   };
   if (colFilters) {
     Object.entries(colFilters).forEach(([k, vals]) => {
@@ -90,7 +90,7 @@ export async function fetchSkuHistory({ search, competitor, sortBy, sortDir, pag
   const colMap = {
     category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
     importer: "filter_importer", country: "filter_country", factory: "filter_factory",
-    email: "filter_email", sku_name: "filter_sku_name",
+    email: "filter_email", sku_name: "filter_sku_name", market_status: "filter_market_status",
   };
   Object.entries(colFilters).forEach(([col, values]) => {
     if (values && values.length > 0 && colMap[col]) {
@@ -120,7 +120,7 @@ export async function fetchHybridSearch({ search, competitor, sortBy, sortDir, p
   const colMap = {
     category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
     importer: "filter_importer", country: "filter_country", factory: "filter_factory",
-    email: "filter_email", sku_name: "filter_sku_name",
+    email: "filter_email", sku_name: "filter_sku_name", market_status: "filter_market_status",
   };
   Object.entries(colFilters).forEach(([col, values]) => {
     if (values && values.length > 0 && colMap[col]) {
@@ -365,7 +365,7 @@ export async function fetchFactoryView({ search, competitor, sortBy, sortDir, pa
   const colMap = {
     category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
     importer: "filter_importer", country: "filter_country", factory: "filter_factory",
-    email: "filter_email", sku_name: "filter_sku_name",
+    email: "filter_email", sku_name: "filter_sku_name", market_status: "filter_market_status",
   };
   Object.entries(colFilters).forEach(([col, values]) => {
     if (values && values.length > 0 && colMap[col]) {
