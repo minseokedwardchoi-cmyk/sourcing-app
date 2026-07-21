@@ -45,3 +45,24 @@ class HybridSearchResponse(BaseModel):
     minimum_returned_semantic_score: Optional[float] = None
     minimum_returned_relevance_score: Optional[float] = None
     semantic_error: Optional[str] = None
+
+
+class SearchSummaryTopProduct(BaseModel):
+    manufacturer: str
+    sku_name: str
+    country: Optional[str] = None
+    import_count: int
+    distinct_importer_count: int
+    cr4_pct: Optional[float] = Field(
+        None, description="상위 4개 수입업체 점유율(%) - 별도 작업에서 채워질 예정, 현재는 항상 null"
+    )
+
+
+class SearchSummaryResponse(BaseModel):
+    query: str
+    total_matched_groups: int
+    total_import_count: int
+    top_products: list[SearchSummaryTopProduct]
+    applied_similarity_threshold: float
+    applied_candidate_limit: int
+    search_elapsed_ms: int

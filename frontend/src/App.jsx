@@ -6,7 +6,7 @@ import {
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
 import { geoCentroid } from "d3-geo";
 import {
-  fetchSkuHistory, fetchHybridSearch, fetchSkuFactories,
+  fetchSkuHistory, fetchHybridSearch, fetchSearchSummary, fetchSkuFactories,
   fetchManufacturerDetail, fetchManufacturerMonthlyImportCounts,
   updateManufacturerContact,
   fetchColumnValues, fetchMonthlyImportCounts,
@@ -533,6 +533,8 @@ function MainDashboard({ navigate }) {
   const [monthlyModal, setMonthlyModal] = useState(null);   // { row, loading, error, yearly, monthly }
   const [modalChartFrom, setModalChartFrom] = useState("");
   const [modalChartTo,   setModalChartTo]   = useState("");
+  const [summary,        setSummary]        = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const colMenuRef = useRef(null);
   const searchActive = !!(debSearch && debSearch.trim());
   const localColValues = useMemo(
@@ -651,6 +653,18 @@ function MainDashboard({ navigate }) {
       .catch(e=>setError(e.message))
       .finally(()=>setLoading(false));
   },[debSearch,competitor,sortBy,sortDir,page,colFilters,dateFrom,dateTo]);
+
+  // AI 요약: 테이블과 동일한 candidateLimit/similarityThreshold로 걸러진 matched
+  // 집합을 그대로 재집계하므로, 나중에 유사도 임계값을 조정하면 요약도 같이 바뀐다.
+  // sortBy/sortDir/page와는 무관(요약은 항상 import_count 기준 전체 재집계)하므로 deps에서 뺌.
+  useEffect(()=>{
+    if(!searchActive){setSummary(null);setSummaryLoading(false);return;}
+    setSummaryLoading(true);
+    fetchSearchSummary({search:debSearch,competitor,colFilters,dateFrom,dateTo,candidateLimit:3000,similarityThreshold:0.9})
+      .then(r=>setSummary(r))
+      .catch(()=>setSummary(null))
+      .finally(()=>setSummaryLoading(false));
+  },[debSearch,competitor,colFilters,dateFrom,dateTo,searchActive]);
 
   useEffect(()=>{
     const h=e=>{if(colMenuRef.current&&!colMenuRef.current.contains(e.target))setShowColMenu(false);};
@@ -806,6 +820,38 @@ function MainDashboard({ navigate }) {
             </div>
           </div>
           </div>
+
+          {/* AI 요약: 지금 테이블에 뜬 검색 결과(같은 similarity_threshold로 걸러진 matched
+              집합)를 그대로 재집계한 것이므로, 유사도 기준을 조여 결과가 좁아지면 이 요약도
+              같이 바뀐다. CR4는 별도 작업에서 채워지는 대로 top_products[].cr4_pct에 노출 예정. */}
+          {searchActive && (summaryLoading || summary) && (
+            <div className="ai-summary-card" style={{margin:"12px 14px 0", padding:"14px 16px", background:"#f4f8ff", border:"1px solid #d6e4ff", borderRadius:10}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,fontWeight:600,fontSize:13,color:"#1a3a6b"}}>
+                ✨ AI 요약
+              </div>
+              {summaryLoading ? (
+                <div style={{fontSize:13,color:"#6b7280"}}>요약 생성 중...</div>
+              ) : summary && summary.top_products.length > 0 ? (
+                <>
+                  <div style={{fontSize:13,color:"#1a1a2e",marginBottom:8}}>
+                    '{summary.query}' 검색 결과 총 {summary.total_import_count.toLocaleString()}건 중, 가장 많이 수입되고 있는 제조사·제품은{" "}
+                    <b>{summary.top_products[0].manufacturer}</b>의 <b>{summary.top_products[0].sku_name}</b>
+                    {summary.top_products[0].country ? ` (${summary.top_products[0].country})` : ""}
+                    로, {summary.top_products[0].import_count.toLocaleString()}건 수입되었습니다.
+                  </div>
+                  <ol style={{fontSize:12.5,color:"#374151",paddingLeft:18,margin:0,display:"flex",flexDirection:"column",gap:4}}>
+                    {summary.top_products.map((p,i)=>(
+                      <li key={`${p.manufacturer}-${p.sku_name}-${i}`}>
+                        <b>{p.manufacturer}</b> — {p.sku_name}{p.country?` (${p.country})`:""}: {p.import_count.toLocaleString()}건
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              ) : (
+                <div style={{fontSize:13,color:"#6b7280"}}>이 검색어에 대한 요약을 만들 수 있는 제조사 정보가 충분하지 않습니다.</div>
+              )}
+            </div>
+          )}
 
           {error&&<div className="error-box">오류: {error}</div>}
 
