@@ -1986,6 +1986,48 @@ async def export_import_history_csv():
     )
 
 
+# ─── 제조사 단위 요약 CSV 내보내기 ───────────────────────────────────────────
+# import-history.csv는 원본 행 전체(수십만 행)라 대형 DB에서는 파일이 너무 커진다.
+# 제조사(공장) 단위로 집계한 요약만 필요할 때 쓰는 경량 버전.
+@app.get("/api/export/manufacturers.csv")
+async def export_manufacturers_csv():
+    columns = ["manufacturer", "factory", "country", "import_count", "latest_import_date"]
+
+    async def row_generator():
+        yield "﻿"
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(columns)
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+
+        async with AsyncSessionLocal() as session:
+            result = await session.stream(text("""
+                SELECT
+                    COALESCE(manufacturer, factory)                       AS manufacturer,
+                    MAX(factory)                                          AS factory,
+                    MAX(country)                                          AS country,
+                    COUNT(*)                                              AS import_count,
+                    MAX(COALESCE(import_date, process_date))              AS latest_import_date
+                FROM import_history
+                WHERE COALESCE(manufacturer, factory) IS NOT NULL
+                GROUP BY COALESCE(manufacturer, factory)
+                ORDER BY import_count DESC
+            """))
+            async for row in result:
+                writer.writerow(["" if v is None else v for v in row])
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate(0)
+
+    return StreamingResponse(
+        row_generator(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=manufacturers_export.csv"},
+    )
+
+
 # ─── 경쟁사별 해외제조업체 수 통계 ───────────────────────────────────────────
 @app.get("/api/competitor-stats")
 async def get_competitor_stats(db: AsyncSession = Depends(get_db)):
