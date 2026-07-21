@@ -47,3 +47,27 @@ class HybridSearchResponse(BaseModel):
     minimum_returned_semantic_score: Optional[float] = None
     minimum_returned_relevance_score: Optional[float] = None
     semantic_error: Optional[str] = None
+
+
+class SearchSummaryTopProduct(BaseModel):
+    manufacturer: str
+    sku_name: str
+    country: Optional[str] = None
+    import_count: int
+    distinct_importer_count: int
+    market_status: Optional[str] = Field(
+        None, description="시장 과점도: 독점/과점/진입가능 (해당 그룹 내 수입량 최대 factory/country 조합 기준)"
+    )
+    cr4_pct: Optional[float] = Field(
+        None, description="상위 4개 수입업체 합산 점유율(%) (해당 그룹 내 수입량 최대 factory/country 조합 기준)"
+    )
+
+
+class SearchSummaryResponse(BaseModel):
+    query: str
+    total_matched_groups: int
+    total_import_count: int
+    top_products: list[SearchSummaryTopProduct]
+    applied_similarity_threshold: float
+    applied_candidate_limit: int
+    search_elapsed_ms: int

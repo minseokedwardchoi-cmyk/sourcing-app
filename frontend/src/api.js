@@ -135,6 +135,36 @@ export async function fetchHybridSearch({ search, competitor, sortBy, sortDir, p
   return res.json();
 }
 
+/** 검색 결과 AI 요약 (상위 제조사/제품 top5. CR4는 별도 작업 완료 후 채워질 예정) */
+export async function fetchSearchSummary({ search, competitor, colFilters = {}, dateFrom, dateTo, candidateLimit, similarityThreshold }) {
+  const url = new URL(`${BASE_URL}/api/search-summary`, window.location.origin);
+  const params = {
+    search, competitor,
+    date_from: dateFrom, date_to: dateTo,
+    candidate_limit: candidateLimit === null || candidateLimit === undefined || candidateLimit === "" ? undefined : Number(candidateLimit),
+    similarity_threshold: similarityThreshold === null || similarityThreshold === undefined || similarityThreshold === "" ? undefined : Number(similarityThreshold),
+  };
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== null && v !== undefined && v !== "") url.searchParams.set(k, String(v));
+  });
+  const colMap = {
+    category: "filter_category", mc: "filter_mc", import_type: "filter_import_type",
+    importer: "filter_importer", country: "filter_country", factory: "filter_factory",
+    email: "filter_email", sku_name: "filter_sku_name",
+  };
+  Object.entries(colFilters).forEach(([col, values]) => {
+    if (values && values.length > 0 && colMap[col]) {
+      values.forEach(v => url.searchParams.append(colMap[col], v));
+    }
+  });
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "API 오류");
+  }
+  return res.json();
+}
+
 export async function fetchMonthlyImportCounts(row, dateFrom, dateTo) {
   const cols = ["category", "mc", "sku_name", "import_type", "importer", "manufacturer", "factory", "country"];
   const url = new URL(`${BASE_URL}/api/sku-history/monthly`, window.location.origin);

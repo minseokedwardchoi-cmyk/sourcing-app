@@ -57,10 +57,11 @@ from schemas import (
     CountryAmountShareRow, CountryAmountShareResponse,
     ItemCountryRow, ItemCountriesResponse,
 )
-from hybrid_schemas import HybridSearchResponse
+from hybrid_schemas import HybridSearchResponse, SearchSummaryResponse
 from hybrid_embeddings import EmbeddingResult
 from hybrid_config import embedding_dimensions_required, embedding_model
 from hybrid_search import search_hybrid
+from search_summary import compute_search_summary
 
 load_dotenv()
 
@@ -815,6 +816,50 @@ async def get_search_hybrid(
         sort_dir=sort_dir,
         page=page,
         page_size=page_size,
+        date_from=date_from,
+        date_to=date_to,
+        candidate_limit=candidate_limit,
+        similarity_threshold=similarity_threshold,
+        precomputed_embedding=_parse_client_embedding(query_embedding),
+        filters={
+            "category": filter_category,
+            "mc": filter_mc,
+            "import_type": filter_import_type,
+            "importer": filter_importer,
+            "country": filter_country,
+            "factory": filter_factory,
+            "email": filter_email,
+            "sku_name": filter_sku_name,
+        },
+    )
+
+
+@app.get("/api/search-summary", response_model=SearchSummaryResponse)
+async def get_search_summary(
+    search:          Optional[str]       = Query(None,   description="검색어"),
+    competitor:      Optional[str]       = Query("전체", description="경쟁사 필터"),
+    date_from:       Optional[str]       = Query(None, description="조회 시작일(YYYY-MM-DD)"),
+    date_to:         Optional[str]       = Query(None, description="조회 종료일(YYYY-MM-DD)"),
+    filter_category:    Optional[List[str]] = Query(None),
+    filter_mc:          Optional[List[str]] = Query(None),
+    filter_import_type: Optional[List[str]] = Query(None),
+    filter_importer:    Optional[List[str]] = Query(None),
+    filter_country:     Optional[List[str]] = Query(None),
+    filter_factory:     Optional[List[str]] = Query(None),
+    filter_email:       Optional[List[str]] = Query(None),
+    filter_sku_name:    Optional[List[str]] = Query(None),
+    candidate_limit: Optional[int] = Query(None, ge=1, le=5000),
+    similarity_threshold: Optional[float] = Query(None, ge=0, le=1),
+    query_embedding: Optional[str] = Query(None, max_length=8192),
+    db: AsyncSession = Depends(get_db),
+):
+    """검색창 상단에 띄우는 AI 요약(구글 AI 요약 스타일)용 집계 엔드포인트.
+    /api/search-hybrid와 동일한 검색/필터/threshold 파라미터를 받아 같은 matched
+    집합 위에서 집계하므로, similarity_threshold를 조정하면 이 요약도 같이 변한다."""
+    return await compute_search_summary(
+        db,
+        search=search,
+        competitor=competitor,
         date_from=date_from,
         date_to=date_to,
         candidate_limit=candidate_limit,
