@@ -2486,7 +2486,7 @@ function CountryDetail({ navigate, state }) {
                       <td>
                         <span className="score-cell">
                           {m.ranking_score!=null
-                            ? <><GradeBadge grade={scoreToGrade(m.ranking_score)}/>{m.best_sku_name ? <span style={{marginLeft:4,fontSize:11,color:"#6b7280"}}>({m.best_sku_name})</span> : null}</>
+                            ? <GradeBadge grade={scoreToGrade(m.ranking_score)}/>
                             : "-"}
                         </span>
                       </td>
