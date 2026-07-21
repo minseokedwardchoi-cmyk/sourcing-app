@@ -338,20 +338,44 @@ _SKU_HISTORY_MV_SQL = """
 """
 
 # 시장 과점도(CR4) — "구분+MC+제품명+OEM/수입+해외제조업소+제조국"이 같으면 같은 제품으로
-# 묶어, 그 그룹을 나눠 갖는 국내 수입업체들의 최근 365일 수입횟수 점유율로 판정한다.
-# 수입업체 1곳뿐이면 독점, 상위 4개사 합산 점유율(CR4)이 60% 이상이면 과점, 그 미만이면
-# 진입가능으로 분류한다. count_year1/2/3처럼 CURRENT_DATE 기준으로 계산되므로 refresh_mvs()
-# 호출 시점(=업로드 시점)의 스냅샷이며, 매 요청마다 재계산하지 않고 sku_history_mv/
-# factory-view 조회 결과에 그룹 키로 LEFT JOIN해서 붙인다.
+# 묶어, 그 그룹을 나눠 갖는 국내 수입업체들의 수입횟수 점유율로 판정한다. 수입업체 1곳뿐이면
+# 독점, 상위 4개사 합산 점유율(CR4)이 60% 이상이면 과점, 그 미만이면 진입가능으로 분류한다.
+#
+# 집계 기간은 CURRENT_DATE 기준 최근 365일이 아니라, 그룹별 "마지막 거래일 기준" 최근
+# 365일이다 — 오늘 날짜를 기준으로 고정하면 마지막 수입이 1년보다 오래된 그룹은 집계 대상
+# 거래가 0건이 되어 market_status가 NULL(화면에 "-")로 빠지는데, 이 제품이 과점인지
+# 아닌지는 원래 "가장 최근에 거래되던 시점" 기준으로 봐야 의미가 있다. 그룹별 anchor_date
+# (그 그룹의 MAX 거래일)를 윈도우 함수로 구해 자기 자신을 기준으로 최근 1년을 잡으므로,
+# 거래 이력이 하나라도 있는 그룹은 전부 판정이 나온다.
+#
+# count_year1/2/3처럼 refresh_mvs() 호출 시점(=업로드 시점)의 스냅샷이며, 매 요청마다
+# 재계산하지 않고 sku_history_mv/factory-view 조회 결과에 그룹 키로 LEFT JOIN해서 붙인다.
 _MARKET_STATUS_MV_SQL = """
     CREATE MATERIALIZED VIEW market_status_mv AS
-    WITH importer_365d AS (
+    WITH dated AS (
+        SELECT
+            category, mc, sku_name, import_type, factory, country, importer,
+            COALESCE(import_date, process_date) AS txn_date
+        FROM import_history
+        WHERE importer IS NOT NULL
+    ),
+    anchored AS (
+        SELECT *,
+            MAX(txn_date) OVER (
+                PARTITION BY category, mc, sku_name, import_type, factory, country
+            ) AS anchor_date
+        FROM dated
+    ),
+    windowed AS (
+        SELECT category, mc, sku_name, import_type, factory, country, importer
+        FROM anchored
+        WHERE txn_date > anchor_date - INTERVAL '365 days'
+    ),
+    importer_365d AS (
         SELECT
             category, mc, sku_name, import_type, factory, country, importer,
             COUNT(*)::int AS count_365d
-        FROM import_history
-        WHERE COALESCE(import_date, process_date) >= CURRENT_DATE - INTERVAL '365 days'
-          AND importer IS NOT NULL
+        FROM windowed
         GROUP BY category, mc, sku_name, import_type, factory, country, importer
     ),
     ranked AS (
