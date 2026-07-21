@@ -260,12 +260,12 @@ async def compute_best_sku_rankings_for_country(
     db: AsyncSession, country: str
 ) -> dict[str, dict]:
     """
-    국가 페이지: 제조사(manufacturer)가 취급하는 SKU마다 개별 점수를 매긴 뒤, 그 SKU가
-    제조사 전체 수입횟수에서 차지하는 비중을 가중치로 삼아 가중평균한 값을 제조사
-    종합점수로 쓴다(특정 SKU 1개의 점수를 대표값으로 쓰지 않는다). import_count_grade는
-    국가에 관계없이 해당 SKU를 취급하는 전체 제조사 집단 내 상대 순위로 산출한다(같은
-    SKU라면 다른 국가 제조사도 비교 대상에 포함). top5/growth grade는 제조사 전체 이력
-    기준으로 산출한다.
+    국가 페이지: 제조사(manufacturer)의 import_count_grade는 그 제조사가 취급하는 SKU별
+    수입횟수 등급(같은 SKU를 취급하는 전체 제조사 집단 내 상대 순위, 국가 무관)을 SKU가
+    제조사 전체 수입횟수에서 차지하는 비중으로 가중평균해 산출한다(특정 SKU 1개의
+    등급을 대표값으로 쓰지 않는다). top5/growth grade는 제조사 전체 이력 기준으로
+    산출하고, 종합점수(ranking_score)는 이 세 등급(탑5 50% + 수입횟수 30% + 성장추세
+    20%)을 _compute_rankings_for_scope와 동일한 단일 가중합 공식에 대입해 계산한다.
 
     반환: {manufacturer: {ranking_score, top5_retailer_grade, top5_retailers_matched,
                           import_count_grade, growth_trend_grade, growth_yearly}}
@@ -334,9 +334,11 @@ async def compute_best_sku_rankings_for_country(
     """), {"country": country, "y1": y1, "y2": y2, "y3": y3})
     growth_by_mfr = {r[0]: (r[1], r[2], r[3]) for r in growth_r.fetchall()}
 
-    # 5. 제조사별로, 취급하는 모든 SKU의 점수를 그 SKU의 제조사 내 수입횟수 비중으로
-    #    가중평균해 종합점수 하나를 만든다. import_count_grade 배지도 같은 가중치로
-    #    등급 점수(A=3/B=2/C=1)를 평균한 뒤 가장 가까운 등급으로 환산한다.
+    # 5. import_count_grade는 제조사가 취급하는 SKU별 수입횟수 등급을, 그 SKU가
+    #    제조사 내 수입횟수에서 차지하는 비중으로 가중평균한 뒤 가장 가까운 등급으로
+    #    환산한다. 종합점수는 그렇게 나온 import_count_grade를 포함한 3축
+    #    (탑5 50% + 수입횟수 30% + 성장추세 20%)을 기존과 동일한 단일 가중합 공식에
+    #    그대로 대입한다 — SKU마다 점수를 따로 내서 평균하지 않는다.
     results: dict[str, dict] = {}
     for mfr_key, sku_counts_map in mfr_sku_counts.items():
         matched_top5 = sorted(
@@ -348,18 +350,10 @@ async def compute_best_sku_rankings_for_country(
         growth_grade = _growth_grade(gy1, gy2, gy3)
 
         mfr_total = sum(sku_counts_map.values())
-        weighted_score = 0.0
         weighted_import_grade_score = 0.0
         for sku_name, sku_count in sku_counts_map.items():
             import_grade = sku_import_grades.get(sku_name, {}).get(mfr_key, "C")
-            weighted = (
-                _GRADE_SCORE[top5_grade] * 0.5
-                + _GRADE_SCORE[import_grade] * 0.3
-                + _GRADE_SCORE[growth_grade] * 0.2
-            )
-            sku_score = weighted / 3 * 100
             share = sku_count / mfr_total if mfr_total else 0.0
-            weighted_score += sku_score * share
             weighted_import_grade_score += _GRADE_SCORE[import_grade] * share
 
         import_grade_overall = (
@@ -368,8 +362,15 @@ async def compute_best_sku_rankings_for_country(
             else "B"
         )
 
+        weighted = (
+            _GRADE_SCORE[top5_grade] * 0.5
+            + _GRADE_SCORE[import_grade_overall] * 0.3
+            + _GRADE_SCORE[growth_grade] * 0.2
+        )
+        ranking_score = round(weighted / 3 * 100, 1)
+
         results[mfr_key] = {
-            "ranking_score":          round(weighted_score, 1),
+            "ranking_score":          ranking_score,
             "top5_retailer_grade":    top5_grade,
             "top5_retailers_matched": matched_top5,
             "import_count_grade":     import_grade_overall,
