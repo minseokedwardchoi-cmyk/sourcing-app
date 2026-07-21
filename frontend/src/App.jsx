@@ -18,7 +18,7 @@ import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
 import worldGeoData from "world-atlas/countries-50m.json";
 
 // ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
-const COMPETITORS = ["전체", "홈플러스", "이마트", "롯데마트", "쿠팡", "코스트코"];
+const COMPETITORS = ["전체", "홈플러스", "이마트", "롯데마트", "쿠팡", "코스트코", "이랜드팜앤푸드"];
 const CARD_THEMES = {
 
   전체:    { bg: "#E8F5E9", active: "#2E7D32" },   // 초록
@@ -27,6 +27,7 @@ const CARD_THEMES = {
   롯데마트: { bg: "#FDECEA", active: "#C8001E" },   // 롯데 빨강
   홈플러스: { bg: "#E8F4FD", active: "#7B2FBE" },   // 보라
   쿠팡:   { bg: "#FFF3E0", active: "#FF6000" },   // 쿠팡 오렌지
+  이랜드팜앤푸드: { bg: "#EAF7F0", active: "#0F8A5F" },   // 그린틸
 };
 // ─── 공통 CSS ────────────────────────────────────────────────────────────────
 const styles = `
@@ -192,13 +193,13 @@ const styles = `
   .hero-kpi-num   { font-size: 18px; font-weight: 700; color: #0f172a; line-height: 1; }
   .hero-kpi-unit  { font-size: 11px; font-weight: 400; color: #64748b; margin-left: 1.5px; }
   .notice { padding: 8px 14px; margin: 0 0 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; font-size: 12px; color: #92400e; }
-  .competitor-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 4px; }
-  .comp-card { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; border: 1.5px solid #e2e8f0; background: #f9fafb; cursor: pointer; transition: all .15s; text-align: left; }
+  .competitor-cards { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 4px; }
+  .comp-card { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border-radius: 10px; border: 1.5px solid #e2e8f0; background: #f9fafb; cursor: pointer; transition: all .15s; text-align: left; }
   .comp-card:hover { border-color: #16a34a; box-shadow: 0 2px 8px rgba(22,163,74,.12); }
   .comp-card.active { color: #fff; border-color: transparent; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
-  .comp-card-name { font-size: 11px; font-weight: 600; }
-  .comp-card-num  { font-size: 20px; font-weight: 700; line-height: 1; }
-  .comp-card-label { font-size: 10px; opacity: .7; margin-top: -2px; }
+  .comp-card-name { font-size: 10px; font-weight: 600; }
+  .comp-card-num  { font-size: 14px; font-weight: 700; line-height: 1; }
+  .comp-card-label { font-size: 9px; opacity: .7; margin-top: -2px; }
   .country-header-card { padding: 16px 18px; }
   .country-header-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
   .country-title-block { flex: 1; min-width: 220px; }
@@ -769,10 +770,10 @@ function MainDashboard({ navigate }) {
             </button>
             {showCompCards && (
               <div className="competitor-cards">
-                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡"].map(name => {
+                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡","이랜드팜앤푸드"].map(name => {
                   const theme = CARD_THEMES[name];
                   const isActive = competitor === name;
-                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375 };
+                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375, "이랜드팜앤푸드": "-" };
                   const count = FIXED_COUNTS[name];
                   return (
                     <button
@@ -781,7 +782,7 @@ function MainDashboard({ navigate }) {
                       style={{ background: isActive ? theme.active : theme.bg, borderColor: isActive ? theme.active : "#e2e8f0" }}
                       onClick={() => { setCompetitor(name); setPage(1); }}
                     >
-                      <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151", fontSize:"15px"}}>{name}</span>
+                      <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151"}}>{name}</span>
                       <span className="comp-card-num"  style={{color: isActive ? "#fff" : "#1a1a2e"}}>
                         {typeof count === "number" ? count.toLocaleString() : count}
                       </span>
@@ -3102,16 +3103,16 @@ function FactoryViewDashboard({ navigate }) {
             </button>
             {showCompCards && (
               <div className="competitor-cards">
-                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡"].map(name => {
+                {["전체","코스트코","이마트","롯데마트","홈플러스","쿠팡","이랜드팜앤푸드"].map(name => {
                   const theme = CARD_THEMES[name];
                   const isActive = competitor === name;
-                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375 };
+                  const FIXED_COUNTS = { "전체": 40658, "코스트코": 420, "이마트": 575, "롯데마트": 353, "홈플러스": 74, "쿠팡": 375, "이랜드팜앤푸드": "-" };
                   const count = FIXED_COUNTS[name];
                   return (
                     <button key={name} className={`comp-card${isActive ? " active" : ""}`}
                       style={{ background: isActive ? theme.active : theme.bg, borderColor: isActive ? theme.active : "#e2e8f0" }}
                       onClick={() => { setCompetitor(name); setPage(1); }}>
-                      <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151", fontSize:"15px"}}>{name}</span>
+                      <span className="comp-card-name" style={{color: isActive ? "#fff" : "#374151"}}>{name}</span>
                       <span className="comp-card-num"  style={{color: isActive ? "#fff" : "#1a1a2e"}}>{typeof count === "number" ? count.toLocaleString() : count}</span>
                       <span className="comp-card-label">해외제조업체</span>
                     </button>

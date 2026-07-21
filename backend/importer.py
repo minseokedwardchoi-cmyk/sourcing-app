@@ -105,6 +105,9 @@ COMPETITOR_MAP: dict[str, list[str]] = {
         "코스트코", "코스트코 코리아", "코스트코코리아", "costco", "costco korea",
         "코스트코홀세일코리아",
     ],
+    "이랜드팜앤푸드": [
+        "이랜드팜앤푸드", "(주)이랜드팜앤푸드", "주식회사이랜드팜앤푸드", "이랜드팜앤푸드(주)",
+    ],
 }
 
 _COMPETITOR_LOOKUP: dict[str, str] = {
