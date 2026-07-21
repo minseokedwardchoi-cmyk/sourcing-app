@@ -44,7 +44,7 @@ from schemas import (
     MonthlyImportCountResponse, MonthlyImportCount, YearlyImportCount,
     FactoryViewRow, FactoryViewResponse,
 )
-from importer import import_excel, COMPETITOR_MAP
+from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
 from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, TOP5_RETAILERS
 from country_data import (
@@ -524,7 +524,7 @@ def _competitor_having_condition(competitor: str | None) -> str:
     if not competitor or competitor == "전체":
         return ""
     aliases = COMPETITOR_MAP.get(competitor, [competitor])
-    inner = " OR ".join(f"importer ILIKE '%{a}%'" for a in aliases)
+    inner = competitor_ilike_clause(aliases)
     return f"AND bool_or({inner})"
 
 
@@ -533,10 +533,7 @@ def _competitor_condition(competitor: str | None) -> str:
     if not competitor or competitor == "전체":
         return ""
     aliases = COMPETITOR_MAP.get(competitor, [competitor])
-    # ILIKE 패턴 목록으로 OR 조건 생성
-    conditions = " OR ".join(
-        f"importer ILIKE '%{a}%'" for a in aliases
-    )
+    conditions = competitor_ilike_clause(aliases)
     return f"AND ({conditions})"
 
 
@@ -589,7 +586,7 @@ async def get_column_values(
 
     if competitor and competitor != "전체":
         aliases = COMPETITOR_MAP.get(competitor, [competitor])
-        comp_parts = " OR ".join(f"importer ILIKE '%{a}%'" for a in aliases)
+        comp_parts = competitor_ilike_clause(aliases)
         conds.append(f"({comp_parts})")
 
     source_sql = "sku_history_mv"
@@ -2138,7 +2135,7 @@ async def get_competitor_stats(db: AsyncSession = Depends(get_db)):
     result = {"전체": total_r.scalar() or 0}
     for comp in competitors:
         aliases = COMPETITOR_MAP.get(comp, [comp])
-        conditions = " OR ".join(f"importer ILIKE '%{a}%'" for a in aliases)
+        conditions = competitor_ilike_clause(aliases)
         r = await db.execute(text(f"""
             SELECT COUNT(DISTINCT factory)
             FROM import_history
