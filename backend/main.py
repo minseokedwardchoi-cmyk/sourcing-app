@@ -46,7 +46,7 @@ from schemas import (
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
-from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, TOP5_RETAILERS
+from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, clear_ranking_caches, TOP5_RETAILERS
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
 )
@@ -163,6 +163,9 @@ async def refresh_mvs(db: AsyncSession = None):
         await conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY sku_factory_mv"))
         await conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY market_status_mv"))
     await _refresh_column_values_cache()
+    # 국가/제조사/공장 랭킹 점수도 MV와 같은 시점에만 무효화 — 과거 연도 데이터는
+    # 새 업로드 전까지 바뀌지 않으므로 그 사이 요청은 캐시로 즉시 응답한다.
+    clear_ranking_caches()
 
 
 _refresh_mvs_lock = None  # lazily created on the running event loop (see _refresh_mvs_safe)
