@@ -500,63 +500,23 @@ async def search_hybrid(
             ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
             LIMIT :limit OFFSET :offset
         """
-    elif not ms_in:
-        # No semantic candidates and no market_status filter: the common case
-        # is plain browsing with no search term at all, where filtered_source
-        # is the entire sku_history_mv (~170k+ rows). The previous query
-        # joined market_status_mv and computed COUNT(*) OVER() across *all*
-        # matching rows before applying ORDER BY/LIMIT, so every plain page
-        # load paid the cost of joining and counting the whole table just to
-        # return 50 rows. Since there's no market_status filter to apply
-        # post-join, we can paginate filtered_source directly (only that
-        # table needs to be scanned/counted) and join market_status_mv only
-        # onto the page's rows afterward.
-        data_sql = f"""
-            WITH source_rows AS (
-                SELECT * FROM {source_sql}
-            ),
-            filtered_source AS (
-                SELECT *
-                FROM source_rows
-                WHERE 1=1
-                  {competitor_cond}
-                  {col_filter_conds}
-                  {direct_search_cond}
-            ),
-            paged AS (
-                SELECT *, COUNT(*) OVER() AS total_count
-                FROM filtered_source
-                ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
-                LIMIT :limit OFFSET :offset
-            )
-            SELECT
-                p.category, p.mc, p.sku_name, p.import_type, p.importer,
-                p.import_count, p.manufacturer, p.factory, p.country,
-                p.email, p.latest_import,
-                p.base_year, p.count_year1, p.count_year2, p.count_year3,
-                'exact'::text AS match_type,
-                NULL::float AS semantic_score,
-                NULL::float AS relevance_score,
-                NULL::float AS mc_intent_bonus,
-                NULL::float AS category_intent_bonus,
-                NULL::float AS best_keyword_bonus,
-                NULL::float AS mc_mismatch_penalty,
-                NULL::float AS category_mismatch_penalty,
-                ms.market_status, ms.cr4_pct,
-                p.total_count
-            FROM paged p
-            LEFT JOIN market_status_mv ms
-              ON p.category IS NOT DISTINCT FROM ms.category
-             AND p.mc IS NOT DISTINCT FROM ms.mc
-             AND p.sku_name = ms.sku_name
-             AND p.import_type IS NOT DISTINCT FROM ms.import_type
-             AND p.factory IS NOT DISTINCT FROM ms.factory
-             AND p.country IS NOT DISTINCT FROM ms.country
-        """
     else:
-        # market_status filter is active: it applies after the join, so we
-        # can't paginate before joining without risking the wrong rows/total
-        # for the requested page. Falls back to join-then-filter-then-paginate.
+        # No semantic candidates to merge in, so every row is already a
+        # complete, unique exact match straight out of filtered_source.
+        # Skip the matched/deduped/self-join pipeline entirely (it would
+        # otherwise regroup and self-join the whole table on every request,
+        # including plain browsing with no search term) and query
+        # filtered_source directly, exactly like the pre-hybrid endpoint did.
+        #
+        # NOTE: a prior attempt paginated filtered_source (LIMIT 50) *before*
+        # joining market_status_mv, on the theory that joining only 50 rows
+        # instead of the whole table would be cheaper. In production this
+        # made things far worse (requests that used to return in ~10-30s
+        # started timing out completely) - joining a tiny derived/uninexed
+        # row set against market_status_mv via the NULL-safe
+        # IS NOT DISTINCT FROM conditions apparently pushed Postgres into a
+        # much worse plan than joining the two materialized views directly.
+        # Reverted to joining before pagination.
         data_sql = f"""
             WITH source_rows AS (
                 SELECT * FROM {source_sql}
