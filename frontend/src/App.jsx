@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, LabelList, ResponsiveContainer,
-} from "recharts";
 import { ComposableMap, Geographies, Geography, Marker, ZoomableGroup } from "react-simple-maps";
+
+// recharts는 상세 뷰의 차트 모달에서만 쓰이므로 지연 로드해 초기 번들에서 제외한다.
+const MonthlyLineChart = lazy(() => import("./MonthlyLineChart.jsx"));
 import { geoCentroid } from "d3-geo";
 import {
   fetchSkuHistory, fetchHybridSearch, fetchSearchSummary, fetchSkuFactories,
@@ -15,7 +15,11 @@ import {
   fetchFactoryView, fetchFactoryViewMonthly,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
-import worldGeoData from "world-atlas/countries-50m.json";
+
+// 지도 데이터(countries-50m, ~756KB)를 JS 번들에서 분리해 런타임에 정적 애셋으로 로드한다.
+// 번들에 static import 하면 이 큰 JSON을 전부 받고 파싱해야 첫 화면이 뜨므로(초기 gzip의 절반),
+// URL로 넘겨 react-simple-maps가 지도 화면 진입 시점에 별도로 fetch/파싱하게 한다.
+const WORLD_GEO_URL = "/countries-50m.json";
 
 // ─── 경쟁사 필터 목록 ────────────────────────────────────────────────────────
 const COMPETITORS = ["전체", "홈플러스", "이마트", "롯데마트", "쿠팡", "코스트코", "이랜드"];
@@ -1157,29 +1161,9 @@ function MainDashboard({ navigate }) {
                         }}>
                           총 수입횟수: <span style={{color:"#15803d"}}>{chartTotal.toLocaleString()}건</span>
                         </div>
-                        <ResponsiveContainer width="100%" height={220}>
-                          <LineChart data={chartData} margin={{top:28, right:16, bottom:4, left:0}}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
-                            <XAxis dataKey="month" tick={{fontSize:10}} interval="preserveStartEnd"/>
-                            <YAxis tick={{fontSize:10}} allowDecimals={false} width={36}/>
-                            <Tooltip
-                              formatter={(v) => [v + "건", "수입횟수"]}
-                              contentStyle={{fontSize:12, borderRadius:6}}
-                            />
-                            <Line
-                              type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2}
-                              dot={{ r: 2, fill: "#16a34a" }}
-                              activeDot={{ r: 4 }}
-                            >
-                              <LabelList
-                                dataKey="count"
-                                position="top"
-                                style={{fontSize:10, fill:"#374151", fontWeight:600}}
-                                formatter={v => v > 0 ? v : ""}
-                              />
-                            </Line>
-                          </LineChart>
-                        </ResponsiveContainer>
+                        <Suspense fallback={<div style={{height:220}}/>}>
+                          <MonthlyLineChart data={chartData}/>
+                        </Suspense>
                       </div>
                     )}
                   </>
@@ -1915,17 +1899,9 @@ function ManufacturerDetail({ navigate, state }) {
                         {!chartData.length ? <div className="empty-state" style={{marginTop:8}}>해당 기간 이력 없음</div> : (
                           <div style={{position:"relative",marginTop:8}}>
                             <div style={{position:"absolute",top:4,left:8,zIndex:1,fontSize:12,color:"#374151",fontWeight:600}}>총 수입횟수: <span style={{color:"#15803d"}}>{chartTotal.toLocaleString()}건</span></div>
-                            <ResponsiveContainer width="100%" height={220}>
-                              <LineChart data={chartData} margin={{top:28,right:16,bottom:4,left:0}}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
-                                <XAxis dataKey="month" tick={{fontSize:10}} interval="preserveStartEnd"/>
-                                <YAxis tick={{fontSize:10}} allowDecimals={false} width={36}/>
-                                <Tooltip formatter={(v)=>[v + "건", "수입횟수"]} contentStyle={{fontSize:12,borderRadius:6}}/>
-                                <Line type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2} dot={{r:2,fill:"#16a34a"}} activeDot={{r:4}}>
-                                  <LabelList dataKey="count" position="top" style={{fontSize:10,fill:"#374151",fontWeight:600}} formatter={v=>v>0?v:""}/>
-                                </Line>
-                              </LineChart>
-                            </ResponsiveContainer>
+                            <Suspense fallback={<div style={{height:220}}/>}>
+                              <MonthlyLineChart data={chartData}/>
+                            </Suspense>
                           </div>
                         )}
                       </>
@@ -2098,17 +2074,9 @@ function ManufacturerDetail({ navigate, state }) {
                           {!chartData.length ? <div className="empty-state" style={{marginTop:8}}>해당 기간 이력 없음</div> : (
                             <div style={{position:"relative",marginTop:8}}>
                               <div style={{position:"absolute",top:4,left:8,zIndex:1,fontSize:12,color:"#374151",fontWeight:600}}>총 수입횟수: <span style={{color:"#15803d"}}>{chartTotal.toLocaleString()}건</span></div>
-                              <ResponsiveContainer width="100%" height={220}>
-                                <LineChart data={chartData} margin={{top:28,right:16,bottom:4,left:0}}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
-                                  <XAxis dataKey="month" tick={{fontSize:10}} interval="preserveStartEnd"/>
-                                  <YAxis tick={{fontSize:10}} allowDecimals={false} width={36}/>
-                                  <Tooltip formatter={(v)=>[v + "건", "수입횟수"]} contentStyle={{fontSize:12,borderRadius:6}}/>
-                                  <Line type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2} dot={{r:2,fill:"#16a34a"}} activeDot={{r:4}}>
-                                    <LabelList dataKey="count" position="top" style={{fontSize:10,fill:"#374151",fontWeight:600}} formatter={v=>v>0?v:""}/>
-                                  </Line>
-                                </LineChart>
-                              </ResponsiveContainer>
+                              <Suspense fallback={<div style={{height:220}}/>}>
+                                <MonthlyLineChart data={chartData}/>
+                              </Suspense>
                             </div>
                           )}
                         </>
@@ -2744,7 +2712,7 @@ function CountryMapPage({ navigate }) {
                 onMoveStart={()=>setHovered(null)}
                 onMoveEnd={setZoomState}
               >
-                <Geographies geography={worldGeoData}>
+                <Geographies geography={WORLD_GEO_URL}>
                   {({ geographies }) => (
                     <>
                       {geographies.map(geo => {
@@ -3411,17 +3379,9 @@ function FactoryViewDashboard({ navigate }) {
                         <div style={{position:"absolute", top:4, left:8, zIndex:1, fontSize:12, color:"#374151", fontWeight:600}}>
                           총 수입횟수: <span style={{color:"#15803d"}}>{chartTotal.toLocaleString()}건</span>
                         </div>
-                        <ResponsiveContainer width="100%" height={220}>
-                          <LineChart data={chartData} margin={{top:28, right:16, bottom:4, left:0}}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb"/>
-                            <XAxis dataKey="month" tick={{fontSize:10}} interval="preserveStartEnd"/>
-                            <YAxis tick={{fontSize:10}} allowDecimals={false} width={36}/>
-                            <Tooltip formatter={(v) => [v + "건", "수입횟수"]} contentStyle={{fontSize:12, borderRadius:6}}/>
-                            <Line type="linear" dataKey="count" stroke="#16a34a" strokeWidth={2} dot={{ r: 2, fill: "#16a34a" }} activeDot={{ r: 4 }}>
-                              <LabelList dataKey="count" position="top" style={{fontSize:10, fill:"#374151", fontWeight:600}} formatter={v => v > 0 ? v : ""}/>
-                            </Line>
-                          </LineChart>
-                        </ResponsiveContainer>
+                        <Suspense fallback={<div style={{height:220}}/>}>
+                          <MonthlyLineChart data={chartData}/>
+                        </Suspense>
                       </div>
                     )}
                   </>
