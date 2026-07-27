@@ -60,7 +60,7 @@ from schemas import (
 from hybrid_schemas import HybridSearchResponse, SearchSummaryResponse
 from hybrid_embeddings import EmbeddingResult
 from hybrid_config import embedding_dimensions_required, embedding_model
-from hybrid_search import search_hybrid
+from hybrid_search import search_hybrid, clear_browse_cache as clear_hybrid_browse_cache
 from search_summary import compute_search_summary
 
 load_dotenv()
@@ -166,6 +166,8 @@ async def refresh_mvs(db: AsyncSession = None):
     # 국가/제조사/공장 랭킹 점수도 MV와 같은 시점에만 무효화 — 과거 연도 데이터는
     # 새 업로드 전까지 바뀌지 않으므로 그 사이 요청은 캐시로 즉시 응답한다.
     clear_ranking_caches()
+    # 검색어 없는 리스트 응답 캐시도 동일한 시점에만 무효화.
+    clear_hybrid_browse_cache()
 
 
 _refresh_mvs_lock = None  # lazily created on the running event loop (see _refresh_mvs_safe)
@@ -318,6 +320,18 @@ async def _startup_bg():
         except Exception:
             pass
     await _refresh_mvs_safe()
+    # 첫 방문자가 콜드 캐시로 무거운 조인/카운트 쿼리를 직접 맞지 않도록,
+    # 검색어 없는 기본 리스트(1페이지) 응답을 미리 계산해 캐시를 데워둔다.
+    try:
+        async with AsyncSessionLocal() as warm_db:
+            await search_hybrid(
+                warm_db, search=None, competitor="전체",
+                sort_by="import_count", sort_dir="desc",
+                page=1, page_size=50, date_from=None, date_to=None,
+                filters={k: None for k in ("category", "mc", "import_type", "importer", "country", "factory", "email", "sku_name")},
+            )
+    except Exception:
+        pass
     print("STARTUP BG COMPLETE")
 
 _SKU_HISTORY_MV_SQL = """

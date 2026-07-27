@@ -4,6 +4,7 @@ import hashlib
 import logging
 import math
 import time
+from collections import OrderedDict
 from datetime import date
 from typing import Optional
 
@@ -37,6 +38,42 @@ log = logging.getLogger(__name__)
 _DYNAMIC_INTENT_CACHE: dict[str, tuple[float, QueryIntent]] = {}
 _DYNAMIC_INTENT_CACHE_TTL_SECONDS = 3600
 _DYNAMIC_INTENT_CACHE_MAX_SIZE = 256
+
+# ─── 검색어 없는 "그냥 둘러보기" 응답 캐시 ────────────────────────────────────
+# 검색어가 없을 때(hybrid_enabled은 항상 False) 이 함수는 매번 sku_history_mv를
+# market_status_mv와 통째로 조인하고 COUNT(*) OVER()로 전체 건수를 세는 무거운
+# 쿼리를 실행한다. 첫 화면 방문·필터 없는 리스트 열람이 압도적으로 이 경로를
+# 타는데, 같은 정렬/페이지/필터 조합이면 결과가 항상 같으므로 응답 전체를
+# 캐싱해 반복 계산을 없앤다. 업로드/크롤링 이후 refresh_mvs()가 clear_browse_cache()를
+# 호출하는 시점에만 무효화한다(다른 캐시들과 동일한 패턴).
+_BROWSE_CACHE_MAX = 300
+_browse_response_cache: "OrderedDict[tuple, HybridSearchResponse]" = OrderedDict()
+
+
+def clear_browse_cache() -> None:
+    _browse_response_cache.clear()
+
+
+def _browse_cache_key(
+    competitor: Optional[str],
+    sort_by: str,
+    sort_dir: str,
+    page: int,
+    page_size: int,
+    date_from: Optional[str],
+    date_to: Optional[str],
+    filters: dict[str, Optional[list[str]]],
+    market_status_filter: Optional[list[str]],
+) -> tuple:
+    filters_key = tuple(sorted(
+        (col, tuple(sorted(values)) if values else None)
+        for col, values in filters.items()
+    ))
+    ms_key = tuple(sorted(market_status_filter)) if market_status_filter else None
+    return (
+        competitor, sort_by, sort_dir, page, page_size,
+        date_from, date_to, filters_key, ms_key,
+    )
 
 
 def normalize_text(value: Optional[str]) -> str:
@@ -277,6 +314,17 @@ async def search_hybrid(
 ) -> HybridSearchResponse:
     started = time.perf_counter()
     query = normalize_text(search)
+
+    browse_cache_key = None
+    if not query:
+        browse_cache_key = _browse_cache_key(
+            competitor, sort_by, sort_dir, page, page_size,
+            date_from, date_to, filters, market_status_filter,
+        )
+        cached_response = _browse_response_cache.get(browse_cache_key)
+        if cached_response is not None:
+            return cached_response
+
     semantic_error: Optional[str] = _semantic_error
     query_embedding = None
     hybrid_enabled = HYBRID_SEARCH_ENABLED and bool(query) and not _force_direct
@@ -711,7 +759,7 @@ async def search_hybrid(
     )
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
-    return HybridSearchResponse(
+    response = HybridSearchResponse(
         data=[
             HybridSkuHistoryRow(**{k: v for k, v in r.items() if k != "total_count"})
             for r in rows
@@ -731,4 +779,12 @@ async def search_hybrid(
         minimum_returned_relevance_score=min_relevance_score,
         semantic_error=semantic_error,
     )
+
+    if browse_cache_key is not None:
+        _browse_response_cache[browse_cache_key] = response
+        _browse_response_cache.move_to_end(browse_cache_key)
+        while len(_browse_response_cache) > _BROWSE_CACHE_MAX:
+            _browse_response_cache.popitem(last=False)
+
+    return response
 
