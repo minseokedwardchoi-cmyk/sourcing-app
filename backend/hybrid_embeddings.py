@@ -119,10 +119,18 @@ class RemoteEmbeddingProvider:
     PyTorch and model weights out of the 512 MB API process.
     """
 
+    # 원격 임베딩 서비스(별도 Render/HF Space)가 죽어있거나 sleep 상태면, 검색 한 번마다
+    # 재시도 3회 x 타임아웃(기본 30초)까지 기다린 뒤에야 실패로 판단해 일반 검색으로
+    # 폴백한다 - 서비스가 내려가 있는 동안 모든 검색이 최대 수십~90초씩 걸리게 됨.
+    # 첫 실패 이후 일정 시간은 재시도 자체를 건너뛰고 즉시 실패 처리해, 서비스가 복구될
+    # 때까지 이후 검색들은 곧바로 일반 검색으로 폴백하도록 한다(회로 차단기 패턴).
+    _CIRCUIT_COOLDOWN_SECONDS = 90.0
+
     def __init__(self):
         self._cache: OrderedDict[str, tuple[float, EmbeddingResult]] = OrderedDict()
         self._cache_lock = asyncio.Lock()
         self._max_cache_size = 256
+        self._circuit_open_until: float = 0.0
 
     def _settings(self) -> tuple[str, str, float]:
         url = embedding_service_url()
@@ -154,6 +162,12 @@ class RemoteEmbeddingProvider:
     async def _post(self, path: str, payload: dict) -> dict:
         import httpx
 
+        now = time.monotonic()
+        if now < self._circuit_open_until:
+            raise RuntimeError(
+                "Embedding service circuit open (recent failure) - skipping retry."
+            )
+
         url, token, timeout = self._settings()
         headers = {"X-Embedding-Token": token}
         last_error: Exception | None = None
@@ -166,6 +180,7 @@ class RemoteEmbeddingProvider:
                 data = response.json()
                 if not isinstance(data, dict):
                     raise RuntimeError("Embedding service returned a non-object response.")
+                self._circuit_open_until = 0.0
                 return data
             except httpx.HTTPStatusError as exc:
                 # Authentication/configuration errors will not heal on retry.
@@ -181,6 +196,7 @@ class RemoteEmbeddingProvider:
             if attempt == 2:
                 break
             await asyncio.sleep(2 ** attempt)
+        self._circuit_open_until = time.monotonic() + self._CIRCUIT_COOLDOWN_SECONDS
         raise RuntimeError(f"Embedding service request failed: {last_error}") from last_error
 
     async def embed_query(self, text_value: str) -> EmbeddingResult:
