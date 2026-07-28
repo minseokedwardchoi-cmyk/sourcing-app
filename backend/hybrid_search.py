@@ -46,7 +46,9 @@ _DYNAMIC_INTENT_CACHE_MAX_SIZE = 256
 # 서비스가 다운돼 있으면 검색어 있는 요청 몇 개만 겹쳐도 풀이 고갈되어 다른 모든
 # 요청(검색이든 아니든)이 QueuePool timeout으로 500이 난다. embed_query 자체의
 # 재시도/백오프 설정과 무관하게, 커넥션을 오래 붙잡지 못하도록 여기서 하드 캡을 건다.
-_EMBEDDING_HARD_TIMEOUT_SECONDS = 8.0
+# 서비스가 11일째 복구가 안 되고 있어, 서킷이 다시 열리는 시점마다("재수 없이 걸리는"
+# 검색 한 번) 사용자가 느끼는 지연을 최소화하려고 8초 -> 3초로 더 줄임.
+_EMBEDDING_HARD_TIMEOUT_SECONDS = 3.0
 
 # ─── 검색어 없는 "그냥 둘러보기" 응답 캐시 ────────────────────────────────────
 # 검색어가 없을 때(hybrid_enabled은 항상 False) 이 함수는 매번 sku_history_mv를

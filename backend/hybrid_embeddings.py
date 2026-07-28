@@ -124,7 +124,13 @@ class RemoteEmbeddingProvider:
     # 폴백한다 - 서비스가 내려가 있는 동안 모든 검색이 최대 수십~90초씩 걸리게 됨.
     # 첫 실패 이후 일정 시간은 재시도 자체를 건너뛰고 즉시 실패 처리해, 서비스가 복구될
     # 때까지 이후 검색들은 곧바로 일반 검색으로 폴백하도록 한다(회로 차단기 패턴).
-    _CIRCUIT_COOLDOWN_SECONDS = 90.0
+    #
+    # 90초로 짧게 잡았더니, 그 90초가 지난 뒤 "재시도 타이밍에 걸린" 첫 검색만
+    # (embed_query의 하드 타임아웃만큼) 느려지는 게 실사용에서 계속 반복 관측됨 -
+    # 임베딩 서비스가 11일째 복구가 안 되고 있어 짧은 쿨다운의 이점(빠른 재개)보다
+    # 단점(주기적으로 느린 검색 한 번씩 재발)이 더 크다고 판단, 훨씬 길게 늘림.
+    # 서비스가 복구되면 다음 성공 응답에서 바로 회로가 닫히므로 더 길게 잡아도 안전함.
+    _CIRCUIT_COOLDOWN_SECONDS = 600.0
 
     def __init__(self):
         self._cache: OrderedDict[str, tuple[float, EmbeddingResult]] = OrderedDict()
