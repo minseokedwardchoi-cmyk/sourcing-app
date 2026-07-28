@@ -390,8 +390,14 @@ async def search_hybrid(
 
     direct_search_cond = ""
     if query:
+        # 임베딩 서비스가 죽어있거나(HYBRID_SEARCH_ENABLED=false 포함) use_semantic이
+        # 꺼져있어도, INTENT_RULES(hybrid_relevance.py)의 규칙 기반 키워드 확장은
+        # 외부 호출 없이 로컬에서 바로 계산되므로 항상 직접 검색 조건에 포함시킨다.
+        # 예: "참치캔" 검색 시 intent.keyword_terms=("참치","tuna")가 더해져,
+        # sku_name/mc 등에 "참치캔"이라는 글자가 없어도 "참치"만 있는 행을 찾아낸다.
+        direct_terms = list(dict.fromkeys((*expand_query_terms(query), *intent.keyword_terms)))
         direct_term_groups: list[str] = []
-        for index, term in enumerate(expand_query_terms(query)):
+        for index, term in enumerate(direct_terms):
             key = f"search_{index}"
             params[key] = f"%{term}%"
             direct_term_groups.append(f"""(
