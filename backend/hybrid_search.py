@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import math
@@ -38,6 +39,14 @@ log = logging.getLogger(__name__)
 _DYNAMIC_INTENT_CACHE: dict[str, tuple[float, QueryIntent]] = {}
 _DYNAMIC_INTENT_CACHE_TTL_SECONDS = 3600
 _DYNAMIC_INTENT_CACHE_MAX_SIZE = 256
+
+# search_hybrid()는 요청 전체에 걸쳐 하나의 db 세션을 붙잡고 있다(Depends(get_db)).
+# embed_query()는 자체적으로 최대 3회 재시도 x 타임아웃(기본 30초)까지 걸릴 수 있는데,
+# 그동안 이 db 세션이 물고 있는 커넥션 풀(총 5개) 슬롯도 같이 묶인다. 원격 임베딩
+# 서비스가 다운돼 있으면 검색어 있는 요청 몇 개만 겹쳐도 풀이 고갈되어 다른 모든
+# 요청(검색이든 아니든)이 QueuePool timeout으로 500이 난다. embed_query 자체의
+# 재시도/백오프 설정과 무관하게, 커넥션을 오래 붙잡지 못하도록 여기서 하드 캡을 건다.
+_EMBEDDING_HARD_TIMEOUT_SECONDS = 8.0
 
 # ─── 검색어 없는 "그냥 둘러보기" 응답 캐시 ────────────────────────────────────
 # 검색어가 없을 때(hybrid_enabled은 항상 False) 이 함수는 매번 sku_history_mv를
@@ -353,7 +362,10 @@ async def search_hybrid(
             query_embedding = precomputed_embedding
         else:
             try:
-                query_embedding = await embedding_provider.embed_query(semantic_query)
+                query_embedding = await asyncio.wait_for(
+                    embedding_provider.embed_query(semantic_query),
+                    timeout=_EMBEDDING_HARD_TIMEOUT_SECONDS,
+                )
             except Exception as exc:
                 semantic_error = str(exc)
                 hybrid_enabled = False
