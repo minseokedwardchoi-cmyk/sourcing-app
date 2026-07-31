@@ -22,6 +22,7 @@ class ImportHistory(Base):
     category         = Column(String(100),  nullable=True,  comment="구분 (PB/NB/부자재 등)")
     mc               = Column(String(100),  nullable=True,  comment="MC (상품 카테고리: 과자/제과, 음료/커피 등)")
     sku_name         = Column(String(500),  nullable=False, comment="SKU명")
+    sku_name_en      = Column(String(500),  nullable=True,  comment="SKU 영문명 (내부 매칭용, 프론트 미노출)")
     import_type      = Column(String(50),   nullable=True,  comment="OEM/수입 여부")
 
     # ── 수입업체 ───────────────────────────────────────────

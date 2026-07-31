@@ -46,6 +46,7 @@ from schemas import (
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
+from english_name_importer import import_english_names
 from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, clear_ranking_caches, TOP5_RETAILERS
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
@@ -246,6 +247,7 @@ async def _startup_bg():
         for col_sql in [
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS contact_status VARCHAR(100)",
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS md_name VARCHAR(100)",
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS sku_name_en VARCHAR(500)",
         ]:
             try:
                 await conn.execute(text(col_sql))
@@ -519,6 +521,13 @@ class ContactUpdateResponse(BaseModel):
     message: str
 
 class ContactBulkUploadResponse(BaseModel):
+    total_rows: int
+    matched_rows: int
+    skipped: int
+    message: str
+
+
+class EnglishNameBulkUploadResponse(BaseModel):
     total_rows: int
     matched_rows: int
     skipped: int
@@ -1924,6 +1933,40 @@ async def upload_contacts(
         asyncio.create_task(_refresh_mvs_safe())
 
         return ContactBulkUploadResponse(**result)
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {str(e)}",
+        )
+
+
+# ─── 3-3. SKU 영문명 일괄 보강 (내부 매칭용, 프론트 미노출) ──────────────────
+@app.post("/api/upload-english-names", response_model=EnglishNameBulkUploadResponse)
+async def upload_english_names(
+    file: UploadFile = File(..., description="한국어 제품명/영문 제품명/해외제조업소/수입업체 Excel 파일"),
+    overwrite: bool = Form(False, description="기존 값 덮어쓰기 여부"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        if not file.filename.endswith((".xlsx", ".xls")):
+            raise HTTPException(
+                status_code=400,
+                detail="Excel 파일(.xlsx, .xls)만 업로드 가능합니다.",
+            )
+
+        content = await file.read()
+        result = await import_english_names(content, db, overwrite=overwrite)
+
+        print("ENGLISH_NAME_UPLOAD_RESULT:", result)
+
+        return EnglishNameBulkUploadResponse(**result)
 
     except HTTPException:
         raise
