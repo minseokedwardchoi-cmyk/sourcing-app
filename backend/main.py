@@ -1956,6 +1956,7 @@ async def upload_contacts(
 async def upload_english_names(
     file: UploadFile = File(..., description="한국어 제품명/영문 제품명/해외제조업소/수입업체 Excel 파일"),
     overwrite: bool = Form(False, description="기존 값 덮어쓰기 여부"),
+    require_importer: bool = Form(True, description="수입업체까지 매칭 조건에 포함할지 (False면 제품명+해외제조업소 2키만 매칭)"),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -1966,7 +1967,7 @@ async def upload_english_names(
             )
 
         content = await file.read()
-        result = await import_english_names(content, db, overwrite=overwrite)
+        result = await import_english_names(content, db, overwrite=overwrite, require_importer=require_importer)
 
         print("ENGLISH_NAME_UPLOAD_RESULT:", result)
 
