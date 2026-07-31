@@ -311,6 +311,10 @@ async def _startup_bg():
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_gin_sku       ON import_history USING gin (sku_name      gin_trgm_ops)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_gin_factory   ON import_history USING gin (factory       gin_trgm_ops)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_gin_importer  ON import_history USING gin (importer      gin_trgm_ops)",
+        # sku_name_en 보강 업로드의 매칭 키 — 이 인덱스 없이는 매 업로드마다
+        # 백만 행 테이블을 훑어 UPDATE ... FROM 조인을 해야 해서 커넥션을
+        # 오래 붙잡고 있다가 QueuePool이 고갈됨.
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_en_match      ON import_history (sku_name, factory, importer)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pe_mc_search ON product_embedding (mc_norm_key, status, model, embedding_dimensions)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_pe_gin_sku_norm ON product_embedding USING gin (sku_name_norm_key gin_trgm_ops)",
     ]
