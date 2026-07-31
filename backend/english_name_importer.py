@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from importer import normalize_importer, normalize_name
 
 
 ENGLISH_NAME_FIELD_MAP = {
@@ -83,8 +84,8 @@ async def import_english_names(
     for _, row in df.iterrows():
         sku_name = clean_value(row.get("sku_name"))
         sku_name_en = clean_value(row.get("sku_name_en"))
-        factory = clean_value(row.get("factory"))
-        importer = clean_value(row.get("importer"))
+        factory = normalize_name(row.get("factory"))
+        importer = normalize_importer(row.get("importer"))
 
         if not sku_name or not factory or not importer or not sku_name_en:
             skipped += 1
