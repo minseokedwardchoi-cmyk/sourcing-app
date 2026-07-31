@@ -1985,6 +1985,45 @@ async def upload_english_names(
             detail=f"{type(e).__name__}: {str(e)}",
         )
 
+
+# ─── 3-4. 영문 SKU명 내부 조회 (병행수입 판단용, 프론트 미노출) ────────────────
+# 프론트가 쓰지 않는 내부 분석 전용 엔드포인트. sku_name_en으로 원본 행을 찾아
+# 로컬 스크립트에서 유사도 매칭 + 제조사별 수입업체 집계를 하기 위한 용도.
+@app.get("/api/internal/english-name-stats")
+async def english_name_stats(db: AsyncSession = Depends(get_db)):
+    r = await db.execute(text("""
+        SELECT
+            COUNT(*) AS total_rows,
+            COUNT(*) FILTER (WHERE sku_name_en IS NOT NULL AND sku_name_en <> '') AS filled_rows,
+            COUNT(*) FILTER (WHERE sku_name_en IS NULL OR sku_name_en = '') AS missing_rows,
+            COUNT(DISTINCT sku_name) FILTER (WHERE sku_name_en IS NULL OR sku_name_en = '') AS missing_distinct_sku_names
+        FROM import_history
+    """))
+    row = r.mappings().first()
+    return dict(row)
+
+
+@app.get("/api/internal/english-lookup")
+async def english_lookup(
+    search: str = Query(..., description="sku_name_en에 대한 ILIKE 검색어"),
+    limit: int = Query(2000, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = await db.execute(
+        text("""
+            SELECT sku_name, sku_name_en, factory, manufacturer, importer,
+                   category, mc, import_type, country,
+                   COALESCE(import_date, process_date) AS txn_date
+            FROM import_history
+            WHERE sku_name_en ILIKE :q
+            ORDER BY sku_name_en
+            LIMIT :limit
+        """),
+        {"q": f"%{search}%", "limit": limit},
+    )
+    return [dict(r) for r in rows.mappings().all()]
+
+
 # ─── 4. Excel 업로드 ──────────────────────────────────────────────────────────
 @app.post("/api/upload", response_model=UploadResponse)
 async def upload_excel(
