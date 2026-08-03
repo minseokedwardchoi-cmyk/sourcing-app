@@ -2005,10 +2005,19 @@ async def english_name_stats(db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/internal/english-lookup")
 async def english_lookup(
-    search: str = Query(..., description="sku_name_en에 대한 ILIKE 검색어"),
+    search: str = Query(..., description="sku_name_en / factory / manufacturer에 대한 ILIKE 검색어"),
     limit: int = Query(2000, ge=1, le=5000),
     db: AsyncSession = Depends(get_db),
 ):
+    # sku_name_en뿐 아니라 factory/manufacturer도 검색 대상에 포함.
+    # 일부 수입업체(예: 이마트)는 sku_name_en에 브랜드명을 안 적고
+    # "EXTRA VIRGIN OLIVE OIL"처럼 일반명만 적어놓는 경우가 있어서,
+    # sku_name_en만 검색하면 그 행 자체를 찾을 수 없었음(브랜드 검색 시
+    # 후보에 아예 안 걸림). factory/manufacturer엔 보통 제조사명(=브랜드인
+    # 경우가 많음, 예: "COSTA D'ORO S.P.A.")이 들어있어서 이걸로 찾을 수
+    # 있게 함. 어느 컬럼이 매칭됐는지는 호출 측(클라이언트)에서 반환된
+    # sku_name_en/factory 값을 검색어와 직접 비교해서 판단하면 되므로
+    # 응답 스키마는 그대로 유지.
     rows = await db.execute(
         text("""
             SELECT sku_name, sku_name_en, factory, manufacturer, importer,
@@ -2016,6 +2025,8 @@ async def english_lookup(
                    COALESCE(import_date, process_date) AS txn_date
             FROM import_history
             WHERE sku_name_en ILIKE :q
+               OR factory ILIKE :q
+               OR manufacturer ILIKE :q
             ORDER BY sku_name_en
             LIMIT :limit
         """),
