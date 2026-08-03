@@ -13,6 +13,7 @@ import {
   fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers, fetchCountryAmountShare,
   fetchItemCountries,
   fetchFactoryView, fetchFactoryViewMonthly,
+  fetchProductSourcingTypes, fetchProductSourcingSearch,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
 
@@ -746,6 +747,12 @@ function MainDashboard({ navigate }) {
                 onClick={()=>navigate("factory-view")}
               >
                 🏭 공장별로 보기
+              </button>
+              <button
+                className="icon-btn"
+                onClick={()=>navigate("product-sourcing")}
+              >
+                🛒 품목별 유통사 인기상품/소싱 리스크
               </button>
               <a
                 className="icon-btn"
@@ -3396,6 +3403,217 @@ function FactoryViewDashboard({ navigate }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// 품목별 유통사 인기상품 & 소싱 리스크
+// ═══════════════════════════════════════════════════════════════════════════════
+const RETAILER_META = {
+  amazon:   { emoji: "🇺🇸", label: "아마존" },
+  walmart:  { emoji: "🇺🇸", label: "월마트" },
+  samsclub: { emoji: "🇺🇸", label: "샘스클럽" },
+  aeon:     { emoji: "🇯🇵", label: "이온몰" },
+};
+
+function statusBadgeClass(value) {
+  if (!value) return "b-gray";
+  const v = String(value).trim().toLowerCase();
+  if (v === "통과" || v === "o") return "b-green";
+  if (v === "탈락" || v === "x") return "b-red";
+  return "b-gray"; // 미검증/수입이력 없음/확인필요/- 등
+}
+
+function ProductSourcingRow({ item }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <>
+      <tr style={{cursor:"pointer"}} onClick={()=>setExpanded(v=>!v)}>
+        <td style={{width:36, textAlign:"center", color:"#6b7280"}}>{item.rank}</td>
+        <td style={{width:56}}>
+          {item.image_url
+            ? <img src={item.image_url} alt="" style={{width:40,height:40,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
+            : <div style={{width:40,height:40,borderRadius:6,background:"#f3f4f6"}}/>
+          }
+        </td>
+        <td style={{maxWidth:150}}>
+          <div style={{fontWeight:600}}>{item.brand_kr || "-"}</div>
+          {item.brand_en && <div style={{fontSize:11,color:"#9ca3af"}}>{item.brand_en}</div>}
+        </td>
+        <td style={{maxWidth:280, whiteSpace:"normal"}} title={item.product_name_en || ""}>
+          {item.url
+            ? <a className="link-cell" href={item.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>{item.product_name_en || "-"}</a>
+            : (item.product_name_en || "-")
+          }
+        </td>
+        <td style={{whiteSpace:"nowrap"}}>{item.price_usd != null ? `$${item.price_usd.toFixed(2)}` : "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>{item.unit || "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>
+          {item.key_criteria_label ? `${item.key_criteria_label} ${item.key_criteria_value ?? ""}` : "-"}
+        </td>
+        <td><span className={`badge ${statusBadgeClass(item.parallel_import)}`}>{item.parallel_import || "정보없음"}</span></td>
+        <td>
+          <span className={`badge ${statusBadgeClass(item.recall_status)}`} title="리콜 이력">리콜</span>
+          <span className={`badge ${statusBadgeClass(item.quality_label_status)}`} title="품질·표시">품질</span>
+          <span className={`badge ${statusBadgeClass(item.legal_risk_status)}`} title="법적·평판 리스크">법적</span>
+        </td>
+        <td style={{whiteSpace:"nowrap"}}>{item.rating != null ? `⭐${item.rating} (${(item.review_count||0).toLocaleString()})` : "-"}</td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={10} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+            <div style={{marginBottom:4}}><b>원산지:</b> {item.origin || "정보없음"}</div>
+            <div style={{marginBottom:4}}><b>5년내 이슈:</b> {item.five_year_issue || "-"}</div>
+            <div style={{marginBottom:4}}><b>비고:</b> {item.notes || "특이사항 없음"}</div>
+            {item.verified_flag && <div style={{color:"#9ca3af"}}>실측여부: {item.verified_flag}</div>}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function ProductSourcingRetailerSection({ group }) {
+  const meta = RETAILER_META[group.retailer] || { emoji: "🛒", label: group.retailer_label || group.retailer };
+  return (
+    <div className="card" style={{padding:16, marginBottom:16}}>
+      <div style={{display:"flex", alignItems:"baseline", gap:8, marginBottom:10}}>
+        <h3 style={{fontSize:15}}>{meta.emoji} {meta.label}</h3>
+        <span style={{fontSize:12, color:"#9ca3af"}}>{group.sample_note || `${group.items.length}개`}</span>
+      </div>
+      {group.items.length === 0 ? (
+        <div style={{fontSize:13, color:"#9ca3af"}}>데이터 없음</div>
+      ) : (
+        <div style={{overflowX:"auto"}}>
+          <table>
+            <thead>
+              <tr>
+                <th>순위</th><th>이미지</th><th>브랜드</th><th>상품명</th><th>가격</th><th>단량</th>
+                <th>핵심기준</th><th>병행수입</th><th>리스크</th><th>평점</th>
+              </tr>
+            </thead>
+            <tbody>
+              {group.items.map(item => <ProductSourcingRow key={item.rank} item={item}/>)}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductSourcingPage({ navigate }) {
+  const [types, setTypes] = useState([]);
+  const [query, setQuery] = useState("");
+  const [showSuggest, setShowSuggest] = useState(false);
+  const [selectedType, setSelectedType] = useState(null);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const searchRef = useRef(null);
+  const dropRef = useRef(null);
+
+  useEffect(() => {
+    fetchProductSourcingTypes().then(r => setTypes(r.types || [])).catch(() => setTypes([]));
+  }, []);
+
+  useEffect(() => {
+    if (!showSuggest) return;
+    const h = e => {
+      if (searchRef.current?.contains(e.target)) return;
+      if (dropRef.current?.contains(e.target)) return;
+      setShowSuggest(false);
+    };
+    document.addEventListener("mousedown", h, true);
+    return () => document.removeEventListener("mousedown", h, true);
+  }, [showSuggest]);
+
+  const suggestions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return types;
+    return types.filter(t => t.toLowerCase().includes(q));
+  }, [query, types]);
+
+  function selectType(t) {
+    setSelectedType(t);
+    setQuery(t);
+    setShowSuggest(false);
+    setLoading(true);
+    setError(null);
+    fetchProductSourcingSearch(t)
+      .then(setResult)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }
+
+  return (
+    <div className="app">
+      <style>{styles}</style>
+      <div className="banner">
+        <div className="banner-inner">
+          <div className="banner-left">
+            <h1>🌐 Global Factory Sourcing Database</h1>
+            <p>수입식품정보 기반으로 구축한 해외 제조업체 · SKU · 수입/OEM 이력 통합 DB</p>
+          </div>
+        </div>
+      </div>
+      <div className="page">
+        <button className="back-btn" onClick={()=>navigate("main")}>← 수입/OEM SKU 이력으로 돌아가기</button>
+
+        <div className="card" style={{padding:16, marginBottom:16}}>
+          <h2>품목별 유통사 인기상품 &amp; 소싱 리스크</h2>
+          <p style={{fontSize:12, color:"#6b7280", margin:"6px 0 12px"}}>
+            품목을 검색하면 아마존·이온몰·월마트·샘스클럽에서 잘 팔리는 브랜드와, 병행수입 가능여부·리콜/품질/법적 리스크 판정을 한번에 비교할 수 있습니다. 각 행을 클릭하면 원산지·비고 상세가 열립니다.
+          </p>
+          <div ref={searchRef} style={{position:"relative", maxWidth:420}}>
+            <input
+              className="date-range-input"
+              style={{width:"100%", background:"#fff"}}
+              placeholder="품목명 검색 (예: 올리브유, 마요네즈, 땅콩버터...)"
+              value={query}
+              onChange={e=>{ setQuery(e.target.value); setSelectedType(null); setShowSuggest(true); }}
+              onFocus={()=>setShowSuggest(true)}
+              onKeyDown={e=>{ if (e.key==="Enter" && suggestions.length>0) selectType(suggestions[0]); }}
+            />
+            {showSuggest && (
+              <div ref={dropRef} className="filter-dropdown" style={{minWidth:"100%", maxWidth:"100%", zIndex:220}}>
+                <div className="filter-list" style={{maxHeight:280}}>
+                  {suggestions.length === 0
+                    ? <div style={{padding:"8px 12px", fontSize:12, color:"#9ca3af"}}>{types.length===0 ? "데이터를 불러오는 중..." : "결과 없음"}</div>
+                    : suggestions.map(t => (
+                      <div key={t} className="filter-item" style={{cursor:"pointer"}} onClick={()=>selectType(t)}>
+                        <span>{t}</span>
+                      </div>
+                    ))
+                  }
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {error && <div className="error-box">오류: {error}</div>}
+        {loading && <div style={{fontSize:13, color:"#9ca3af", padding:"16px 0"}}>불러오는 중...</div>}
+
+        {!loading && result && (
+          <>
+            <h3 style={{margin:"4px 0 14px"}}>{result.product_type}</h3>
+            {result.retailers.length === 0
+              ? <div style={{fontSize:13, color:"#9ca3af"}}>이 품목에 대한 유통사 데이터가 없습니다.</div>
+              : result.retailers.map(group => (
+                <ProductSourcingRetailerSection key={group.retailer} group={group}/>
+              ))
+            }
+          </>
+        )}
+
+        {!loading && !result && selectedType === null && (
+          <div style={{fontSize:13, color:"#9ca3af", padding:"24px 0", textAlign:"center"}}>
+            품목을 검색해서 선택하면 유통사별 인기상품과 소싱 리스크가 표시됩니다.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ROOT
 // ═══════════════════════════════════════════════════════════════════════════════
 const HYBRID_TEST_TERMS = [
@@ -3613,5 +3831,6 @@ export default function App() {
   if (page.name==="country") return <CountryDetail navigate={navigate} state={page.state}/>;
   if (page.name==="country-map") return <CountryMapPage navigate={navigate}/>;
   if (page.name==="factory-view") return <FactoryViewDashboard navigate={navigate}/>;
+  if (page.name==="product-sourcing") return <ProductSourcingPage navigate={navigate}/>;
   return <MainDashboard navigate={navigate}/>;
 }

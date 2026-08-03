@@ -355,6 +355,16 @@ export function fetchCountryManufacturers(country, { mc, query, sortBy, sortOrde
   });
 }
 
+/** 품목별 유통사 인기상품/소싱 리스크: 적재된 품목(유형) 전체 목록 */
+export function fetchProductSourcingTypes() {
+  return request("/api/product-sourcing/types");
+}
+
+/** 품목별 유통사 인기상품/소싱 리스크: 유통사별 순위/리스크 정보 */
+export function fetchProductSourcingSearch(productType) {
+  return request("/api/product-sourcing/search", { product_type: productType });
+}
+
 /** 공장별 보기: SKU 이력 집계 (importer 제외 그룹핑) */
 export async function fetchFactoryView({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {}, dateFrom, dateTo }) {
   const url = new URL(`${BASE_URL}/api/factory-view`, window.location.origin);
