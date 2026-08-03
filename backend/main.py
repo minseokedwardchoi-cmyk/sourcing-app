@@ -35,7 +35,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from database import get_db, engine, Base, AsyncSessionLocal
-from models import ImportHistory
+from models import ImportHistory, ProductSourcingItem
 from schemas import (
     SkuHistoryResponse, SkuHistoryRow, PaginationMeta,
     SkuFactoriesResponse, SkuInfo, FactoryRow,
@@ -43,10 +43,14 @@ from schemas import (
     UploadResponse,
     MonthlyImportCountResponse, MonthlyImportCount, YearlyImportCount,
     FactoryViewRow, FactoryViewResponse,
+    ProductSourcingTypesResponse, ProductSourcingItemRow,
+    ProductSourcingRetailerGroup, ProductSourcingSearchResponse,
+    ProductSourcingUploadResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
 from english_name_importer import import_english_names
+from product_sourcing_importer import import_product_sourcing
 from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, clear_ranking_caches, TOP5_RETAILERS
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
@@ -1986,7 +1990,94 @@ async def upload_english_names(
         )
 
 
-# ─── 3-4. 영문 SKU명 내부 조회 (병행수입 판단용, 프론트 미노출) ────────────────
+# ─── 3-4. 품목별 유통사 인기상품/소싱 리스크 (엑셀 업로드 + 조회) ──────────────
+_RETAILER_DISPLAY_ORDER = ["amazon", "aeon", "walmart", "samsclub"]
+
+
+@app.post("/api/upload-product-sourcing", response_model=ProductSourcingUploadResponse)
+async def upload_product_sourcing(
+    file: UploadFile = File(..., description="품목별 유통사 인기상품/소싱 리스크 리서치 Excel 파일"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        if not file.filename.endswith((".xlsx", ".xls")):
+            raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls)만 업로드 가능합니다.")
+
+        content = await file.read()
+        result = await import_product_sourcing(content, db)
+
+        print("PRODUCT_SOURCING_UPLOAD_RESULT:", result)
+        return ProductSourcingUploadResponse(**result)
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+@app.get("/api/product-sourcing/types", response_model=ProductSourcingTypesResponse)
+async def get_product_sourcing_types(db: AsyncSession = Depends(get_db)):
+    r = await db.execute(text("SELECT DISTINCT product_type FROM product_sourcing_item ORDER BY product_type"))
+    return ProductSourcingTypesResponse(types=[row[0] for row in r.fetchall()])
+
+
+@app.get("/api/product-sourcing/search", response_model=ProductSourcingSearchResponse)
+async def search_product_sourcing(
+    product_type: str = Query(..., description="품목 유형명 (정확히 일치)"),
+    db: AsyncSession = Depends(get_db),
+):
+    r = await db.execute(
+        select(ProductSourcingItem)
+        .where(ProductSourcingItem.product_type == product_type)
+        .order_by(ProductSourcingItem.retailer, ProductSourcingItem.rank)
+    )
+    rows = r.scalars().all()
+
+    groups: dict[str, ProductSourcingRetailerGroup] = {}
+    for row in rows:
+        g = groups.get(row.retailer)
+        if g is None:
+            g = ProductSourcingRetailerGroup(
+                retailer=row.retailer,
+                retailer_label=row.retailer_label,
+                ranking_method=row.ranking_method,
+                sample_note=row.sample_note,
+            )
+            groups[row.retailer] = g
+        g.items.append(ProductSourcingItemRow(
+            rank=row.rank,
+            brand_kr=row.brand_kr,
+            brand_en=row.brand_en,
+            product_name_en=row.product_name_en,
+            price_usd=float(row.price_usd) if row.price_usd is not None else None,
+            origin=row.origin,
+            unit=row.unit,
+            key_criteria_label=row.key_criteria_label,
+            key_criteria_value=row.key_criteria_value,
+            parallel_import=row.parallel_import,
+            recall_status=row.recall_status,
+            quality_label_status=row.quality_label_status,
+            legal_risk_status=row.legal_risk_status,
+            five_year_issue=row.five_year_issue,
+            notes=row.notes,
+            rating=float(row.rating) if row.rating is not None else None,
+            review_count=row.review_count,
+            url=row.url,
+            image_url=row.image_url,
+            verified_flag=row.verified_flag,
+        ))
+
+    ordered = [groups[key] for key in _RETAILER_DISPLAY_ORDER if key in groups]
+    ordered += [g for key, g in groups.items() if key not in _RETAILER_DISPLAY_ORDER]
+
+    return ProductSourcingSearchResponse(product_type=product_type, retailers=ordered)
+
+
+# ─── 3-5. 영문 SKU명 내부 조회 (병행수입 판단용, 프론트 미노출) ────────────────
 # 프론트가 쓰지 않는 내부 분석 전용 엔드포인트. sku_name_en으로 원본 행을 찾아
 # 로컬 스크립트에서 유사도 매칭 + 제조사별 수입업체 집계를 하기 위한 용도.
 @app.get("/api/internal/english-name-stats")

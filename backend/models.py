@@ -105,6 +105,54 @@ class CountryTopItem(Base):
     )
 
 
+class ProductSourcingItem(Base):
+    """
+    품목별(유형) × 유통사(월마트/아마존/샘스클럽/이온몰) 순위 상품 + 소싱 리스크 정보.
+    ESI Top40 리서치 엑셀(유형별카드 시트 + 상품리스트(raw) 시트를 유형·유통사·순위로
+    조인)에서 적재. product_sourcing_importer.py 참고.
+    """
+    __tablename__ = "product_sourcing_item"
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+
+    product_type        = Column(String(300), nullable=False, comment="품목 유형 (예: OLITALIA 엑스트라버진 올리브유)")
+    retailer             = Column(String(20),  nullable=False, comment="유통사 (walmart/amazon/samsclub/aeon)")
+    retailer_label       = Column(String(50),  nullable=True,  comment="유통사 한글명 (월마트/아마존/샘스클럽/이온몰)")
+    ranking_method       = Column(String(100), nullable=True,  comment="순위 산출 기준 (best_seller/top_selling 등)")
+    sample_note          = Column(String(200), nullable=True,  comment="원본 순위 설명 (예: 상위 40개 · PB 제외)")
+    rank                 = Column(Integer,     nullable=False, comment="유통사 내 순위")
+
+    brand_kr             = Column(String(200), nullable=True,  comment="브랜드 한국명")
+    brand_en             = Column(String(200), nullable=True,  comment="브랜드 영문명")
+    product_name_en      = Column(String(500), nullable=True,  comment="영문 상품명")
+
+    price_usd            = Column(Numeric,     nullable=True,  comment="가격 (USD)")
+    origin                = Column(Text,        nullable=True,  comment="원산지")
+    unit                 = Column(String(100), nullable=True,  comment="단량/용량")
+
+    key_criteria_label   = Column(String(100), nullable=True,  comment="핵심기준 항목명 (품목별로 다름: 산도/난황 함량 등)")
+    key_criteria_value   = Column(String(100), nullable=True,  comment="핵심기준 값")
+
+    parallel_import      = Column(String(50),  nullable=True,  comment="병행수입 가능여부 (O/X/수입이력 없음/확인필요)")
+    recall_status        = Column(String(20),  nullable=True,  comment="리콜 이력 판정 (통과/탈락)")
+    quality_label_status = Column(String(20),  nullable=True,  comment="품질·표시 판정 (통과/탈락)")
+    legal_risk_status    = Column(String(20),  nullable=True,  comment="법적·평판 리스크 판정 (통과/탈락)")
+    five_year_issue      = Column(String(20),  nullable=True,  comment="5년내 이슈 여부 (-/O/X)")
+    notes                = Column(Text,        nullable=True,  comment="비고 (소송/리콜 등 상세)")
+
+    rating               = Column(Numeric,     nullable=True,  comment="평점")
+    review_count         = Column(Integer,     nullable=True,  comment="리뷰수")
+    url                  = Column(Text,        nullable=True,  comment="상품 페이지 URL")
+    image_url            = Column(Text,        nullable=True,  comment="상품 이미지 URL")
+    verified_flag        = Column(String(50),  nullable=True,  comment="실측여부 (실측/추정 등)")
+
+    __table_args__ = (
+        UniqueConstraint("product_type", "retailer", "rank", name="uq_psi_type_retailer_rank"),
+        Index("ix_psi_product_type", "product_type"),
+        Index("ix_psi_retailer", "retailer"),
+    )
+
+
 class CountryItemAmount(Base):
     """
     국가별 품목별 수입금액 전체 (품목 검색 → 국가 리스트업 기능용).

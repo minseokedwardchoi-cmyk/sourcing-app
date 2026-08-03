@@ -210,6 +210,52 @@ class ItemCountriesResponse(BaseModel):
     countries:           list[ItemCountryRow] = Field(default_factory=list)
 
 
+# ─── 품목별 유통사 인기상품/소싱 리스크 페이지 ─────────────────────────────────
+class ProductSourcingTypesResponse(BaseModel):
+    types: list[str] = Field(default_factory=list, description="적재된 품목(유형) 전체 목록")
+
+
+class ProductSourcingItemRow(BaseModel):
+    rank:                  int
+    brand_kr:              Optional[str]   = Field(None, description="브랜드 한국명")
+    brand_en:              Optional[str]   = Field(None, description="브랜드 영문명")
+    product_name_en:       Optional[str]   = Field(None, description="영문 상품명")
+    price_usd:             Optional[float] = Field(None, description="가격 (USD)")
+    origin:                Optional[str]   = Field(None, description="원산지")
+    unit:                  Optional[str]   = Field(None, description="단량/용량")
+    key_criteria_label:    Optional[str]   = Field(None, description="핵심기준 항목명 (품목별로 다름)")
+    key_criteria_value:    Optional[str]   = Field(None, description="핵심기준 값")
+    parallel_import:       Optional[str]   = Field(None, description="병행수입 가능여부")
+    recall_status:         Optional[str]   = Field(None, description="리콜 이력 판정")
+    quality_label_status:  Optional[str]   = Field(None, description="품질·표시 판정")
+    legal_risk_status:     Optional[str]   = Field(None, description="법적·평판 리스크 판정")
+    five_year_issue:       Optional[str]   = Field(None, description="5년내 이슈 여부")
+    notes:                 Optional[str]   = Field(None, description="비고")
+    rating:                Optional[float] = Field(None, description="평점")
+    review_count:          Optional[int]   = Field(None, description="리뷰수")
+    url:                   Optional[str]   = Field(None, description="상품 페이지 URL")
+    image_url:              Optional[str]   = Field(None, description="상품 이미지 URL")
+    verified_flag:         Optional[str]   = Field(None, description="실측여부")
+
+
+class ProductSourcingRetailerGroup(BaseModel):
+    retailer:        str
+    retailer_label:  Optional[str] = Field(None)
+    ranking_method:  Optional[str] = Field(None)
+    sample_note:     Optional[str] = Field(None)
+    items:           list[ProductSourcingItemRow] = Field(default_factory=list)
+
+
+class ProductSourcingSearchResponse(BaseModel):
+    product_type: str
+    retailers:    list[ProductSourcingRetailerGroup] = Field(default_factory=list)
+
+
+class ProductSourcingUploadResponse(BaseModel):
+    inserted:           int
+    product_type_count: int
+
+
 # ─── 공장별 보기 페이지 ───────────────────────────────────────────────────────
 class FactoryViewRow(BaseModel):
     category:      Optional[str]  = Field(None)
