@@ -45,7 +45,7 @@ from schemas import (
     FactoryViewRow, FactoryViewResponse,
     ProductSourcingTypesResponse, ProductSourcingItemRow,
     ProductSourcingRetailerGroup, ProductSourcingSearchResponse,
-    ProductSourcingUploadResponse,
+    ProductSourcingUploadResponse, ProductSourcingFlatRow, ProductSourcingAllResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
@@ -2023,6 +2023,29 @@ async def upload_product_sourcing(
 async def get_product_sourcing_types(db: AsyncSession = Depends(get_db)):
     r = await db.execute(text("SELECT DISTINCT product_type FROM product_sourcing_item ORDER BY product_type"))
     return ProductSourcingTypesResponse(types=[row[0] for row in r.fetchall()])
+
+
+@app.get("/api/product-sourcing/all", response_model=ProductSourcingAllResponse)
+async def get_all_product_sourcing(db: AsyncSession = Depends(get_db)):
+    """엑셀식 필터/정렬 테이블용 전체 행 (품목x유통사x순위 단위, 매칭/그룹핑 없음)."""
+    order_case = " ".join(
+        f"WHEN retailer = '{r}' THEN {i}" for i, r in enumerate(_RETAILER_DISPLAY_ORDER)
+    )
+    r = await db.execute(text(f"""
+        SELECT product_type, retailer, retailer_label, rank, brand_kr, brand_en,
+               product_name_en, price_usd, origin, unit, parallel_import,
+               recall_status, quality_label_status, legal_risk_status, five_year_issue,
+               notes, rating, review_count, url, image_url
+        FROM product_sourcing_item
+        ORDER BY product_type, (CASE {order_case} ELSE 99 END), rank
+    """))
+    rows = r.mappings().all()
+    return ProductSourcingAllResponse(rows=[
+        ProductSourcingFlatRow(
+            **{**row, "price_usd": float(row["price_usd"]) if row["price_usd"] is not None else None,
+               "rating": float(row["rating"]) if row["rating"] is not None else None}
+        ) for row in rows
+    ])
 
 
 @app.get("/api/product-sourcing/search", response_model=ProductSourcingSearchResponse)

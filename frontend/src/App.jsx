@@ -13,7 +13,7 @@ import {
   fetchCountrySummary, fetchCountryTopItems, fetchCountryManufacturers, fetchCountryAmountShare,
   fetchItemCountries,
   fetchFactoryView, fetchFactoryViewMonthly,
-  fetchProductSourcingTypes, fetchProductSourcingSearch,
+  fetchProductSourcingAll,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
 
@@ -3420,48 +3420,59 @@ function statusBadgeClass(value) {
   return "b-gray"; // 미검증/수입이력 없음/확인필요/- 등
 }
 
-function ProductSourcingRow({ item }) {
+// 이온몰은 판매량순 랭킹이 아니라서 순위 없이 유통사명만 표기
+function retailerRankLabel(row) {
+  const meta = RETAILER_META[row.retailer] || { label: row.retailer_label || row.retailer };
+  if (row.retailer === "aeon") return meta.label;
+  return `${meta.label} ${row.rank}위`;
+}
+
+function ProductSourcingRiskCell({ row }) {
+  return (
+    <div style={{display:"flex", flexWrap:"wrap", gap:3, maxWidth:200}}>
+      <span className={`badge ${statusBadgeClass(row.recall_status)}`} title="리콜 이력">리콜 {row.recall_status || "-"}</span>
+      <span className={`badge ${statusBadgeClass(row.quality_label_status)}`} title="품질·표시">품질 {row.quality_label_status || "-"}</span>
+      <span className={`badge ${statusBadgeClass(row.legal_risk_status)}`} title="법적·평판 리스크">법적 {row.legal_risk_status || "-"}</span>
+      <span className={`badge ${statusBadgeClass(row.parallel_import)}`} title="병행수입 가능여부">병행 {row.parallel_import || "정보없음"}</span>
+    </div>
+  );
+}
+
+function ProductSourcingTableRow({ row }) {
   const [expanded, setExpanded] = useState(false);
+  const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
   return (
     <>
       <tr style={{cursor:"pointer"}} onClick={()=>setExpanded(v=>!v)}>
-        <td style={{width:36, textAlign:"center", color:"#6b7280"}}>{item.rank}</td>
+        <td style={{maxWidth:160, whiteSpace:"normal"}}>{row.product_type}</td>
+        <td style={{whiteSpace:"nowrap"}}>{meta.emoji} {retailerRankLabel(row)}</td>
         <td style={{width:56}}>
-          {item.image_url
-            ? <img src={item.image_url} alt="" style={{width:40,height:40,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
+          {row.image_url
+            ? <img src={row.image_url} alt="" style={{width:40,height:40,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
             : <div style={{width:40,height:40,borderRadius:6,background:"#f3f4f6"}}/>
           }
         </td>
         <td style={{maxWidth:150}}>
-          <div style={{fontWeight:600}}>{item.brand_kr || "-"}</div>
-          {item.brand_en && <div style={{fontSize:11,color:"#9ca3af"}}>{item.brand_en}</div>}
+          <div style={{fontWeight:600}}>{row.brand_kr || "-"}</div>
+          {row.brand_en && <div style={{fontSize:11,color:"#9ca3af"}}>{row.brand_en}</div>}
         </td>
-        <td style={{maxWidth:280, whiteSpace:"normal"}} title={item.product_name_en || ""}>
-          {item.url
-            ? <a className="link-cell" href={item.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>{item.product_name_en || "-"}</a>
-            : (item.product_name_en || "-")
+        <td style={{maxWidth:280, whiteSpace:"normal"}} title={row.product_name_en || ""}>
+          {row.url
+            ? <a className="link-cell" href={row.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>{row.product_name_en || "-"}</a>
+            : (row.product_name_en || "-")
           }
         </td>
-        <td style={{whiteSpace:"nowrap"}}>{item.price_usd != null ? `$${item.price_usd.toFixed(2)}` : "-"}</td>
-        <td style={{whiteSpace:"nowrap"}}>{item.unit || "-"}</td>
-        <td style={{whiteSpace:"nowrap"}}>
-          {item.key_criteria_label ? `${item.key_criteria_label} ${item.key_criteria_value ?? ""}` : "-"}
-        </td>
-        <td><span className={`badge ${statusBadgeClass(item.parallel_import)}`}>{item.parallel_import || "정보없음"}</span></td>
-        <td>
-          <span className={`badge ${statusBadgeClass(item.recall_status)}`} title="리콜 이력">리콜</span>
-          <span className={`badge ${statusBadgeClass(item.quality_label_status)}`} title="품질·표시">품질</span>
-          <span className={`badge ${statusBadgeClass(item.legal_risk_status)}`} title="법적·평판 리스크">법적</span>
-        </td>
-        <td style={{whiteSpace:"nowrap"}}>{item.rating != null ? `⭐${item.rating} (${(item.review_count||0).toLocaleString()})` : "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
+        <td style={{maxWidth:200, whiteSpace:"normal"}}>{row.origin || "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>{row.unit || "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>{row.rating != null ? `⭐${row.rating} (${(row.review_count||0).toLocaleString()})` : "-"}</td>
+        <td><ProductSourcingRiskCell row={row}/></td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={10} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
-            <div style={{marginBottom:4}}><b>원산지:</b> {item.origin || "정보없음"}</div>
-            <div style={{marginBottom:4}}><b>5년내 이슈:</b> {item.five_year_issue || "-"}</div>
-            <div style={{marginBottom:4}}><b>비고:</b> {item.notes || "특이사항 없음"}</div>
-            {item.verified_flag && <div style={{color:"#9ca3af"}}>실측여부: {item.verified_flag}</div>}
+          <td colSpan={9} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+            <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
+            <div><b>비고:</b> {row.notes || "특이사항 없음"}</div>
           </td>
         </tr>
       )}
@@ -3469,145 +3480,158 @@ function ProductSourcingRow({ item }) {
   );
 }
 
-function ProductSourcingRetailerSection({ group }) {
-  const meta = RETAILER_META[group.retailer] || { emoji: "🛒", label: group.retailer_label || group.retailer };
-  return (
-    <div className="card" style={{padding:16, marginBottom:16}}>
-      <div style={{display:"flex", alignItems:"baseline", gap:8, marginBottom:10}}>
-        <h3 style={{fontSize:15}}>{meta.emoji} {meta.label}</h3>
-        <span style={{fontSize:12, color:"#9ca3af"}}>{group.sample_note || `${group.items.length}개`}</span>
-      </div>
-      {group.items.length === 0 ? (
-        <div style={{fontSize:13, color:"#9ca3af"}}>데이터 없음</div>
-      ) : (
-        <div style={{overflowX:"auto"}}>
-          <table>
-            <thead>
-              <tr>
-                <th>순위</th><th>이미지</th><th>브랜드</th><th>상품명</th><th>가격</th><th>단량</th>
-                <th>핵심기준</th><th>병행수입</th><th>리스크</th><th>평점</th>
-              </tr>
-            </thead>
-            <tbody>
-              {group.items.map(item => <ProductSourcingRow key={item.rank} item={item}/>)}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
+const PRODUCT_SOURCING_PAGE_SIZE = 50;
 
 function ProductSourcingPage({ navigate }) {
-  const [types, setTypes] = useState([]);
-  const [query, setQuery] = useState("");
-  const [showSuggest, setShowSuggest] = useState(false);
-  const [selectedType, setSelectedType] = useState(null);
-  const [result, setResult] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [allRows, setAllRows] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const searchRef = useRef(null);
-  const dropRef = useRef(null);
+
+  const [search, setSearch] = useState("");
+  const [colFilters, setColFilters] = useState({}); // { product_type, retailer_label, brand_kr }
+  const [sortBy, setSortBy] = useState(null);        // "product_type" | "rank" | "price_usd" | "brand_kr" | "rating"
+  const [sortDir, setSortDir] = useState("asc");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
-    fetchProductSourcingTypes().then(r => setTypes(r.types || [])).catch(() => setTypes([]));
-  }, []);
-
-  useEffect(() => {
-    if (!showSuggest) return;
-    const h = e => {
-      if (searchRef.current?.contains(e.target)) return;
-      if (dropRef.current?.contains(e.target)) return;
-      setShowSuggest(false);
-    };
-    document.addEventListener("mousedown", h, true);
-    return () => document.removeEventListener("mousedown", h, true);
-  }, [showSuggest]);
-
-  const suggestions = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return types;
-    return types.filter(t => t.toLowerCase().includes(q));
-  }, [query, types]);
-
-  function selectType(t) {
-    setSelectedType(t);
-    setQuery(t);
-    setShowSuggest(false);
-    setLoading(true);
-    setError(null);
-    fetchProductSourcingSearch(t)
-      .then(setResult)
+    fetchProductSourcingAll()
+      .then(r => setAllRows(r.rows || []))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }
+  }, []);
+
+  const productTypeVals  = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_type))].sort() : [], [allRows]);
+  const retailerVals     = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.retailer_label||r.retailer))] : [], [allRows]);
+  const brandVals        = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.brand_kr).filter(Boolean))].sort() : [], [allRows]);
+
+  const filteredSorted = useMemo(() => {
+    if (!allRows) return [];
+    const q = search.trim().toLowerCase();
+    let rows = allRows.filter(r => {
+      if (q) {
+        const hay = `${r.product_type} ${r.brand_kr||""} ${r.brand_en||""} ${r.product_name_en||""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (colFilters.product_type?.length && !colFilters.product_type.includes(r.product_type)) return false;
+      if (colFilters.retailer_label?.length && !colFilters.retailer_label.includes(r.retailer_label||r.retailer)) return false;
+      if (colFilters.brand_kr?.length && !colFilters.brand_kr.includes(r.brand_kr)) return false;
+      return true;
+    });
+    if (sortBy) {
+      const dir = sortDir === "asc" ? 1 : -1;
+      rows = [...rows].sort((a,b) => {
+        let av = a[sortBy], bv = b[sortBy];
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (typeof av === "number" && typeof bv === "number") return (av-bv)*dir;
+        return String(av).localeCompare(String(bv), "ko") * dir;
+      });
+    }
+    return rows;
+  }, [allRows, search, colFilters, sortBy, sortDir]);
+
+  useEffect(() => { setPage(1); }, [search, colFilters]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / PRODUCT_SOURCING_PAGE_SIZE));
+  const pageRows = filteredSorted.slice((page-1)*PRODUCT_SOURCING_PAGE_SIZE, page*PRODUCT_SOURCING_PAGE_SIZE);
+  const meta = { total: filteredSorted.length, page, page_size: PRODUCT_SOURCING_PAGE_SIZE, total_pages: totalPages };
+
+  function applySort(col, dir) { setSortBy(col); setSortDir(dir); }
 
   return (
     <div className="app">
       <style>{styles}</style>
-      <div className="banner">
-        <div className="banner-inner">
-          <div className="banner-left">
-            <h1>🌐 Global Factory Sourcing Database</h1>
-            <p>수입식품정보 기반으로 구축한 해외 제조업체 · SKU · 수입/OEM 이력 통합 DB</p>
-          </div>
+      <div className="hero">
+        <div className="hero-inner">
+          <div className="hero-title">품목별 유통사 인기상품 &amp; 소싱 리스크</div>
+          <div className="hero-desc">아마존·월마트·샘스클럽·이온몰의 품목별 인기상품과, 병행수입 가능여부·리콜/품질/법적 리스크 판정을 한 테이블에서 비교합니다. 행을 클릭하면 5년내 이슈·비고 상세가 열립니다.</div>
+          {allRows && (
+            <div className="hero-kpi">
+              {[
+                { label: "품목 수",   val: productTypeVals.length, unit: "개" },
+                { label: "전체 상품", val: allRows.length,         unit: "건" },
+                { label: "유통사",    val: 4,                      unit: "곳" },
+              ].map(({ label, val, unit }) => (
+                <div key={label} className="hero-kpi-item">
+                  <div className="hero-kpi-label">{label}</div>
+                  <div className="hero-kpi-num">{Number(val).toLocaleString()}<span className="hero-kpi-unit">{unit}</span></div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
-      <div className="page">
+      <div className="page" style={{maxWidth:1520}}>
         <button className="back-btn" onClick={()=>navigate("main")}>← 수입/OEM SKU 이력으로 돌아가기</button>
 
-        <div className="card" style={{padding:16, marginBottom:16}}>
-          <h2>품목별 유통사 인기상품 &amp; 소싱 리스크</h2>
-          <p style={{fontSize:12, color:"#6b7280", margin:"6px 0 12px"}}>
-            품목을 검색하면 아마존·이온몰·월마트·샘스클럽에서 잘 팔리는 브랜드와, 병행수입 가능여부·리콜/품질/법적 리스크 판정을 한번에 비교할 수 있습니다. 각 행을 클릭하면 원산지·비고 상세가 열립니다.
-          </p>
-          <div ref={searchRef} style={{position:"relative", maxWidth:420}}>
-            <input
-              className="date-range-input"
-              style={{width:"100%", background:"#fff"}}
-              placeholder="품목명 검색 (예: 올리브유, 마요네즈, 땅콩버터...)"
-              value={query}
-              onChange={e=>{ setQuery(e.target.value); setSelectedType(null); setShowSuggest(true); }}
-              onFocus={()=>setShowSuggest(true)}
-              onKeyDown={e=>{ if (e.key==="Enter" && suggestions.length>0) selectType(suggestions[0]); }}
-            />
-            {showSuggest && (
-              <div ref={dropRef} className="filter-dropdown" style={{minWidth:"100%", maxWidth:"100%", zIndex:220}}>
-                <div className="filter-list" style={{maxHeight:280}}>
-                  {suggestions.length === 0
-                    ? <div style={{padding:"8px 12px", fontSize:12, color:"#9ca3af"}}>{types.length===0 ? "데이터를 불러오는 중..." : "결과 없음"}</div>
-                    : suggestions.map(t => (
-                      <div key={t} className="filter-item" style={{cursor:"pointer"}} onClick={()=>selectType(t)}>
-                        <span>{t}</span>
-                      </div>
-                    ))
-                  }
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
         {error && <div className="error-box">오류: {error}</div>}
-        {loading && <div style={{fontSize:13, color:"#9ca3af", padding:"16px 0"}}>불러오는 중...</div>}
 
-        {!loading && result && (
-          <>
-            <h3 style={{margin:"4px 0 14px"}}>{result.product_type}</h3>
-            {result.retailers.length === 0
-              ? <div style={{fontSize:13, color:"#9ca3af"}}>이 품목에 대한 유통사 데이터가 없습니다.</div>
-              : result.retailers.map(group => (
-                <ProductSourcingRetailerSection key={group.retailer} group={group}/>
-              ))
-            }
-          </>
-        )}
-
-        {!loading && !result && selectedType === null && (
-          <div style={{fontSize:13, color:"#9ca3af", padding:"24px 0", textAlign:"center"}}>
-            품목을 검색해서 선택하면 유통사별 인기상품과 소싱 리스크가 표시됩니다.
+        <div className="card">
+          <div className="toolbar">
+            <div className="search-wrap">
+              <span className="search-icon">🔍</span>
+              <input placeholder="품목명, 브랜드, 상품명 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+            </div>
+            <span className="count-label">{allRows ? `총 ${meta.total.toLocaleString()}건 중 표시` : ""}</span>
           </div>
-        )}
+
+          {loading ? (
+            <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
+          ) : (
+            <div style={{overflowX:"auto"}}>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{minWidth:150}}>
+                      <div className="th-inner">
+                        <span className="th-label">품목명</span>
+                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_type||null} activeSortCol={sortBy==="product_type"} activeSortDir={sortDir} localValues={productTypeVals} onSort={dir=>applySort("product_type",dir)} onApply={vals=>setColFilters(p=>({...p,product_type:vals}))}/>
+                      </div>
+                    </th>
+                    <th style={{minWidth:110}}>
+                      <div className="th-inner">
+                        <span className="th-label">유통사+순위</span>
+                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.retailer_label||null} activeSortCol={sortBy==="rank"} activeSortDir={sortDir} localValues={retailerVals} onSort={dir=>applySort("rank",dir)} onApply={vals=>setColFilters(p=>({...p,retailer_label:vals}))}/>
+                      </div>
+                    </th>
+                    <th style={{minWidth:56}}>이미지</th>
+                    <th style={{minWidth:130}}>
+                      <div className="th-inner">
+                        <span className="th-label">브랜드</span>
+                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
+                      </div>
+                    </th>
+                    <th style={{minWidth:220}}>상품명</th>
+                    <th style={{minWidth:90}}>
+                      <div className="th-inner">
+                        <span className="th-label">가격</span>
+                        <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("price_usd",dir)} onApply={()=>{}}/>
+                      </div>
+                    </th>
+                    <th style={{minWidth:180}}>원산지</th>
+                    <th style={{minWidth:100}}>단량</th>
+                    <th style={{minWidth:100}}>
+                      <div className="th-inner">
+                        <span className="th-label">평점</span>
+                        <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="rating"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("rating",dir)} onApply={()=>{}}/>
+                      </div>
+                    </th>
+                    <th style={{minWidth:220}}>리스크</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.length === 0
+                    ? <tr><td colSpan={9} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
+                    : pageRows.map((row, i) => <ProductSourcingTableRow key={`${row.product_type}-${row.retailer}-${row.rank}-${i}`} row={row}/>)
+                  }
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <Pagination meta={meta} page={page} setPage={setPage}/>
+        </div>
       </div>
     </div>
   );

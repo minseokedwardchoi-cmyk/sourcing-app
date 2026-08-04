@@ -256,6 +256,33 @@ class ProductSourcingUploadResponse(BaseModel):
     product_type_count: int
 
 
+class ProductSourcingFlatRow(BaseModel):
+    product_type:           str
+    retailer:               str
+    retailer_label:         Optional[str]   = Field(None)
+    rank:                   int
+    brand_kr:               Optional[str]   = Field(None)
+    brand_en:               Optional[str]   = Field(None)
+    product_name_en:        Optional[str]   = Field(None)
+    price_usd:              Optional[float] = Field(None)
+    origin:                 Optional[str]   = Field(None)
+    unit:                   Optional[str]   = Field(None)
+    parallel_import:        Optional[str]   = Field(None)
+    recall_status:          Optional[str]   = Field(None)
+    quality_label_status:   Optional[str]   = Field(None)
+    legal_risk_status:      Optional[str]   = Field(None)
+    five_year_issue:        Optional[str]   = Field(None)
+    notes:                  Optional[str]   = Field(None)
+    rating:                 Optional[float] = Field(None)
+    review_count:           Optional[int]   = Field(None)
+    url:                    Optional[str]   = Field(None)
+    image_url:              Optional[str]   = Field(None)
+
+
+class ProductSourcingAllResponse(BaseModel):
+    rows: list[ProductSourcingFlatRow] = Field(default_factory=list)
+
+
 # ─── 공장별 보기 페이지 ───────────────────────────────────────────────────────
 class FactoryViewRow(BaseModel):
     category:      Optional[str]  = Field(None)

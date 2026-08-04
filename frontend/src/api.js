@@ -365,6 +365,11 @@ export function fetchProductSourcingSearch(productType) {
   return request("/api/product-sourcing/search", { product_type: productType });
 }
 
+/** 품목별 유통사 인기상품/소싱 리스크: 전체 행 (엑셀식 필터 테이블용) */
+export function fetchProductSourcingAll() {
+  return request("/api/product-sourcing/all");
+}
+
 /** 공장별 보기: SKU 이력 집계 (importer 제외 그룹핑) */
 export async function fetchFactoryView({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {}, dateFrom, dateTo }) {
   const url = new URL(`${BASE_URL}/api/factory-view`, window.location.origin);
