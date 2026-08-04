@@ -3433,7 +3433,6 @@ function ProductSourcingRiskCell({ row }) {
       <span className={`badge ${statusBadgeClass(row.recall_status)}`} title="리콜 이력">리콜 {row.recall_status || "-"}</span>
       <span className={`badge ${statusBadgeClass(row.quality_label_status)}`} title="품질·표시">품질 {row.quality_label_status || "-"}</span>
       <span className={`badge ${statusBadgeClass(row.legal_risk_status)}`} title="법적·평판 리스크">법적 {row.legal_risk_status || "-"}</span>
-      <span className={`badge ${statusBadgeClass(row.parallel_import)}`} title="병행수입 가능여부">병행 {row.parallel_import || "정보없음"}</span>
     </div>
   );
 }
@@ -3456,7 +3455,7 @@ function ProductSourcingTableRow({ row }) {
           <div style={{fontWeight:600}}>{row.brand_kr || "-"}</div>
           {row.brand_en && <div style={{fontSize:11,color:"#9ca3af"}}>{row.brand_en}</div>}
         </td>
-        <td style={{maxWidth:280, whiteSpace:"normal"}} title={row.product_name_en || ""}>
+        <td style={{maxWidth:420, whiteSpace:"normal"}} title={row.product_name_en || ""}>
           {row.url
             ? <a className="link-cell" href={row.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>{row.product_name_en || "-"}</a>
             : (row.product_name_en || "-")
@@ -3465,12 +3464,14 @@ function ProductSourcingTableRow({ row }) {
         <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
         <td style={{maxWidth:200, whiteSpace:"normal"}}>{row.origin || "-"}</td>
         <td style={{whiteSpace:"nowrap"}}>{row.unit || "-"}</td>
-        <td style={{whiteSpace:"nowrap"}}>{row.rating != null ? `⭐${row.rating} (${(row.review_count||0).toLocaleString()})` : "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>{row.rating != null ? `⭐${row.rating}` : "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>{row.rating != null ? (row.review_count||0).toLocaleString() : "-"}</td>
+        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title="병행수입 가능여부">{row.parallel_import || "정보없음"}</span></td>
         <td><ProductSourcingRiskCell row={row}/></td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={9} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+          <td colSpan={12} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
             <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
             <div><b>비고:</b> {row.notes || "특이사항 없음"}</div>
           </td>
@@ -3602,27 +3603,29 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
                       </div>
                     </th>
-                    <th style={{minWidth:220}}>상품명</th>
-                    <th style={{minWidth:90}}>
+                    <th style={{minWidth:320}}>상품명</th>
+                    <th style={{minWidth:70}}>
                       <div className="th-inner">
                         <span className="th-label">가격</span>
                         <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("price_usd",dir)} onApply={()=>{}}/>
                       </div>
                     </th>
                     <th style={{minWidth:180}}>원산지</th>
-                    <th style={{minWidth:100}}>단량</th>
-                    <th style={{minWidth:100}}>
+                    <th style={{minWidth:60}}>단량</th>
+                    <th style={{minWidth:60}}>
                       <div className="th-inner">
                         <span className="th-label">평점</span>
                         <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="rating"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("rating",dir)} onApply={()=>{}}/>
                       </div>
                     </th>
+                    <th style={{minWidth:70}}>리뷰수</th>
+                    <th style={{minWidth:110}}>병행수입</th>
                     <th style={{minWidth:220}}>리스크</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageRows.length === 0
-                    ? <tr><td colSpan={9} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
+                    ? <tr><td colSpan={12} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
                     : pageRows.map((row, i) => <ProductSourcingTableRow key={`${row.product_type}-${row.retailer}-${row.rank}-${i}`} row={row}/>)
                   }
                 </tbody>
