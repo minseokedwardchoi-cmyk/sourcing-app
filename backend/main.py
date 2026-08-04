@@ -245,6 +245,22 @@ async def _startup_bg():
     """MV 생성 + 인덱스 생성을 백그라운드에서 실행 (startup 락 충돌 방지)"""
     import asyncio
     await asyncio.sleep(3)
+
+    # product_sourcing_item 컬럼 마이그레이션은 아래 import_history 마이그레이션과
+    # 별개 트랜잭션으로 실행한다 — 같은 트랜잭션에 묶으면 앞쪽 ALTER 중 하나라도
+    # 실패할 때 그 트랜잭션 전체가 abort 상태가 되어 뒤에 있는 이 ALTER까지
+    # try/except로 조용히 무시되는 문제가 있었다 (2026-08: image_data 컬럼 누락
+    # 사고로 확인됨).
+    async with engine.begin() as conn:
+        for col_sql in [
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_data BYTEA",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_mime VARCHAR(50)",
+        ]:
+            try:
+                await conn.execute(text(col_sql))
+            except Exception:
+                pass
+
     # MV 생성/마이그레이션
     async with engine.begin() as conn:
         # 새 컬럼 마이그레이션 (이미 존재하면 무시)
@@ -252,8 +268,6 @@ async def _startup_bg():
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS contact_status VARCHAR(100)",
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS md_name VARCHAR(100)",
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS sku_name_en VARCHAR(500)",
-            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_data BYTEA",
-            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_mime VARCHAR(50)",
         ]:
             try:
                 await conn.execute(text(col_sql))

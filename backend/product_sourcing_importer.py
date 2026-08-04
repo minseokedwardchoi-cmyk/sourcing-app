@@ -21,6 +21,7 @@ import re
 from functools import lru_cache
 from io import BytesIO
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from models import ProductSourcingItem
 
 
@@ -338,6 +339,21 @@ def build_records(file_bytes: bytes) -> list[dict]:
     return merged
 
 
+async def _ensure_image_columns(db: AsyncSession) -> None:
+    """image_data/image_mime 컬럼이 없으면 추가한다 (기존 배포에 테이블만 있고
+    이 두 컬럼은 없는 경우 대비). main.py의 startup 마이그레이션이 다른 ALTER
+    문과 한 트랜잭션에 묶여있어 그중 하나라도 실패하면 뒤엣것까지 조용히
+    무시될 수 있어서, 업로드 시점에 한 번 더 독립적으로 보장해둔다."""
+    for col_sql in [
+        "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_data BYTEA",
+        "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_mime VARCHAR(50)",
+    ]:
+        try:
+            await db.execute(text(col_sql))
+        except Exception:
+            await db.rollback()
+
+
 async def import_product_sourcing(file_bytes: bytes, db: AsyncSession) -> dict:
     """Excel(카드 시트 + raw 시트) → product_sourcing_item 테이블 전체 재적재.
 
@@ -347,6 +363,7 @@ async def import_product_sourcing(file_bytes: bytes, db: AsyncSession) -> dict:
     """
     records = build_records(file_bytes)
 
+    await _ensure_image_columns(db)
     await db.execute(ProductSourcingItem.__table__.delete())
 
     CHUNK = 2000
