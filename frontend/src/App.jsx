@@ -3437,41 +3437,74 @@ function ProductSourcingRiskCell({ row }) {
   );
 }
 
+// 기본 2줄로 잘라 보여주고, 클릭하면 셀 안에서 전체 내용을 펼쳐 보여준다.
+// 행 클릭(상세 펼침)과 별개로 동작해야 하므로 클릭 이벤트는 상위로 전파하지 않는다.
+function ClampCell({ children, title }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
+      title={title}
+      style={{
+        cursor: "pointer",
+        whiteSpace: "normal",
+        wordBreak: "break-word",
+        display: expanded ? "block" : "-webkit-box",
+        WebkitLineClamp: expanded ? "unset" : 2,
+        WebkitBoxOrient: "vertical",
+        overflow: expanded ? "visible" : "hidden",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function ProductSourcingTableRow({ row }) {
   const [expanded, setExpanded] = useState(false);
   const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
   return (
     <>
       <tr style={{cursor:"pointer"}} onClick={()=>setExpanded(v=>!v)}>
-        <td style={{maxWidth:160, whiteSpace:"normal"}}>{row.product_type}</td>
+        <td><ClampCell>{row.product_type}</ClampCell></td>
         <td style={{whiteSpace:"nowrap"}}>{meta.emoji} {retailerRankLabel(row)}</td>
-        <td style={{width:56}}>
+        <td style={{width:42}}>
           {row.image_url
-            ? <img src={row.image_url} alt="" style={{width:40,height:40,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
-            : <div style={{width:40,height:40,borderRadius:6,background:"#f3f4f6"}}/>
+            ? <img src={row.image_url} alt="" style={{width:32,height:32,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
+            : <div style={{width:32,height:32,borderRadius:6,background:"#f3f4f6"}}/>
           }
         </td>
-        <td style={{maxWidth:150}}>
-          <div style={{fontWeight:600}}>{row.brand_kr || "-"}</div>
-          {row.brand_en && <div style={{fontSize:11,color:"#9ca3af"}}>{row.brand_en}</div>}
+        <td>
+          <ClampCell>
+            <span style={{fontWeight:600}}>{row.brand_kr || "-"}</span>
+            {row.brand_en && <span style={{fontSize:11,color:"#9ca3af"}}> ({row.brand_en})</span>}
+          </ClampCell>
         </td>
-        <td style={{maxWidth:420, whiteSpace:"normal"}} title={row.product_name_en || ""}>
-          {row.url
-            ? <a className="link-cell" href={row.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>{row.product_name_en || "-"}</a>
-            : (row.product_name_en || "-")
-          }
+        <td>
+          <ClampCell title={row.product_name_en || ""}>
+            {row.url
+              ? <a className="link-cell" href={row.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>{row.product_name_en || "-"}</a>
+              : (row.product_name_en || "-")
+            }
+          </ClampCell>
         </td>
         <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
-        <td style={{maxWidth:200, whiteSpace:"normal"}}>{row.origin || "-"}</td>
+        <td><ClampCell>{row.origin || "-"}</ClampCell></td>
         <td style={{whiteSpace:"nowrap"}}>{row.unit || "-"}</td>
-        <td style={{whiteSpace:"nowrap"}}>{row.rating != null ? `⭐${row.rating}` : "-"}</td>
-        <td style={{whiteSpace:"nowrap"}}>{row.rating != null ? (row.review_count||0).toLocaleString() : "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>
+          {row.rating != null
+            ? <div style={{lineHeight:1.4}}>
+                <div>⭐{row.rating}</div>
+                <div style={{fontSize:11,color:"#9ca3af"}}>{(row.review_count||0).toLocaleString()}</div>
+              </div>
+            : "-"}
+        </td>
         <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title="병행수입 가능여부">{row.parallel_import || "정보없음"}</span></td>
         <td><ProductSourcingRiskCell row={row}/></td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={12} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+          <td colSpan={11} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
             <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
             <div><b>비고:</b> {row.notes || "특이사항 없음"}</div>
           </td>
@@ -3581,51 +3614,50 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table>
+              <table style={{minWidth:1900}}>
                 <thead>
                   <tr>
-                    <th style={{minWidth:150}}>
+                    <th style={{width:150}}>
                       <div className="th-inner">
                         <span className="th-label">품목명</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_type||null} activeSortCol={sortBy==="product_type"} activeSortDir={sortDir} localValues={productTypeVals} onSort={dir=>applySort("product_type",dir)} onApply={vals=>setColFilters(p=>({...p,product_type:vals}))}/>
                       </div>
                     </th>
-                    <th style={{minWidth:110}}>
+                    <th style={{width:110}}>
                       <div className="th-inner">
                         <span className="th-label">유통사+순위</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.retailer_label||null} activeSortCol={sortBy==="rank"} activeSortDir={sortDir} localValues={retailerVals} onSort={dir=>applySort("rank",dir)} onApply={vals=>setColFilters(p=>({...p,retailer_label:vals}))}/>
                       </div>
                     </th>
-                    <th style={{minWidth:56}}>이미지</th>
-                    <th style={{minWidth:130}}>
+                    <th style={{width:42}}>이미지</th>
+                    <th style={{width:170}}>
                       <div className="th-inner">
                         <span className="th-label">브랜드</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
                       </div>
                     </th>
-                    <th style={{minWidth:320}}>상품명</th>
-                    <th style={{minWidth:70}}>
+                    <th style={{width:640}}>상품명</th>
+                    <th style={{width:53}}>
                       <div className="th-inner">
                         <span className="th-label">가격</span>
                         <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("price_usd",dir)} onApply={()=>{}}/>
                       </div>
                     </th>
-                    <th style={{minWidth:180}}>원산지</th>
-                    <th style={{minWidth:60}}>단량</th>
-                    <th style={{minWidth:60}}>
+                    <th style={{width:135}}>원산지</th>
+                    <th style={{width:45}}>단량</th>
+                    <th style={{width:80}}>
                       <div className="th-inner">
                         <span className="th-label">평점</span>
                         <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="rating"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("rating",dir)} onApply={()=>{}}/>
                       </div>
                     </th>
-                    <th style={{minWidth:70}}>리뷰수</th>
-                    <th style={{minWidth:110}}>병행수입</th>
-                    <th style={{minWidth:220}}>리스크</th>
+                    <th style={{width:110}}>병행수입</th>
+                    <th style={{width:220}}>리스크</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageRows.length === 0
-                    ? <tr><td colSpan={12} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
+                    ? <tr><td colSpan={11} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
                     : pageRows.map((row, i) => <ProductSourcingTableRow key={`${row.product_type}-${row.retailer}-${row.rank}-${i}`} row={row}/>)
                   }
                 </tbody>
