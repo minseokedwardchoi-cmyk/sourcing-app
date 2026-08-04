@@ -3437,25 +3437,44 @@ function ProductSourcingRiskCell({ row }) {
   );
 }
 
-// 기본 2줄로 잘라 보여주고, 클릭하면 셀 안에서 전체 내용을 펼쳐 보여준다.
+// 기본 2줄로 잘라 보여주고, 잘렸을 때만 ▼ 버튼을 붙여 펼치기가 가능하다는 걸 드러낸다.
+// (메인 SKU 테이블의 sku-expand-btn과 동일한 화살표 어포던스)
 // 행 클릭(상세 펼침)과 별개로 동작해야 하므로 클릭 이벤트는 상위로 전파하지 않는다.
 function ClampCell({ children, title }) {
   const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+
+  function measureRef(el) {
+    if (!el || expanded) return;
+    const isOver = el.scrollHeight > el.clientHeight + 1;
+    setOverflowing(prev => prev === isOver ? prev : isOver);
+  }
+
   return (
-    <div
-      onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
-      title={title}
-      style={{
-        cursor: "pointer",
-        whiteSpace: "normal",
-        wordBreak: "break-word",
-        display: expanded ? "block" : "-webkit-box",
-        WebkitLineClamp: expanded ? "unset" : 2,
-        WebkitBoxOrient: "vertical",
-        overflow: expanded ? "visible" : "hidden",
-      }}
-    >
-      {children}
+    <div style={{display:"flex", alignItems:"flex-start", gap:4}}>
+      <div
+        ref={measureRef}
+        title={title}
+        style={{
+          whiteSpace: "normal",
+          wordBreak: "break-word",
+          display: expanded ? "block" : "-webkit-box",
+          WebkitLineClamp: expanded ? "unset" : 2,
+          WebkitBoxOrient: "vertical",
+          overflow: expanded ? "visible" : "hidden",
+        }}
+      >
+        {children}
+      </div>
+      {(overflowing || expanded) && (
+        <button
+          className="sku-expand-btn"
+          onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
+          title={expanded ? "접기" : "펼치기"}
+        >
+          {expanded ? "▲" : "▼"}
+        </button>
+      )}
     </div>
   );
 }
