@@ -3468,7 +3468,7 @@ function ProductSourcingTableRow({ row }) {
       <tr style={{cursor:"pointer"}} onClick={()=>setExpanded(v=>!v)}>
         <td><ClampCell>{row.product_type}</ClampCell></td>
         <td style={{whiteSpace:"nowrap"}}>{meta.emoji} {retailerRankLabel(row)}</td>
-        <td style={{width:42}}>
+        <td style={{width:50}}>
           {row.image_url
             ? <img src={row.image_url} alt="" style={{width:32,height:32,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
             : <div style={{width:32,height:32,borderRadius:6,background:"#f3f4f6"}}/>
@@ -3476,8 +3476,8 @@ function ProductSourcingTableRow({ row }) {
         </td>
         <td>
           <ClampCell>
-            <span style={{fontWeight:600}}>{row.brand_kr || "-"}</span>
-            {row.brand_en && <span style={{fontSize:11,color:"#9ca3af"}}> ({row.brand_en})</span>}
+            <div style={{fontWeight:600}}>{row.brand_kr || "-"}</div>
+            {row.brand_en && <div style={{fontSize:11,color:"#9ca3af"}}>{row.brand_en}</div>}
           </ClampCell>
         </td>
         <td>
@@ -3614,7 +3614,7 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1900}}>
+              <table style={{minWidth:1500}}>
                 <thead>
                   <tr>
                     <th style={{width:150}}>
@@ -3629,22 +3629,22 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.retailer_label||null} activeSortCol={sortBy==="rank"} activeSortDir={sortDir} localValues={retailerVals} onSort={dir=>applySort("rank",dir)} onApply={vals=>setColFilters(p=>({...p,retailer_label:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:42}}>이미지</th>
+                    <th style={{width:50}}>이미지</th>
                     <th style={{width:170}}>
                       <div className="th-inner">
                         <span className="th-label">브랜드</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:640}}>상품명</th>
-                    <th style={{width:53}}>
+                    <th style={{width:320}}>상품명</th>
+                    <th style={{width:65}}>
                       <div className="th-inner">
                         <span className="th-label">가격</span>
                         <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("price_usd",dir)} onApply={()=>{}}/>
                       </div>
                     </th>
                     <th style={{width:135}}>원산지</th>
-                    <th style={{width:45}}>단량</th>
+                    <th style={{width:55}}>단량</th>
                     <th style={{width:80}}>
                       <div className="th-inner">
                         <span className="th-label">평점</span>
