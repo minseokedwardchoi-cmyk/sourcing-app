@@ -216,6 +216,7 @@ class ProductSourcingTypesResponse(BaseModel):
 
 
 class ProductSourcingItemRow(BaseModel):
+    id:                    int
     rank:                  int
     brand_kr:              Optional[str]   = Field(None, description="브랜드 한국명")
     brand_en:              Optional[str]   = Field(None, description="브랜드 영문명")
@@ -257,6 +258,7 @@ class ProductSourcingUploadResponse(BaseModel):
 
 
 class ProductSourcingFlatRow(BaseModel):
+    id:                      int
     product_type:           str
     retailer:               str
     retailer_label:         Optional[str]   = Field(None)

@@ -4,7 +4,7 @@ models.py — DB 테이블 정의
 실제 Excel 컬럼명이 달라질 경우 FIELD_MAP(importer.py)만 수정하면 됨.
 """
 from sqlalchemy import (
-    Column, Integer, String, Date, DateTime, Text, Index, UniqueConstraint, Numeric
+    Column, Integer, String, Date, DateTime, Text, Index, UniqueConstraint, Numeric, LargeBinary
 )
 from database import Base
 
@@ -143,7 +143,9 @@ class ProductSourcingItem(Base):
     rating               = Column(Numeric,     nullable=True,  comment="평점")
     review_count         = Column(Integer,     nullable=True,  comment="리뷰수")
     url                  = Column(Text,        nullable=True,  comment="상품 페이지 URL")
-    image_url            = Column(Text,        nullable=True,  comment="상품 이미지 URL")
+    image_url            = Column(Text,        nullable=True,  comment="상품 이미지 URL (raw 시트에 실제 호스팅 URL이 있는 유통사만)")
+    image_data           = Column(LargeBinary, nullable=True,  comment="원본 엑셀에 삽입된 이미지 바이트 (image_url이 없는 유통사용 대체)")
+    image_mime           = Column(String(50),  nullable=True,  comment="image_data의 MIME 타입")
     verified_flag        = Column(String(50),  nullable=True,  comment="실측여부 (실측/추정 등)")
 
     __table_args__ = (

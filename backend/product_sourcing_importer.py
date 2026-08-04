@@ -119,13 +119,20 @@ def _clean_url(val):
 
 
 def parse_card_sheet(ws) -> list[dict]:
-    """'유형별카드' 시트를 파싱해 (product_type, retailer, rank) 단위 레코드로 펼친다."""
+    """'유형별카드' 시트를 파싱해 (product_type, retailer, rank) 단위 레코드로 펼친다.
+
+    각 레코드에 "_image_row"(그 유통사 서브블록의 '이미지' 라벨 행, 0-index)를
+    함께 담아둔다 — 셀 값이 아니라 삽입된 그림 객체라 여기서는 위치만 기록하고,
+    실제 그림 바이트는 build_records에서 extract_card_images()로 뽑아 이 좌표로
+    매칭한다.
+    """
     records: list[dict] = []
 
     current_type: str | None = None
     current_retailer: dict | None = None
     current_data: dict[str, list] = {}
     current_key_criteria_label: str | None = None
+    current_image_row: int | None = None
 
     def flush():
         if not current_type or not current_retailer:
@@ -160,9 +167,11 @@ def parse_card_sheet(ws) -> list[dict]:
                 "five_year_issue": at("five_year_issue"),
                 "notes": at("notes"),
                 "product_name_en_card": at("product_name_en_card"),
+                "_image_row": current_image_row,
+                "_image_col": i + 1,
             })
 
-    for row in ws.iter_rows(values_only=True):
+    for row_idx, row in enumerate(ws.iter_rows(values_only=True)):
         first = row[0]
         if not isinstance(first, str) or not first.strip():
             continue
@@ -174,6 +183,7 @@ def parse_card_sheet(ws) -> list[dict]:
             current_retailer = None
             current_data = {}
             current_key_criteria_label = None
+            current_image_row = None
             continue
 
         if "(상위" in text:
@@ -182,9 +192,14 @@ def parse_card_sheet(ws) -> list[dict]:
             current_retailer = parsed  # None이면(대상 외 유통사) 이후 라벨 행은 무시됨
             current_data = {}
             current_key_criteria_label = None
+            current_image_row = None
             continue
 
-        if text.startswith("항목") or text == "이미지":
+        if text.startswith("항목"):
+            continue
+
+        if text == "이미지":
+            current_image_row = row_idx
             continue
 
         field, extra = _classify_label(text)
@@ -196,6 +211,34 @@ def parse_card_sheet(ws) -> list[dict]:
 
     flush()
     return records
+
+
+_MIME_BY_EXT = {
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+    "gif": "image/gif", "bmp": "image/bmp", "webp": "image/webp",
+}
+
+
+def extract_card_images(ws) -> dict[tuple[int, int], tuple[bytes, str]]:
+    """'유형별카드' 시트에 삽입된 그림들을 (행, 열) 좌표 → (바이트, MIME) 로 인덱싱.
+
+    셀 값이 아니라 워크시트에 얹힌 그림 객체(ws._images)라서, 각 그림의 앵커
+    (anchor.row/col, 0-index)로 어느 순위 칸 위에 놓여있는지 알아낸다.
+    """
+    out: dict[tuple[int, int], tuple[bytes, str]] = {}
+    for img in getattr(ws, "_images", []):
+        anchor = getattr(img, "anchor", None)
+        frm = getattr(anchor, "_from", None)
+        if frm is None:
+            continue
+        ext = (img.path or "").rsplit(".", 1)[-1].lower()
+        mime = _MIME_BY_EXT.get(ext, "image/jpeg")
+        try:
+            data = img._data()
+        except Exception:
+            continue
+        out[(frm.row, frm.col)] = (data, mime)
+    return out
 
 
 def parse_raw_sheet(ws) -> dict[tuple[str, str, str], list[dict]]:
@@ -235,11 +278,14 @@ def parse_raw_sheet(ws) -> dict[tuple[str, str, str], list[dict]]:
 
 def build_records(file_bytes: bytes) -> list[dict]:
     openpyxl = _openpyxl()
-    wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True, read_only=True)
+    # 이미지(삽입된 그림 객체)를 읽으려면 read_only가 아닌 일반 모드로 열어야 한다.
+    # 파일 하나를 두 번 여는 대신, 이 한 번의 로드를 카드/raw 시트 파싱에 모두 쓴다.
+    wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True)
     card_ws = wb["유형별카드"]
     raw_ws = wb["상품리스트(raw)"]
 
     card_records = parse_card_sheet(card_ws)
+    card_images = extract_card_images(card_ws)
     raw_index = parse_raw_sheet(raw_ws)
 
     merged: list[dict] = []
@@ -264,7 +310,19 @@ def build_records(file_bytes: bytes) -> list[dict]:
         extra = extra or {}
 
         product_name_en = extra.get("product_name_en") or rec.get("product_name_en_card")
+        image_url = extra.get("image_url")
+        image_data = image_mime = None
+        # raw 시트에 실제 호스팅된 이미지 URL이 없을 때만(아마존/이온몰), 카드
+        # 시트에 삽입된 그림을 대신 쓴다 — 있는 URL을 그림으로 덮어쓰지 않는다.
+        if not image_url:
+            img_row, img_col = rec.get("_image_row"), rec.get("_image_col")
+            if img_row is not None:
+                found = card_images.get((img_row, img_col))
+                if found:
+                    image_data, image_mime = found
         rec.pop("product_name_en_card", None)
+        rec.pop("_image_row", None)
+        rec.pop("_image_col", None)
         merged.append({
             **rec,
             "product_name_en": product_name_en,
@@ -272,7 +330,9 @@ def build_records(file_bytes: bytes) -> list[dict]:
             "rating": extra.get("rating"),
             "review_count": extra.get("review_count"),
             "url": extra.get("url"),
-            "image_url": extra.get("image_url"),
+            "image_url": image_url,
+            "image_data": image_data,
+            "image_mime": image_mime,
             "verified_flag": extra.get("verified_flag"),
         })
     return merged

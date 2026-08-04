@@ -19,7 +19,7 @@ from calendar import monthrange
 from datetime import date
 from typing import Optional, List
 import logging
-from fastapi import FastAPI, BackgroundTasks, Depends, Query, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, BackgroundTasks, Depends, Query, UploadFile, File, HTTPException, Form, Request
 
 # logging.basicConfig() 없이는 루트 로거에 핸들러가 없어 log.info()가 전부 조용히
 # 버려진다 (WARNING 미만은 출력 안 됨) — 크롤링 완료/실패 등 log.info/log.error
@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, func, select
 from dotenv import load_dotenv
@@ -252,6 +252,8 @@ async def _startup_bg():
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS contact_status VARCHAR(100)",
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS md_name VARCHAR(100)",
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS sku_name_en VARCHAR(500)",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_data BYTEA",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_mime VARCHAR(50)",
         ]:
             try:
                 await conn.execute(text(col_sql))
@@ -2025,73 +2027,110 @@ async def get_product_sourcing_types(db: AsyncSession = Depends(get_db)):
     return ProductSourcingTypesResponse(types=[row[0] for row in r.fetchall()])
 
 
+def _resolve_image_url(request: Request, row_id: int, image_url: str | None, has_image_data: bool) -> str | None:
+    """raw 시트에 실제 호스팅 URL이 있으면 그걸 쓰고(월마트/샘스클럽), 없는데
+    엑셀에 삽입된 그림을 뽑아둔 경우(아마존/이온몰)엔 그 그림을 서빙하는
+    내부 엔드포인트 URL을 대신 돌려준다."""
+    if image_url:
+        return image_url
+    if has_image_data:
+        return str(request.base_url).rstrip("/") + f"/api/product-sourcing/image/{row_id}"
+    return None
+
+
+@app.get("/api/product-sourcing/image/{item_id}")
+async def get_product_sourcing_image(item_id: int, db: AsyncSession = Depends(get_db)):
+    """엑셀에 삽입돼있던 상품 이미지(아마존/이온몰 등 실제 URL이 없는 유통사용)를 서빙."""
+    r = await db.execute(
+        text("SELECT image_data, image_mime FROM product_sourcing_item WHERE id = :id"),
+        {"id": item_id},
+    )
+    row = r.mappings().first()
+    if not row or not row["image_data"]:
+        raise HTTPException(status_code=404, detail="이미지 없음")
+    return Response(
+        content=bytes(row["image_data"]),
+        media_type=row["image_mime"] or "image/jpeg",
+        headers={"Cache-Control": "public, max-age=604800, immutable"},
+    )
+
+
 @app.get("/api/product-sourcing/all", response_model=ProductSourcingAllResponse)
-async def get_all_product_sourcing(db: AsyncSession = Depends(get_db)):
+async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(get_db)):
     """엑셀식 필터/정렬 테이블용 전체 행 (품목x유통사x순위 단위, 매칭/그룹핑 없음)."""
     order_case = " ".join(
         f"WHEN retailer = '{r}' THEN {i}" for i, r in enumerate(_RETAILER_DISPLAY_ORDER)
     )
     r = await db.execute(text(f"""
-        SELECT product_type, retailer, retailer_label, rank, brand_kr, brand_en,
+        SELECT id, product_type, retailer, retailer_label, rank, brand_kr, brand_en,
                product_name_en, price_usd, origin, unit, parallel_import,
                recall_status, quality_label_status, legal_risk_status, five_year_issue,
-               notes, rating, review_count, url, image_url
+               notes, rating, review_count, url, image_url, (image_data IS NOT NULL) AS has_image_data
         FROM product_sourcing_item
         ORDER BY product_type, (CASE {order_case} ELSE 99 END), rank
     """))
     rows = r.mappings().all()
     return ProductSourcingAllResponse(rows=[
-        ProductSourcingFlatRow(
-            **{**row, "price_usd": float(row["price_usd"]) if row["price_usd"] is not None else None,
-               "rating": float(row["rating"]) if row["rating"] is not None else None}
-        ) for row in rows
+        ProductSourcingFlatRow(**{
+            **row,
+            "price_usd": float(row["price_usd"]) if row["price_usd"] is not None else None,
+            "rating": float(row["rating"]) if row["rating"] is not None else None,
+            "image_url": _resolve_image_url(request, row["id"], row["image_url"], row["has_image_data"]),
+        }) for row in rows
     ])
 
 
 @app.get("/api/product-sourcing/search", response_model=ProductSourcingSearchResponse)
 async def search_product_sourcing(
+    request: Request,
     product_type: str = Query(..., description="품목 유형명 (정확히 일치)"),
     db: AsyncSession = Depends(get_db),
 ):
-    r = await db.execute(
-        select(ProductSourcingItem)
-        .where(ProductSourcingItem.product_type == product_type)
-        .order_by(ProductSourcingItem.retailer, ProductSourcingItem.rank)
-    )
-    rows = r.scalars().all()
+    r = await db.execute(text("""
+        SELECT id, retailer, retailer_label, ranking_method, sample_note, rank, brand_kr, brand_en,
+               product_name_en, price_usd, origin, unit, key_criteria_label, key_criteria_value,
+               parallel_import, recall_status, quality_label_status, legal_risk_status,
+               five_year_issue, notes, rating, review_count, url, image_url,
+               (image_data IS NOT NULL) AS has_image_data, verified_flag
+        FROM product_sourcing_item
+        WHERE product_type = :pt
+        ORDER BY retailer, rank
+    """), {"pt": product_type})
+    rows = r.mappings().all()
 
     groups: dict[str, ProductSourcingRetailerGroup] = {}
     for row in rows:
-        g = groups.get(row.retailer)
+        g = groups.get(row["retailer"])
         if g is None:
             g = ProductSourcingRetailerGroup(
-                retailer=row.retailer,
-                retailer_label=row.retailer_label,
-                ranking_method=row.ranking_method,
-                sample_note=row.sample_note,
+                retailer=row["retailer"],
+                retailer_label=row["retailer_label"],
+                ranking_method=row["ranking_method"],
+                sample_note=row["sample_note"],
             )
-            groups[row.retailer] = g
+            groups[row["retailer"]] = g
         g.items.append(ProductSourcingItemRow(
-            rank=row.rank,
-            brand_kr=row.brand_kr,
-            brand_en=row.brand_en,
-            product_name_en=row.product_name_en,
-            price_usd=float(row.price_usd) if row.price_usd is not None else None,
-            origin=row.origin,
-            unit=row.unit,
-            key_criteria_label=row.key_criteria_label,
-            key_criteria_value=row.key_criteria_value,
-            parallel_import=row.parallel_import,
-            recall_status=row.recall_status,
-            quality_label_status=row.quality_label_status,
-            legal_risk_status=row.legal_risk_status,
-            five_year_issue=row.five_year_issue,
-            notes=row.notes,
-            rating=float(row.rating) if row.rating is not None else None,
-            review_count=row.review_count,
-            url=row.url,
-            image_url=row.image_url,
-            verified_flag=row.verified_flag,
+            id=row["id"],
+            rank=row["rank"],
+            brand_kr=row["brand_kr"],
+            brand_en=row["brand_en"],
+            product_name_en=row["product_name_en"],
+            price_usd=float(row["price_usd"]) if row["price_usd"] is not None else None,
+            origin=row["origin"],
+            unit=row["unit"],
+            key_criteria_label=row["key_criteria_label"],
+            key_criteria_value=row["key_criteria_value"],
+            parallel_import=row["parallel_import"],
+            recall_status=row["recall_status"],
+            quality_label_status=row["quality_label_status"],
+            legal_risk_status=row["legal_risk_status"],
+            five_year_issue=row["five_year_issue"],
+            notes=row["notes"],
+            rating=float(row["rating"]) if row["rating"] is not None else None,
+            review_count=row["review_count"],
+            url=row["url"],
+            image_url=_resolve_image_url(request, row["id"], row["image_url"], row["has_image_data"]),
+            verified_flag=row["verified_flag"],
         ))
 
     ordered = [groups[key] for key in _RETAILER_DISPLAY_ORDER if key in groups]
