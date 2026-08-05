@@ -2007,7 +2007,9 @@ async def upload_english_names(
 
 
 # ─── 3-4. 품목별 유통사 인기상품/소싱 리스크 (엑셀 업로드 + 조회) ──────────────
-_RETAILER_DISPLAY_ORDER = ["amazon", "aeon", "walmart", "samsclub"]
+# 유통사 우선순위: FY2025 매출 기준 아마존($716.92B) > 월마트($681.0B) >
+# 샘스클럽($90.2B) > 이온(¥10,715.3B, 약 $71B).
+_RETAILER_DISPLAY_ORDER = ["amazon", "walmart", "samsclub", "aeon"]
 
 
 @app.post("/api/upload-product-sourcing", response_model=ProductSourcingUploadResponse)
@@ -2075,6 +2077,8 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
     order_case = " ".join(
         f"WHEN retailer = '{r}' THEN {i}" for i, r in enumerate(_RETAILER_DISPLAY_ORDER)
     )
+    # 품목유형 내 정렬: (1) 리스크 3항목 중 "통과" 개수 많은 순 → (2) 병행수입
+    # (O > 수입이력 없음 > X > 그 외) → (3) 유통사 우선순위 → (4) 유통사 내 순위.
     r = await db.execute(text(f"""
         SELECT id, product_type, retailer, retailer_label, rank, brand_kr, brand_en,
                product_name_en, price_usd, origin, unit, parallel_import,
@@ -2083,6 +2087,17 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
         FROM product_sourcing_item p
         ORDER BY
             (SELECT MIN(id) FROM product_sourcing_item p2 WHERE p2.product_type = p.product_type),
+            (
+                (CASE WHEN trim(recall_status) = '통과' THEN 1 ELSE 0 END) +
+                (CASE WHEN trim(quality_label_status) = '통과' THEN 1 ELSE 0 END) +
+                (CASE WHEN trim(legal_risk_status) = '통과' THEN 1 ELSE 0 END)
+            ) DESC,
+            (CASE
+                WHEN trim(parallel_import) = 'O' THEN 0
+                WHEN trim(parallel_import) = '수입이력 없음' THEN 1
+                WHEN trim(parallel_import) = 'X' THEN 2
+                ELSE 3
+            END),
             (CASE {order_case} ELSE 99 END), rank
     """))
     rows = r.mappings().all()
