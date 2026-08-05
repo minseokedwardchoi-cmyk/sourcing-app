@@ -3774,7 +3774,10 @@ function ProductSourcingPage({ navigate }) {
   const pageRows = filteredSorted.slice((page-1)*PRODUCT_SOURCING_PAGE_SIZE, page*PRODUCT_SOURCING_PAGE_SIZE);
   const meta = { total: filteredSorted.length, page, page_size: PRODUCT_SOURCING_PAGE_SIZE, total_pages: totalPages };
 
-  function applySort(col, dir) { setSortBy(col); setSortDir(dir); }
+  function applySort(col, dir) {
+    setSortBy(prev => (prev === col && sortDir === dir) ? null : col);
+    setSortDir(dir);
+  }
 
   return (
     <div className="app">
