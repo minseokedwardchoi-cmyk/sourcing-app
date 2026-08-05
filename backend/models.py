@@ -134,6 +134,7 @@ class ProductSourcingItem(Base):
     key_criteria_value   = Column(String(100), nullable=True,  comment="핵심기준 값")
 
     parallel_import      = Column(String(50),  nullable=True,  comment="병행수입 가능여부 (O/X/수입이력 없음/확인필요)")
+    importers            = Column(Text,        nullable=True,  comment="병행수입 판정 근거 — factory별 수입업체 목록 (JSON, cross_check_results.json에서 이식)")
     recall_status        = Column(String(20),  nullable=True,  comment="리콜 이력 판정 (통과/탈락)")
     quality_label_status = Column(String(20),  nullable=True,  comment="품질·표시 판정 (통과/탈락)")
     legal_risk_status    = Column(String(20),  nullable=True,  comment="법적·평판 리스크 판정 (통과/탈락)")

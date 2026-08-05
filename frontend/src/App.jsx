@@ -3587,6 +3587,17 @@ function statusBadgeClass(value) {
   return "b-gray"; // 미검증/수입이력 없음/확인필요/- 등
 }
 
+// 병행수입 판정 근거(factory별 수입업체 목록)를 호버 툴팁 텍스트로 만든다.
+// row.importers는 [{factory, importers, importer_count, status}, ...] 형태의 JSON 문자열.
+function parallelImportTitle(row) {
+  if (!row.importers) return "병행수입 가능여부";
+  let verdicts;
+  try { verdicts = JSON.parse(row.importers); } catch { return "병행수입 가능여부"; }
+  if (!Array.isArray(verdicts) || verdicts.length === 0) return "병행수입 가능여부";
+  const lines = verdicts.map(v => `${v.factory}: ${(v.importers||[]).join(", ")} (${v.importer_count}곳)`);
+  return `병행수입 가능여부 — 판정 근거\n${lines.join("\n")}`;
+}
+
 // 이온몰은 판매량순 랭킹이 아니라서 순위 없이 유통사명만 표기
 function retailerRankLabel(row) {
   const meta = RETAILER_META[row.retailer] || { label: row.retailer_label || row.retailer };
@@ -3686,7 +3697,7 @@ function ProductSourcingTableRow({ row }) {
               </div>
             : "-"}
         </td>
-        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title="병행수입 가능여부">{row.parallel_import || "정보없음"}</span></td>
+        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{row.parallel_import || "정보없음"}</span></td>
         <td><ProductSourcingRiskCell row={row}/></td>
       </tr>
       {expanded && (

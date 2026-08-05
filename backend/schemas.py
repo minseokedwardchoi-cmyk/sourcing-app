@@ -271,6 +271,7 @@ class ProductSourcingFlatRow(BaseModel):
     origin:                 Optional[str]   = Field(None)
     unit:                   Optional[str]   = Field(None)
     parallel_import:        Optional[str]   = Field(None)
+    importers:              Optional[str]   = Field(None, description="factory별 수입업체 목록 (JSON 문자열)")
     recall_status:          Optional[str]   = Field(None)
     quality_label_status:   Optional[str]   = Field(None)
     legal_risk_status:      Optional[str]   = Field(None)

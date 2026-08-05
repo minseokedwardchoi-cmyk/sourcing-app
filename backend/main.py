@@ -255,6 +255,7 @@ async def _startup_bg():
         for col_sql in [
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_data BYTEA",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_mime VARCHAR(50)",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS importers TEXT",
         ]:
             try:
                 await conn.execute(text(col_sql))
@@ -2081,7 +2082,7 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
     # (O > 수입이력 없음 > X > 그 외) → (3) 유통사 우선순위 → (4) 유통사 내 순위.
     r = await db.execute(text(f"""
         SELECT id, product_type, retailer, retailer_label, rank, brand_kr, brand_en,
-               product_name_en, price_usd, origin, unit, parallel_import,
+               product_name_en, price_usd, origin, unit, parallel_import, importers,
                recall_status, quality_label_status, legal_risk_status, five_year_issue,
                notes, rating, review_count, url, image_url, (image_data IS NOT NULL) AS has_image_data,
                DENSE_RANK() OVER (
