@@ -3616,7 +3616,7 @@ function ProductSourcingPage({ navigate }) {
         </div>
       </div>
       <div className="page" style={{maxWidth:1520}}>
-        <button className="back-btn" onClick={()=>navigate("main")}>← 수입/OEM SKU 이력으로 돌아가기</button>
+        <button className="back-btn" onClick={()=>navigate("main")}>→ 수입/OEM SKU 이력 대시보드 보기</button>
 
         {error && <div className="error-box">오류: {error}</div>}
 
@@ -3902,7 +3902,7 @@ function SearchTestPage() {
 
 export default function App() {
   if (window.location.pathname === "/search-test") return <SearchTestPage />;
-  const [page, setPage] = useState({ name:"main", state:null });
+  const [page, setPage] = useState({ name:"product-sourcing", state:null });
   function navigate(name, state) { setPage({name,state}); window.scrollTo({top:0,behavior:"smooth"}); }
   if (page.name==="sku") return <SkuManufacturers navigate={navigate} state={page.state}/>;
   if (page.name==="mfr") return <ManufacturerDetail navigate={navigate} state={page.state}/>;
