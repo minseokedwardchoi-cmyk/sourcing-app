@@ -3587,14 +3587,25 @@ function statusBadgeClass(value) {
   return "b-gray"; // 미검증/수입이력 없음/확인필요/- 등
 }
 
-// 병행수입 판정 근거(factory별 수입업체 목록)를 호버 툴팁 텍스트로 만든다.
-// row.importers는 [{factory, importers, importer_count, status}, ...] 형태의 JSON 문자열.
-function parallelImportTitle(row) {
-  if (!row.importers) return "병행수입 가능여부";
+// row.importers([{factory, importers, importer_count, status}, ...] JSON 문자열)를 파싱.
+function parseImporterVerdicts(row) {
+  if (!row.importers) return null;
   let verdicts;
-  try { verdicts = JSON.parse(row.importers); } catch { return "병행수입 가능여부"; }
-  if (!Array.isArray(verdicts) || verdicts.length === 0) return "병행수입 가능여부";
-  const lines = verdicts.map(v => `${v.factory}: ${(v.importers||[]).join(", ")} (${v.importer_count}곳)`);
+  try { verdicts = JSON.parse(row.importers); } catch { return null; }
+  if (!Array.isArray(verdicts) || verdicts.length === 0) return null;
+  return verdicts;
+}
+
+function importerVerdictLines(row) {
+  const verdicts = parseImporterVerdicts(row);
+  if (!verdicts) return [];
+  return verdicts.map(v => `${v.factory}: ${(v.importers||[]).join(", ")} (${v.importer_count}곳)`);
+}
+
+// 병행수입 판정 근거(factory별 수입업체 목록)를 호버 툴팁 텍스트로 만든다.
+function parallelImportTitle(row) {
+  const lines = importerVerdictLines(row);
+  if (lines.length === 0) return "병행수입 가능여부";
   return `병행수입 가능여부 — 판정 근거\n${lines.join("\n")}`;
 }
 
@@ -3704,7 +3715,10 @@ function ProductSourcingTableRow({ row }) {
         <tr>
           <td colSpan={12} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
             <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
-            <div><b>비고:</b> {row.notes || "특이사항 없음"}</div>
+            <div style={{marginBottom: importerVerdictLines(row).length ? 4 : 0}}><b>비고:</b> {row.notes || "특이사항 없음"}</div>
+            {importerVerdictLines(row).map((line, i) => (
+              <div key={i} style={{color:"#6b7280"}}><b>수입업체:</b> {line}</div>
+            ))}
           </td>
         </tr>
       )}
