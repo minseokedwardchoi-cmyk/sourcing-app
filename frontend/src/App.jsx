@@ -3633,7 +3633,7 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1500}}>
+              <table style={{minWidth:1515}}>
                 <thead>
                   <tr>
                     <th style={{width:150}}>
@@ -3663,7 +3663,7 @@ function ProductSourcingPage({ navigate }) {
                       </div>
                     </th>
                     <th style={{width:135}}>원산지</th>
-                    <th style={{width:55}}>단량</th>
+                    <th style={{width:70}}>단량</th>
                     <th style={{width:80}}>
                       <div className="th-inner">
                         <span className="th-label">평점</span>
