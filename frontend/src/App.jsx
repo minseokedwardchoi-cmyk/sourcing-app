@@ -3721,6 +3721,7 @@ function ProductSourcingPage({ navigate }) {
       .finally(() => setLoading(false));
   }, []);
 
+  const typePriorityVals  = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.type_priority).filter(v=>v!=null))].sort((a,b)=>a-b) : [], [allRows]);
   const productTypeVals   = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_type))].sort() : [], [allRows]);
   const retailerVals      = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.retailer_label||r.retailer))] : [], [allRows]);
   const brandVals         = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.brand_kr).filter(Boolean))].sort() : [], [allRows]);
@@ -3736,6 +3737,7 @@ function ProductSourcingPage({ navigate }) {
         const hay = `${r.product_type} ${r.brand_kr||""} ${r.brand_en||""} ${r.product_name_en||""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
+      if (colFilters.type_priority?.length && !colFilters.type_priority.includes(String(r.type_priority))) return false;
       if (colFilters.product_type?.length && !colFilters.product_type.includes(r.product_type)) return false;
       if (colFilters.retailer_label?.length && !colFilters.retailer_label.includes(r.retailer_label||r.retailer)) return false;
       if (colFilters.brand_kr?.length && !colFilters.brand_kr.includes(r.brand_kr)) return false;
@@ -3820,10 +3822,15 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1570}}>
+              <table style={{minWidth:1585}}>
                 <thead>
                   <tr>
-                    <th style={{width:45}}>우선순위</th>
+                    <th style={{width:60}}>
+                      <div className="th-inner">
+                        <span className="th-label">우선순위</span>
+                        <ColumnFilter colKey="_l" isNumeric={true} activeValues={colFilters.type_priority||null} activeSortCol={sortBy==="type_priority"} activeSortDir={sortDir} localValues={typePriorityVals} onSort={dir=>applySort("type_priority",dir)} onApply={vals=>setColFilters(p=>({...p,type_priority:vals}))}/>
+                      </div>
+                    </th>
                     <th style={{width:150}}>
                       <div className="th-inner">
                         <span className="th-label">품목명</span>
