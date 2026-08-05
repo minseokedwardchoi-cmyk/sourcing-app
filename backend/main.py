@@ -2083,7 +2083,10 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
         SELECT id, product_type, retailer, retailer_label, rank, brand_kr, brand_en,
                product_name_en, price_usd, origin, unit, parallel_import,
                recall_status, quality_label_status, legal_risk_status, five_year_issue,
-               notes, rating, review_count, url, image_url, (image_data IS NOT NULL) AS has_image_data
+               notes, rating, review_count, url, image_url, (image_data IS NOT NULL) AS has_image_data,
+               DENSE_RANK() OVER (
+                   ORDER BY (SELECT MIN(id) FROM product_sourcing_item p2 WHERE p2.product_type = p.product_type)
+               ) AS type_priority
         FROM product_sourcing_item p
         ORDER BY
             (SELECT MIN(id) FROM product_sourcing_item p2 WHERE p2.product_type = p.product_type),

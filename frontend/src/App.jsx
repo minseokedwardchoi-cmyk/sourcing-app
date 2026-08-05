@@ -382,6 +382,173 @@ function ColumnFilter({ colKey, isNumeric, activeValues, activeSortCol, activeSo
   );
 }
 
+// 값 목록 대신 최소/최대 숫자 범위로 거르는 필터 (가격용). 드롭다운 셸/포지셔닝은
+// ColumnFilter와 동일하게 맞췄다.
+function RangeFilter({ activeSortCol, activeSortDir, onSort, activeRange, onApplyRange, label }) {
+  const [open, setOpen] = useState(false);
+  const [min, setMin] = useState(activeRange?.min ?? "");
+  const [max, setMax] = useState(activeRange?.max ?? "");
+  const [dropStyle, setDropStyle] = useState({});
+  const btnRef  = useRef(null);
+  const dropRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) { setMin(activeRange?.min ?? ""); setMax(activeRange?.max ?? ""); }
+  }, [open, activeRange]);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = e => {
+      if (btnRef.current?.contains(e.target)) return;
+      if (dropRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", h, true);
+    return () => document.removeEventListener("mousedown", h, true);
+  }, [open]);
+
+  function handleToggle(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < 220 && rect.top > 220) {
+        setDropStyle({ position:"fixed", bottom: window.innerHeight - rect.top + 2, left: rect.left, zIndex:9999 });
+      } else {
+        setDropStyle({ position:"fixed", top: rect.bottom + 2, left: rect.left, zIndex:9999 });
+      }
+    }
+    setOpen(v => !v);
+  }
+
+  function handleSort(dir) { try { onSort(dir); } catch(e) { console.error(e); } setOpen(false); }
+
+  function handleApply() {
+    const lo = min === "" ? null : Number(min);
+    const hi = max === "" ? null : Number(max);
+    onApplyRange((lo == null && hi == null) ? null : { min: lo, max: hi });
+    setOpen(false);
+  }
+
+  function handleReset() { setMin(""); setMax(""); onApplyRange(null); setOpen(false); }
+
+  const isActive = activeRange != null || activeSortCol;
+
+  const dropdown = (
+    <div ref={dropRef} className="filter-dropdown" style={dropStyle} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+      <div className="filter-sort-section">
+        <button className="filter-sort-btn" onClick={() => handleSort("asc")}>
+          <span className="filter-sort-icon">1→9</span>
+          숫자 오름차순 정렬
+          {activeSortCol && activeSortDir === "asc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
+        </button>
+        <button className="filter-sort-btn" onClick={() => handleSort("desc")}>
+          <span className="filter-sort-icon">9→1</span>
+          숫자 내림차순 정렬
+          {activeSortCol && activeSortDir === "desc" && <span style={{marginLeft:"auto",color:"#16a34a"}}>✓</span>}
+        </button>
+      </div>
+      <div style={{padding:"8px 10px", display:"flex", flexDirection:"column", gap:6, borderTop:"1px solid #e8eaed"}}>
+        <div style={{fontSize:11, color:"#6b7280"}}>{label || "범위"}</div>
+        <div style={{display:"flex", alignItems:"center", gap:6}}>
+          <input type="number" className="filter-search" style={{width:70}} placeholder="최소" value={min} onChange={e=>setMin(e.target.value)}/>
+          <span style={{color:"#9ca3af"}}>~</span>
+          <input type="number" className="filter-search" style={{width:70}} placeholder="최대" value={max} onChange={e=>setMax(e.target.value)}/>
+        </div>
+      </div>
+      <div className="filter-actions">
+        <button className="filter-ok-btn" onClick={handleApply}>적용</button>
+        <button className="filter-cancel-btn" onClick={handleReset}>초기화</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{position:"relative",display:"inline-block"}} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+      <button type="button" ref={btnRef} className={`filter-icon-btn${isActive ? " active" : ""}`} onMouseDown={handleToggle} onClick={e => { e.preventDefault(); e.stopPropagation(); }} title="필터">▾</button>
+      {open && createPortal(dropdown, document.body)}
+    </div>
+  );
+}
+
+// 리스크 열 전용 필터 — 리콜/품질/법적 3개 필드 각각 "통과" 여부를 체크박스로
+// 골라 AND 조건으로 거른다 (값 목록이 아니라 필드별 boolean 조합).
+const RISK_FILTER_OPTIONS = [
+  { key: "recall_status",        label: "리콜 통과" },
+  { key: "quality_label_status", label: "품질 통과" },
+  { key: "legal_risk_status",    label: "법적 통과" },
+];
+
+function RiskFilter({ activeKeys, onApply }) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState(new Set(activeKeys || []));
+  const [dropStyle, setDropStyle] = useState({});
+  const btnRef  = useRef(null);
+  const dropRef = useRef(null);
+
+  useEffect(() => { if (!open) setSelected(new Set(activeKeys || [])); }, [open, activeKeys]);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = e => {
+      if (btnRef.current?.contains(e.target)) return;
+      if (dropRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", h, true);
+    return () => document.removeEventListener("mousedown", h, true);
+  }, [open]);
+
+  function handleToggle(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < 220 && rect.top > 220) {
+        setDropStyle({ position:"fixed", bottom: window.innerHeight - rect.top + 2, left: rect.left, zIndex:9999 });
+      } else {
+        setDropStyle({ position:"fixed", top: rect.bottom + 2, left: rect.left, zIndex:9999 });
+      }
+    }
+    setOpen(v => !v);
+  }
+
+  function toggle(key) {
+    setSelected(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
+  }
+
+  function handleOk() { const sel = [...selected]; onApply(sel.length ? sel : null); setOpen(false); }
+  function handleCancel() { setOpen(false); }
+
+  const isActive = activeKeys && activeKeys.length > 0;
+
+  const dropdown = (
+    <div ref={dropRef} className="filter-dropdown" style={dropStyle} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+      <div className="filter-list">
+        {RISK_FILTER_OPTIONS.map(opt => (
+          <label key={opt.key} className="filter-item">
+            <input type="checkbox" checked={selected.has(opt.key)} onChange={() => toggle(opt.key)}/>
+            <span>{opt.label}</span>
+          </label>
+        ))}
+      </div>
+      <div className="filter-actions">
+        <button className="filter-ok-btn" onClick={handleOk}>확인</button>
+        <button className="filter-cancel-btn" onClick={handleCancel}>취소</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{position:"relative",display:"inline-block"}} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+      <button type="button" ref={btnRef} className={`filter-icon-btn${isActive ? " active" : ""}`} onMouseDown={handleToggle} onClick={e => { e.preventDefault(); e.stopPropagation(); }} title="필터">▾</button>
+      {open && createPortal(dropdown, document.body)}
+    </div>
+  );
+}
+
 // ─── 유틸 ─────────────────────────────────────────────────────────────────────
 function OemBadge({ value }) {
   if (!value) return <span className="badge b-gray">-</span>;
@@ -3485,6 +3652,7 @@ function ProductSourcingTableRow({ row }) {
   return (
     <>
       <tr style={{cursor:"pointer"}} onClick={()=>setExpanded(v=>!v)}>
+        <td style={{whiteSpace:"nowrap", textAlign:"center", color:"#6b7280"}}>{row.type_priority}</td>
         <td><ClampCell>{row.product_type}</ClampCell></td>
         <td style={{whiteSpace:"nowrap"}}>{meta.emoji} {retailerRankLabel(row)}</td>
         <td style={{width:50}}>
@@ -3523,7 +3691,7 @@ function ProductSourcingTableRow({ row }) {
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={11} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+          <td colSpan={12} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
             <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
             <div><b>비고:</b> {row.notes || "특이사항 없음"}</div>
           </td>
@@ -3553,9 +3721,12 @@ function ProductSourcingPage({ navigate }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const productTypeVals  = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_type))].sort() : [], [allRows]);
-  const retailerVals     = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.retailer_label||r.retailer))] : [], [allRows]);
-  const brandVals        = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.brand_kr).filter(Boolean))].sort() : [], [allRows]);
+  const productTypeVals   = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_type))].sort() : [], [allRows]);
+  const retailerVals      = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.retailer_label||r.retailer))] : [], [allRows]);
+  const brandVals         = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.brand_kr).filter(Boolean))].sort() : [], [allRows]);
+  const productNameVals   = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_name_en).filter(Boolean))].sort() : [], [allRows]);
+  const originVals        = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.origin).filter(Boolean))].sort() : [], [allRows]);
+  const parallelImportVals= useMemo(() => allRows ? [...new Set(allRows.map(r=>r.parallel_import).filter(Boolean))].sort() : [], [allRows]);
 
   const filteredSorted = useMemo(() => {
     if (!allRows) return [];
@@ -3568,6 +3739,19 @@ function ProductSourcingPage({ navigate }) {
       if (colFilters.product_type?.length && !colFilters.product_type.includes(r.product_type)) return false;
       if (colFilters.retailer_label?.length && !colFilters.retailer_label.includes(r.retailer_label||r.retailer)) return false;
       if (colFilters.brand_kr?.length && !colFilters.brand_kr.includes(r.brand_kr)) return false;
+      if (colFilters.product_name_en?.length && !colFilters.product_name_en.includes(r.product_name_en)) return false;
+      if (colFilters.origin?.length && !colFilters.origin.includes(r.origin)) return false;
+      if (colFilters.parallel_import?.length && !colFilters.parallel_import.includes(r.parallel_import)) return false;
+      if (colFilters.price_range) {
+        const { min, max } = colFilters.price_range;
+        if (min != null && (r.price_usd == null || r.price_usd < min)) return false;
+        if (max != null && (r.price_usd == null || r.price_usd > max)) return false;
+      }
+      if (colFilters.risk_keys?.length) {
+        for (const k of colFilters.risk_keys) {
+          if (String(r[k] || "").trim() !== "통과") return false;
+        }
+      }
       return true;
     });
     if (sortBy) {
@@ -3633,9 +3817,10 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1515}}>
+              <table style={{minWidth:1570}}>
                 <thead>
                   <tr>
+                    <th style={{width:45}}>우선순위</th>
                     <th style={{width:150}}>
                       <div className="th-inner">
                         <span className="th-label">품목명</span>
@@ -3655,14 +3840,24 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:320}}>상품명</th>
+                    <th style={{width:320}}>
+                      <div className="th-inner">
+                        <span className="th-label">상품명</span>
+                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_name_en||null} activeSortCol={sortBy==="product_name_en"} activeSortDir={sortDir} localValues={productNameVals} onSort={dir=>applySort("product_name_en",dir)} onApply={vals=>setColFilters(p=>({...p,product_name_en:vals}))}/>
+                      </div>
+                    </th>
                     <th style={{width:65}}>
                       <div className="th-inner">
                         <span className="th-label">가격</span>
-                        <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("price_usd",dir)} onApply={()=>{}}/>
+                        <RangeFilter label="가격 범위 (USD)" activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} onSort={dir=>applySort("price_usd",dir)} activeRange={colFilters.price_range||null} onApplyRange={range=>setColFilters(p=>({...p,price_range:range}))}/>
                       </div>
                     </th>
-                    <th style={{width:135}}>원산지</th>
+                    <th style={{width:135}}>
+                      <div className="th-inner">
+                        <span className="th-label">원산지</span>
+                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.origin||null} activeSortCol={sortBy==="origin"} activeSortDir={sortDir} localValues={originVals} onSort={dir=>applySort("origin",dir)} onApply={vals=>setColFilters(p=>({...p,origin:vals}))}/>
+                      </div>
+                    </th>
                     <th style={{width:70}}>단량</th>
                     <th style={{width:80}}>
                       <div className="th-inner">
@@ -3670,13 +3865,23 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="rating"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("rating",dir)} onApply={()=>{}}/>
                       </div>
                     </th>
-                    <th style={{width:110}}>병행수입</th>
-                    <th style={{width:220}}>리스크</th>
+                    <th style={{width:110}}>
+                      <div className="th-inner">
+                        <span className="th-label">병행수입</span>
+                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
+                      </div>
+                    </th>
+                    <th style={{width:220}}>
+                      <div className="th-inner">
+                        <span className="th-label">리스크</span>
+                        <RiskFilter activeKeys={colFilters.risk_keys||null} onApply={keys=>setColFilters(p=>({...p,risk_keys:keys}))}/>
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageRows.length === 0
-                    ? <tr><td colSpan={11} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
+                    ? <tr><td colSpan={12} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
                     : pageRows.map((row, i) => <ProductSourcingTableRow key={`${row.product_type}-${row.retailer}-${row.rank}-${i}`} row={row}/>)
                   }
                 </tbody>

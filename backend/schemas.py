@@ -259,6 +259,7 @@ class ProductSourcingUploadResponse(BaseModel):
 
 class ProductSourcingFlatRow(BaseModel):
     id:                      int
+    type_priority:          int
     product_type:           str
     retailer:               str
     retailer_label:         Optional[str]   = Field(None)
