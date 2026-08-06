@@ -149,6 +149,9 @@ class ProductSourcingItem(Base):
     image_mime           = Column(String(50),  nullable=True,  comment="image_data의 MIME 타입")
     verified_flag        = Column(String(50),  nullable=True,  comment="실측여부 (실측/추정 등)")
 
+    brand_group_key      = Column(String(200), nullable=True,  comment="브랜드 그룹핑 키 (동일 브랜드 묶음 정렬용, 정규화된 브랜드명)")
+    product_group_key    = Column(String(200), nullable=True,  comment="동일 제품 그룹핑 키 (용량/유통사 무관 동일 제품 매칭, 브랜드 내부 정렬용)")
+
     __table_args__ = (
         UniqueConstraint("product_type", "retailer", "rank", name="uq_psi_type_retailer_rank"),
         Index("ix_psi_product_type", "product_type"),

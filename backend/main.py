@@ -256,6 +256,8 @@ async def _startup_bg():
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_data BYTEA",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS image_mime VARCHAR(50)",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS importers TEXT",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS brand_group_key VARCHAR(200)",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS product_group_key VARCHAR(200)",
         ]:
             try:
                 await conn.execute(text(col_sql))
@@ -2078,8 +2080,13 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
     order_case = " ".join(
         f"WHEN retailer = '{r}' THEN {i}" for i, r in enumerate(_RETAILER_DISPLAY_ORDER)
     )
-    # 품목유형 내 정렬: (1) 리스크 3항목 중 "통과" 개수 많은 순 → (2) 병행수입
-    # (O > 수입이력 없음 > X > 그 외) → (3) 유통사 우선순위 → (4) 유통사 내 순위.
+    # 품목유형 내 정렬:
+    #   brand_group_key/product_group_key가 채워진 품목(현재는 올리브유 파일럿만)은
+    #     (1) 브랜드 그룹(브랜드 내 최초 등장 id 기준) → (2) 브랜드 안에서 동일 제품 그룹
+    #     (제품 내 최초 등장 id 기준) → (3) 유통사 우선순위 → (4) 유통사 내 순위.
+    #   아직 그룹핑 안 된 품목은 기존 로직 그대로: (1) 리스크 3항목 중 "통과" 개수
+    #     많은 순 → (2) 병행수입(O > 수입이력 없음 > X > 그 외) → (3) 유통사 우선순위
+    #     → (4) 유통사 내 순위.
     r = await db.execute(text(f"""
         SELECT id, product_type, retailer, retailer_label, rank, brand_kr, brand_en,
                product_name_en, price_usd, origin, unit, parallel_import, importers,
@@ -2091,17 +2098,27 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
         FROM product_sourcing_item p
         ORDER BY
             (SELECT MIN(id) FROM product_sourcing_item p2 WHERE p2.product_type = p.product_type),
-            (
+            (CASE WHEN p.brand_group_key IS NOT NULL THEN 0 ELSE 1 END),
+            COALESCE((
+                SELECT MIN(id) FROM product_sourcing_item p3
+                WHERE p3.product_type = p.product_type AND p3.brand_group_key = p.brand_group_key
+            ), 0),
+            COALESCE((
+                SELECT MIN(id) FROM product_sourcing_item p4
+                WHERE p4.product_type = p.product_type AND p4.brand_group_key = p.brand_group_key
+                      AND p4.product_group_key = p.product_group_key
+            ), 0),
+            (CASE WHEN p.brand_group_key IS NULL THEN -(
                 (CASE WHEN trim(recall_status) = '통과' THEN 1 ELSE 0 END) +
                 (CASE WHEN trim(quality_label_status) = '통과' THEN 1 ELSE 0 END) +
                 (CASE WHEN trim(legal_risk_status) = '통과' THEN 1 ELSE 0 END)
-            ) DESC,
-            (CASE
+            ) ELSE 0 END),
+            (CASE WHEN p.brand_group_key IS NULL THEN (CASE
                 WHEN trim(parallel_import) = 'O' THEN 0
                 WHEN trim(parallel_import) = '수입이력 없음' THEN 1
                 WHEN trim(parallel_import) = 'X' THEN 2
                 ELSE 3
-            END),
+            END) ELSE 0 END),
             (CASE {order_case} ELSE 99 END), rank
     """))
     rows = r.mappings().all()
