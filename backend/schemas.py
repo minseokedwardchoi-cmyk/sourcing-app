@@ -281,6 +281,8 @@ class ProductSourcingFlatRow(BaseModel):
     review_count:           Optional[int]   = Field(None)
     url:                    Optional[str]   = Field(None)
     image_url:              Optional[str]   = Field(None)
+    brand_group_key:        Optional[str]   = Field(None, description="브랜드 그룹핑 키 (프론트 rowspan/배경밴딩용)")
+    product_group_key:      Optional[str]   = Field(None, description="동일 제품 그룹핑 키 (프론트 구분선용)")
 
 
 class ProductSourcingAllResponse(BaseModel):

@@ -3668,28 +3668,32 @@ function ClampCell({ children, title }) {
   );
 }
 
-function ProductSourcingTableRow({ row }) {
+function ProductSourcingTableRow({ row, showBrand = true, brandRowSpan = 1, bandIndex = 0, productDivider = false }) {
   const [expanded, setExpanded] = useState(false);
   const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
+  const rowBg = bandIndex % 2 === 1 ? "#f8fafc" : undefined;
+  const dividerStyle = productDivider ? { borderTop: "1px solid #e2e8f0" } : {};
   return (
     <>
-      <tr style={{cursor:"pointer"}} onClick={()=>setExpanded(v=>!v)}>
-        <td style={{whiteSpace:"nowrap", textAlign:"center", color:"#6b7280"}}>{row.type_priority}</td>
-        <td><ClampCell>{row.product_type}</ClampCell></td>
-        <td style={{whiteSpace:"nowrap"}}>{meta.emoji} {retailerRankLabel(row)}</td>
-        <td style={{width:50}}>
+      <tr style={{cursor:"pointer", background: rowBg}} onClick={()=>setExpanded(v=>!v)}>
+        <td style={{whiteSpace:"nowrap", textAlign:"center", color:"#6b7280", ...dividerStyle}}>{row.type_priority}</td>
+        <td style={dividerStyle}><ClampCell>{row.product_type}</ClampCell></td>
+        {showBrand && (
+          <td rowSpan={brandRowSpan} style={{verticalAlign:"top", borderTop: "1px solid #e2e8f0"}}>
+            <ClampCell>
+              <div style={{fontWeight:600}}>{row.brand_kr || "-"}</div>
+              {row.brand_en && <div style={{fontSize:11,color:"#9ca3af"}}>{row.brand_en}</div>}
+            </ClampCell>
+          </td>
+        )}
+        <td style={{whiteSpace:"nowrap", ...dividerStyle}}>{meta.emoji} {retailerRankLabel(row)}</td>
+        <td style={{width:50, ...dividerStyle}}>
           {row.image_url
             ? <img src={row.image_url} alt="" style={{width:32,height:32,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
             : <div style={{width:32,height:32,borderRadius:6,background:"#f3f4f6"}}/>
           }
         </td>
-        <td>
-          <ClampCell>
-            <div style={{fontWeight:600}}>{row.brand_kr || "-"}</div>
-            {row.brand_en && <div style={{fontSize:11,color:"#9ca3af"}}>{row.brand_en}</div>}
-          </ClampCell>
-        </td>
-        <td>
+        <td style={dividerStyle}>
           <ClampCell title={row.product_name_en || ""}>
             {row.url
               ? <a className="link-cell" href={row.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>{row.product_name_en || "-"}</a>
@@ -3697,10 +3701,10 @@ function ProductSourcingTableRow({ row }) {
             }
           </ClampCell>
         </td>
-        <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
-        <td><ClampCell>{row.origin || "-"}</ClampCell></td>
-        <td style={{whiteSpace:"nowrap"}}>{row.unit || "-"}</td>
-        <td style={{whiteSpace:"nowrap"}}>
+        <td style={{whiteSpace:"nowrap", ...dividerStyle}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
+        <td style={dividerStyle}><ClampCell>{row.origin || "-"}</ClampCell></td>
+        <td style={{whiteSpace:"nowrap", ...dividerStyle}}>{row.unit || "-"}</td>
+        <td style={{whiteSpace:"nowrap", ...dividerStyle}}>
           {row.rating != null
             ? <div style={{lineHeight:1.4}}>
                 <div>⭐{row.rating}</div>
@@ -3708,8 +3712,8 @@ function ProductSourcingTableRow({ row }) {
               </div>
             : "-"}
         </td>
-        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{row.parallel_import || "정보없음"}</span></td>
-        <td><ProductSourcingRiskCell row={row}/></td>
+        <td style={dividerStyle}><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{row.parallel_import || "정보없음"}</span></td>
+        <td style={dividerStyle}><ProductSourcingRiskCell row={row}/></td>
       </tr>
       {expanded && (
         <tr>
@@ -3801,6 +3805,31 @@ function ProductSourcingPage({ navigate }) {
   const pageRows = filteredSorted.slice((page-1)*PRODUCT_SOURCING_PAGE_SIZE, page*PRODUCT_SOURCING_PAGE_SIZE);
   const meta = { total: filteredSorted.length, page, page_size: PRODUCT_SOURCING_PAGE_SIZE, total_pages: totalPages };
 
+  // 브랜드 rowspan 병합 + 브랜드 블록 배경 밴딩 + 제품 그룹 구분선 계산.
+  // brand_group_key/product_group_key가 없는 행(아직 그룹핑 안 된 82개 품목)은
+  // id 기준으로 유니크 키를 만들어 사실상 그룹 없음(rowSpan=1)으로 처리한다.
+  const pageRowsWithGroups = useMemo(() => {
+    const entries = pageRows.map(row => ({
+      row,
+      brandKey: row.brand_group_key || `__u_b_${row.id}`,
+      productKey: row.product_group_key || `__u_p_${row.id}`,
+    }));
+    let bandIndex = 0;
+    entries.forEach((e, i) => {
+      e.isBrandFirst = i === 0 || entries[i-1].brandKey !== e.brandKey;
+      if (e.isBrandFirst && i > 0) bandIndex = (bandIndex + 1) % 2;
+      e.bandIndex = bandIndex;
+      e.isProductFirst = e.isBrandFirst || entries[i-1].productKey !== e.productKey;
+    });
+    entries.forEach((e, i) => {
+      if (!e.isBrandFirst) { e.brandRowSpan = 0; return; }
+      let span = 1;
+      while (i + span < entries.length && entries[i+span].brandKey === e.brandKey) span++;
+      e.brandRowSpan = span;
+    });
+    return entries;
+  }, [pageRows]);
+
   function applySort(col, dir) {
     setSortBy(prev => (prev === col && sortDir === dir) ? null : col);
     setSortDir(dir);
@@ -3862,6 +3891,12 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_type||null} activeSortCol={sortBy==="product_type"} activeSortDir={sortDir} localValues={productTypeVals} onSort={dir=>applySort("product_type",dir)} onApply={vals=>setColFilters(p=>({...p,product_type:vals}))}/>
                       </div>
                     </th>
+                    <th style={{width:170}}>
+                      <div className="th-inner">
+                        <span className="th-label">브랜드</span>
+                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
+                      </div>
+                    </th>
                     <th style={{width:110}}>
                       <div className="th-inner">
                         <span className="th-label">유통사+순위</span>
@@ -3869,12 +3904,6 @@ function ProductSourcingPage({ navigate }) {
                       </div>
                     </th>
                     <th style={{width:50}}>이미지</th>
-                    <th style={{width:170}}>
-                      <div className="th-inner">
-                        <span className="th-label">브랜드</span>
-                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
-                      </div>
-                    </th>
                     <th style={{width:320}}>
                       <div className="th-inner">
                         <span className="th-label">상품명</span>
@@ -3915,9 +3944,18 @@ function ProductSourcingPage({ navigate }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageRows.length === 0
+                  {pageRowsWithGroups.length === 0
                     ? <tr><td colSpan={12} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
-                    : pageRows.map((row, i) => <ProductSourcingTableRow key={`${row.product_type}-${row.retailer}-${row.rank}-${i}`} row={row}/>)
+                    : pageRowsWithGroups.map((e, i) => (
+                        <ProductSourcingTableRow
+                          key={`${e.row.product_type}-${e.row.retailer}-${e.row.rank}-${i}`}
+                          row={e.row}
+                          showBrand={e.isBrandFirst}
+                          brandRowSpan={e.brandRowSpan}
+                          bandIndex={e.bandIndex}
+                          productDivider={e.isProductFirst && !e.isBrandFirst}
+                        />
+                      ))
                   }
                 </tbody>
               </table>
