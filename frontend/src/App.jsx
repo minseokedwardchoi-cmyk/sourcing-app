@@ -3579,6 +3579,41 @@ const RETAILER_META = {
   aeon:     { emoji: "🇯🇵", label: "이온몰" },
 };
 
+// 제품 그룹 색상 바(브랜드 안에서 제품이 바뀔 때마다 순환)
+const PRODUCT_ACCENT_COLORS = ["#93c5fd", "#86efac", "#fbbf8f"];
+
+// 유통사 커버리지 배지: 표시 순서 / 한글 이니셜 / 배지 색
+const RETAILER_ORDER = ["amazon", "walmart", "samsclub", "aeon"];
+const RETAILER_INITIAL = { amazon: "아", walmart: "월", samsclub: "샘", aeon: "이" };
+const RETAILER_BADGE_COLOR = { amazon: "#e07b1f", walmart: "#0071ce", samsclub: "#1f4e8c", aeon: "#c8262c" };
+
+function RetailerCoverageBadges({ coverage }) {
+  if (!coverage) return null;
+  return (
+    <div style={{display:"flex", gap:4, marginBottom:3}}>
+      {RETAILER_ORDER.map(r => {
+        const on = coverage.has(r);
+        return (
+          <span
+            key={r}
+            title={`${RETAILER_META[r].label}${on ? " 순위권 있음" : " 순위권 없음"}`}
+            style={{
+              width:15, height:15, borderRadius:4, flexShrink:0,
+              display:"inline-flex", alignItems:"center", justifyContent:"center",
+              fontSize:8.5, fontWeight:700, lineHeight:1,
+              background: on ? RETAILER_BADGE_COLOR[r] : "transparent",
+              color: on ? "#fff" : "#c2c8d1",
+              border: on ? "1px solid transparent" : "1px solid #d7dce4",
+            }}
+          >
+            {on ? RETAILER_INITIAL[r] : "·"}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function statusBadgeClass(value) {
   if (!value) return "b-gray";
   const v = String(value).trim().toLowerCase();
@@ -3668,32 +3703,32 @@ function ClampCell({ children, title }) {
   );
 }
 
-function ProductSourcingTableRow({ row, showBrand = true, brandRowSpan = 1, bandIndex = 0, productDivider = false }) {
+function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isProductFirst = true, accentIndex = 0, coverage = null }) {
   const [expanded, setExpanded] = useState(false);
   const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
   const rowBg = bandIndex % 2 === 1 ? "#f8fafc" : undefined;
-  const dividerStyle = productDivider ? { borderTop: "1px solid #e2e8f0" } : {};
+  const accentColor = PRODUCT_ACCENT_COLORS[accentIndex % PRODUCT_ACCENT_COLORS.length];
+  const productNameStyle = isProductFirst ? { borderLeft: `3px solid ${accentColor}` } : { borderLeft: "3px solid transparent" };
   return (
     <>
       <tr style={{cursor:"pointer", background: rowBg}} onClick={()=>setExpanded(v=>!v)}>
-        <td style={{whiteSpace:"nowrap", textAlign:"center", color:"#6b7280", ...dividerStyle}}>{row.type_priority}</td>
-        <td style={dividerStyle}><ClampCell>{row.product_type}</ClampCell></td>
-        {showBrand && (
-          <td rowSpan={brandRowSpan} style={{verticalAlign:"top", borderTop: "1px solid #e2e8f0"}}>
-            <ClampCell>
-              <div style={{fontWeight:600}}>{row.brand_kr || "-"}</div>
-              {row.brand_en && <div style={{fontSize:11,color:"#9ca3af"}}>{row.brand_en}</div>}
-            </ClampCell>
-          </td>
-        )}
-        <td style={{whiteSpace:"nowrap", ...dividerStyle}}>{meta.emoji} {retailerRankLabel(row)}</td>
-        <td style={{width:50, ...dividerStyle}}>
+        <td style={{whiteSpace:"nowrap", textAlign:"center", color:"#6b7280"}}>{row.type_priority}</td>
+        <td><ClampCell>{row.product_type}</ClampCell></td>
+        <td>
+          <ClampCell>
+            <div style={{fontWeight: isBrandFirst ? 600 : 500, color: isBrandFirst ? "#111827" : "#c2c8d1"}}>{row.brand_kr || "-"}</div>
+            {row.brand_en && <div style={{fontSize:11, color: isBrandFirst ? "#9ca3af" : "#d7dce4"}}>{row.brand_en}</div>}
+          </ClampCell>
+        </td>
+        <td style={{whiteSpace:"nowrap"}}>{meta.emoji} {retailerRankLabel(row)}</td>
+        <td style={{width:50}}>
           {row.image_url
             ? <img src={row.image_url} alt="" style={{width:32,height:32,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
             : <div style={{width:32,height:32,borderRadius:6,background:"#f3f4f6"}}/>
           }
         </td>
-        <td style={dividerStyle}>
+        <td style={productNameStyle}>
+          {isProductFirst && <RetailerCoverageBadges coverage={coverage}/>}
           <ClampCell title={row.product_name_en || ""}>
             {row.url
               ? <a className="link-cell" href={row.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>{row.product_name_en || "-"}</a>
@@ -3701,10 +3736,10 @@ function ProductSourcingTableRow({ row, showBrand = true, brandRowSpan = 1, band
             }
           </ClampCell>
         </td>
-        <td style={{whiteSpace:"nowrap", ...dividerStyle}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
-        <td style={dividerStyle}><ClampCell>{row.origin || "-"}</ClampCell></td>
-        <td style={{whiteSpace:"nowrap", ...dividerStyle}}>{row.unit || "-"}</td>
-        <td style={{whiteSpace:"nowrap", ...dividerStyle}}>
+        <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
+        <td><ClampCell>{row.origin || "-"}</ClampCell></td>
+        <td style={{whiteSpace:"nowrap"}}>{row.unit || "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>
           {row.rating != null
             ? <div style={{lineHeight:1.4}}>
                 <div>⭐{row.rating}</div>
@@ -3712,8 +3747,8 @@ function ProductSourcingTableRow({ row, showBrand = true, brandRowSpan = 1, band
               </div>
             : "-"}
         </td>
-        <td style={dividerStyle}><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{row.parallel_import || "정보없음"}</span></td>
-        <td style={dividerStyle}><ProductSourcingRiskCell row={row}/></td>
+        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{row.parallel_import || "정보없음"}</span></td>
+        <td><ProductSourcingRiskCell row={row}/></td>
       </tr>
       {expanded && (
         <tr>
@@ -3805,9 +3840,9 @@ function ProductSourcingPage({ navigate }) {
   const pageRows = filteredSorted.slice((page-1)*PRODUCT_SOURCING_PAGE_SIZE, page*PRODUCT_SOURCING_PAGE_SIZE);
   const meta = { total: filteredSorted.length, page, page_size: PRODUCT_SOURCING_PAGE_SIZE, total_pages: totalPages };
 
-  // 브랜드 rowspan 병합 + 브랜드 블록 배경 밴딩 + 제품 그룹 구분선 계산.
+  // 브랜드 블록 배경 밴딩(병합 없이 반복 표시) + 제품 그룹 색상 바 계산.
   // brand_group_key/product_group_key가 없는 행(아직 그룹핑 안 된 82개 품목)은
-  // id 기준으로 유니크 키를 만들어 사실상 그룹 없음(rowSpan=1)으로 처리한다.
+  // id 기준으로 유니크 키를 만들어 사실상 그룹 없음으로 처리한다.
   const pageRowsWithGroups = useMemo(() => {
     const entries = pageRows.map(row => ({
       row,
@@ -3815,20 +3850,33 @@ function ProductSourcingPage({ navigate }) {
       productKey: row.product_group_key || `__u_p_${row.id}`,
     }));
     let bandIndex = 0;
+    let productIndexInBrand = -1;
     entries.forEach((e, i) => {
       e.isBrandFirst = i === 0 || entries[i-1].brandKey !== e.brandKey;
-      if (e.isBrandFirst && i > 0) bandIndex = (bandIndex + 1) % 2;
+      if (e.isBrandFirst) {
+        if (i > 0) bandIndex = (bandIndex + 1) % 2;
+        productIndexInBrand = -1;
+      }
       e.bandIndex = bandIndex;
       e.isProductFirst = e.isBrandFirst || entries[i-1].productKey !== e.productKey;
-    });
-    entries.forEach((e, i) => {
-      if (!e.isBrandFirst) { e.brandRowSpan = 0; return; }
-      let span = 1;
-      while (i + span < entries.length && entries[i+span].brandKey === e.brandKey) span++;
-      e.brandRowSpan = span;
+      if (e.isProductFirst) productIndexInBrand++;
+      e.accentIndex = productIndexInBrand;
     });
     return entries;
   }, [pageRows]);
+
+  // 제품 그룹별 유통사 커버리지(아마존/월마트/샘스클럽/이온몰 중 몇 곳에 있는지).
+  // 페이지네이션/필터와 무관하게 전체 allRows 기준으로 계산해야 정확하다.
+  const productCoverageMap = useMemo(() => {
+    const map = new Map();
+    if (!allRows) return map;
+    for (const r of allRows) {
+      if (!r.product_group_key) continue;
+      if (!map.has(r.product_group_key)) map.set(r.product_group_key, new Set());
+      map.get(r.product_group_key).add(r.retailer);
+    }
+    return map;
+  }, [allRows]);
 
   function applySort(col, dir) {
     setSortBy(prev => (prev === col && sortDir === dir) ? null : col);
@@ -3950,10 +3998,11 @@ function ProductSourcingPage({ navigate }) {
                         <ProductSourcingTableRow
                           key={`${e.row.product_type}-${e.row.retailer}-${e.row.rank}-${i}`}
                           row={e.row}
-                          showBrand={e.isBrandFirst}
-                          brandRowSpan={e.brandRowSpan}
+                          isBrandFirst={e.isBrandFirst}
                           bandIndex={e.bandIndex}
-                          productDivider={e.isProductFirst && !e.isBrandFirst}
+                          isProductFirst={e.isProductFirst}
+                          accentIndex={e.accentIndex}
+                          coverage={e.row.product_group_key ? productCoverageMap.get(e.row.product_group_key) : null}
                         />
                       ))
                   }
