@@ -3708,7 +3708,7 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
   const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
   const rowBg = bandIndex % 2 === 1 ? "#f8fafc" : undefined;
   const accentColor = PRODUCT_ACCENT_COLORS[accentIndex % PRODUCT_ACCENT_COLORS.length];
-  const productNameStyle = isProductFirst ? { borderLeft: `3px solid ${accentColor}` } : { borderLeft: "3px solid transparent" };
+  const productNameStyle = { borderLeft: `3px solid ${accentColor}` };
   return (
     <>
       <tr style={{cursor:"pointer", background: rowBg}} onClick={()=>setExpanded(v=>!v)}>
@@ -3850,17 +3850,18 @@ function ProductSourcingPage({ navigate }) {
       productKey: row.product_group_key || `__u_p_${row.id}`,
     }));
     let bandIndex = 0;
-    let productIndexInBrand = -1;
+    let productIndexGlobal = -1;
     entries.forEach((e, i) => {
       e.isBrandFirst = i === 0 || entries[i-1].brandKey !== e.brandKey;
       if (e.isBrandFirst) {
         if (i > 0) bandIndex = (bandIndex + 1) % 2;
-        productIndexInBrand = -1;
       }
       e.bandIndex = bandIndex;
       e.isProductFirst = e.isBrandFirst || entries[i-1].productKey !== e.productKey;
-      if (e.isProductFirst) productIndexInBrand++;
-      e.accentIndex = productIndexInBrand;
+      // 브랜드 경계에서 리셋하지 않고 페이지 전체에서 계속 증가시켜야
+      // 서로 다른 브랜드의 인접 제품끼리도 색이 겹치지 않는다(위아래 구분 보장).
+      if (e.isProductFirst) productIndexGlobal++;
+      e.accentIndex = productIndexGlobal;
     });
     return entries;
   }, [pageRows]);
