@@ -163,6 +163,24 @@ class ProductSourcingItem(Base):
     )
 
 
+class ProductSourcingExportCache(Base):
+    """
+    '원본 형식(유형별카드) 다운로드' .xlsx를 미리 만들어 캐싱해두는 테이블.
+    Render 백엔드 인스턴스가 CPU/메모리가 넉넉하지 않아, 다운로드 요청마다
+    ~7,000개 이미지를 담은 워크북을 즉석에서 만들면 응답이 너무 느리거나
+    (실측 60초+ 후 연결 끊김) 메모리 부족으로 죽는 문제(502)가 실제로 있었다.
+    그래서 상품 소싱 데이터가 재적재될 때(백필/업로드 후) 미리 한 번 만들어
+    이 테이블에 저장해두고, 다운로드 요청은 이 캐시를 그대로 서빙만 한다.
+    항상 단일 행(id=1)만 유지 — 갱신 시 UPDATE.
+    """
+    __tablename__ = "product_sourcing_export_cache"
+
+    id           = Column(Integer, primary_key=True)
+    file_data    = Column(LargeBinary, nullable=False)
+    generated_at = Column(DateTime,    nullable=False)
+    row_count    = Column(Integer,     nullable=True)
+
+
 class TariffRate(Base):
     """
     HS코드(품목번호)별 관세율표 — 관세청_품목번호별 관세율표(data.go.kr) 원본을 그대로 적재.

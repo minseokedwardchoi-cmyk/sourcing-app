@@ -2025,6 +2025,7 @@ _RETAILER_DISPLAY_ORDER = ["amazon", "walmart", "samsclub", "aeon"]
 
 @app.post("/api/upload-product-sourcing", response_model=ProductSourcingUploadResponse)
 async def upload_product_sourcing(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="품목별 유통사 인기상품/소싱 리스크 리서치 Excel 파일"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2034,6 +2035,14 @@ async def upload_product_sourcing(
 
         content = await file.read()
         result = await import_product_sourcing(content, db)
+
+        # 원본형식 다운로드 캐시를 응답 이후 백그라운드로 재생성.
+        # 참고: 새로 업로드된 행은 image_url만 있고 image_data(백필된 실제
+        # 사진 바이트)는 없는 상태라, 이 시점 캐시에는 사진이 비어있을 수
+        # 있다 — backfill_product_sourcing_images.py를 재실행한 뒤 이
+        # 캐시가 다시 갱신되게 하려면 해당 스크립트 실행 후 이 업로드
+        # 엔드포인트를 다시 치거나 재생성을 별도로 트리거해야 한다.
+        background_tasks.add_task(regenerate_product_sourcing_export_cache)
 
         print("PRODUCT_SOURCING_UPLOAD_RESULT:", result)
         return ProductSourcingUploadResponse(**result)
@@ -2254,12 +2263,12 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
 
 
 _EXPORT_IMAGE_BATCH = 300
+_EXPORT_FILENAME = "product_sourcing_original_format.xlsx"
 
 
-@app.get("/api/product-sourcing/export-original")
-async def export_product_sourcing_original():
+async def _build_product_sourcing_export_bytes(session: AsyncSession) -> tuple[bytes, int] | None:
     """대시보드 데이터를 원본 엑셀('유형별카드' 시트)과 동일한 카드 레이아웃으로
-    재구성한 .xlsx로 내려준다.
+    재구성한 .xlsx 바이트를 만든다.
 
     ~7,200개 이미지를 한 SELECT로 통째로 읽어 openpyxl에 올리면 백엔드
     인스턴스 메모리가 부족해 프로세스가 죽는 걸 실제로 겪었다(502) — 텍스트
@@ -2267,46 +2276,98 @@ async def export_product_sourcing_original():
     나눠 읽고 바로 워크북에 심은 뒤 그 배치를 버리는 식으로 피크 메모리를
     낮춘다. 사진은 image_data(백필된 바이트)가 있는 행만 셀에 삽입되고,
     없는 행(백필 전이거나 다운로드 실패한 URL)은 사진 없이 나간다."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(text("""
-            SELECT id, product_type, retailer_label, ranking_method, sample_note, rank,
-                   brand_kr, brand_en, product_name_en, price_usd, origin, unit,
-                   key_criteria_label, key_criteria_value, parallel_import,
-                   recall_status, quality_label_status, legal_risk_status,
-                   five_year_issue, notes, rating, review_count, url, verified_flag,
-                   (image_data IS NOT NULL) AS has_image
-            FROM product_sourcing_item
-            ORDER BY id
-        """))
-        rows = result.mappings().all()
-
+    result = await session.execute(text("""
+        SELECT id, product_type, retailer_label, ranking_method, sample_note, rank,
+               brand_kr, brand_en, product_name_en, price_usd, origin, unit,
+               key_criteria_label, key_criteria_value, parallel_import,
+               recall_status, quality_label_status, legal_risk_status,
+               five_year_issue, notes, rating, review_count, url, verified_flag,
+               (image_data IS NOT NULL) AS has_image
+        FROM product_sourcing_item
+        ORDER BY id
+    """))
+    rows = result.mappings().all()
     if not rows:
-        raise HTTPException(status_code=404, detail="데이터 없음")
+        return None
 
     wb, ws, image_cells = build_workbook_skeleton(rows)
     add_flat_sheet(wb, rows)
 
     ids = list(image_cells.keys())
-    async with AsyncSessionLocal() as session:
-        for i in range(0, len(ids), _EXPORT_IMAGE_BATCH):
-            batch_ids = ids[i:i + _EXPORT_IMAGE_BATCH]
-            r = await session.execute(
-                text("SELECT id, image_data FROM product_sourcing_item WHERE id = ANY(:ids)"),
-                {"ids": batch_ids},
-            )
-            for row in r.mappings():
-                data = row["image_data"]
-                if not data:
-                    continue
-                embed_image(ws, image_cells[row["id"]], bytes(data))
+    for i in range(0, len(ids), _EXPORT_IMAGE_BATCH):
+        batch_ids = ids[i:i + _EXPORT_IMAGE_BATCH]
+        r = await session.execute(
+            text("SELECT id, image_data FROM product_sourcing_item WHERE id = ANY(:ids)"),
+            {"ids": batch_ids},
+        )
+        for row in r.mappings():
+            data = row["image_data"]
+            if not data:
+                continue
+            embed_image(ws, image_cells[row["id"]], bytes(data))
 
     buf = io.BytesIO()
     wb.save(buf)
-    buf.seek(0)
-    return StreamingResponse(
-        buf,
+    return buf.getvalue(), len(rows)
+
+
+async def regenerate_product_sourcing_export_cache() -> None:
+    """원본형식 다운로드 캐시를 다시 만들어 저장한다 (단일 행, id=1로 upsert).
+
+    데이터 재적재(업로드) 직후 BackgroundTask로 호출된다 — 이 함수 자체는
+    CPU를 꽤 쓰지만(수십 초) 클라이언트 응답 이후에 돌기 때문에 사용자가
+    기다릴 필요는 없다. 다운로드 엔드포인트는 이 캐시를 읽기만 한다."""
+    async with AsyncSessionLocal() as session:
+        try:
+            built = await _build_product_sourcing_export_bytes(session)
+        except Exception:
+            log.exception("product_sourcing export cache 생성 실패")
+            return
+        if built is None:
+            return
+        file_data, row_count = built
+        await session.execute(text("""
+            INSERT INTO product_sourcing_export_cache (id, file_data, generated_at, row_count)
+            VALUES (1, :file_data, now(), :row_count)
+            ON CONFLICT (id) DO UPDATE SET
+                file_data = EXCLUDED.file_data,
+                generated_at = EXCLUDED.generated_at,
+                row_count = EXCLUDED.row_count
+        """), {"file_data": file_data, "row_count": row_count})
+        await session.commit()
+        log.info("product_sourcing export cache 재생성 완료 (%d행, %.1fMB)", row_count, len(file_data) / 1024 / 1024)
+
+
+@app.get("/api/product-sourcing/export-original")
+async def export_product_sourcing_original():
+    """캐싱된 원본형식 .xlsx를 서빙한다. 캐시가 아직 없으면(첫 배포 직후 등)
+    그 자리에서 만들어 응답하면서 다음 요청을 위해 캐시에도 저장해둔다."""
+    async with AsyncSessionLocal() as session:
+        cached = (await session.execute(
+            text("SELECT file_data FROM product_sourcing_export_cache WHERE id = 1")
+        )).mappings().first()
+
+        if cached:
+            file_bytes = bytes(cached["file_data"])
+        else:
+            built = await _build_product_sourcing_export_bytes(session)
+            if built is None:
+                raise HTTPException(status_code=404, detail="데이터 없음")
+            file_bytes, row_count = built
+            await session.execute(text("""
+                INSERT INTO product_sourcing_export_cache (id, file_data, generated_at, row_count)
+                VALUES (1, :file_data, now(), :row_count)
+                ON CONFLICT (id) DO UPDATE SET
+                    file_data = EXCLUDED.file_data,
+                    generated_at = EXCLUDED.generated_at,
+                    row_count = EXCLUDED.row_count
+            """), {"file_data": file_bytes, "row_count": row_count})
+            await session.commit()
+
+    return Response(
+        content=file_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="product_sourcing_original_format.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="{_EXPORT_FILENAME}"'},
     )
 
 
