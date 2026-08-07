@@ -370,6 +370,20 @@ export function fetchProductSourcingAll() {
   return request("/api/product-sourcing/all");
 }
 
+/** 품목유형 단위 HS코드 지정/수정 (같은 품목유형의 전체 행에 일괄 적용) */
+export async function updateProductSourcingHsCode(productType, hsCode) {
+  const res = await fetch(`${BASE_URL}/api/product-sourcing/hs-code`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ product_type: productType, hs_code: hsCode || null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "HS코드 저장 실패");
+  }
+  return res.json();
+}
+
 /** 공장별 보기: SKU 이력 집계 (importer 제외 그룹핑) */
 export async function fetchFactoryView({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {}, dateFrom, dateTo }) {
   const url = new URL(`${BASE_URL}/api/factory-view`, window.location.origin);

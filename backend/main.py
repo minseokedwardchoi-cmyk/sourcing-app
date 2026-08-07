@@ -46,11 +46,15 @@ from schemas import (
     ProductSourcingTypesResponse, ProductSourcingItemRow,
     ProductSourcingRetailerGroup, ProductSourcingSearchResponse,
     ProductSourcingUploadResponse, ProductSourcingFlatRow, ProductSourcingAllResponse,
+    TariffUploadResponse, HsCodeUpdateRequest, HsCodeUpdateResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
 from english_name_importer import import_english_names
 from product_sourcing_importer import import_product_sourcing
+from tariff_rate_importer import import_tariff_rates
+from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
+from fta_country_map import match_country_in_text
 from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, clear_ranking_caches, TOP5_RETAILERS
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
@@ -258,6 +262,7 @@ async def _startup_bg():
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS importers TEXT",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS brand_group_key VARCHAR(200)",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS product_group_key VARCHAR(200)",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS hs_code VARCHAR(20)",
         ]:
             try:
                 await conn.execute(text(col_sql))
@@ -2040,6 +2045,50 @@ async def upload_product_sourcing(
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
+@app.post("/api/upload-tariff-rates", response_model=TariffUploadResponse)
+async def upload_tariff_rates(
+    file: UploadFile = File(..., description="관세청_품목번호별 관세율표 Excel 파일 (data.go.kr)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """관세청_품목번호별 관세율표(data.go.kr) 원본을 그대로 tariff_rate 테이블에 재적재.
+    hs_code가 채워진 품목행들의 추정원가가 다음 조회부터 자동으로 갱신된다."""
+    try:
+        if not file.filename.endswith((".xlsx", ".xls")):
+            raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls)만 업로드 가능합니다.")
+
+        content = await file.read()
+        result = await import_tariff_rates(content, db)
+
+        print("TARIFF_RATE_UPLOAD_RESULT:", result)
+        return TariffUploadResponse(**result)
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+@app.patch("/api/product-sourcing/hs-code", response_model=HsCodeUpdateResponse)
+async def update_product_sourcing_hs_code(
+    payload: HsCodeUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """품목유형(product_type) 단위로 HS코드를 지정/수정. 같은 품목유형에 속한
+    모든 유통사×순위 행에 일괄 적용된다 — HS코드는 상품의 물리적 분류라
+    유통사가 달라도 보통 동일하기 때문 (다르면 개별 행 단위 수정이 필요한데,
+    현재는 그 케이스가 없어 지원하지 않음)."""
+    hs_code = payload.hs_code.strip() if payload.hs_code else None
+    r = await db.execute(text("""
+        UPDATE product_sourcing_item SET hs_code = :hs_code WHERE product_type = :pt
+    """), {"hs_code": hs_code, "pt": payload.product_type})
+    await db.commit()
+    return HsCodeUpdateResponse(product_type=payload.product_type, hs_code=hs_code, updated_rows=r.rowcount)
+
+
 @app.get("/api/product-sourcing/types", response_model=ProductSourcingTypesResponse)
 async def get_product_sourcing_types(db: AsyncSession = Depends(get_db)):
     r = await db.execute(text("SELECT DISTINCT product_type FROM product_sourcing_item ORDER BY product_type"))
@@ -2055,6 +2104,47 @@ def _resolve_image_url(request: Request, row_id: int, image_url: str | None, has
     if has_image_data:
         return str(request.base_url).rstrip("/") + f"/api/product-sourcing/image/{row_id}"
     return None
+
+
+async def _attach_cost_estimates(db: AsyncSession, rows: list[dict]) -> None:
+    """hs_code가 채워진 행들에 한해 관세율/추정 착지원가를 계산해 dict를 in-place로
+    채운다. hs_code가 아직 없는 행(현재 대부분)은 세 필드 모두 None으로 남는다 —
+    나중에 hs_code가 채워지면 별도 코드 변경 없이 자동으로 값이 채워진다."""
+    hs_codes = sorted({row["hs_code"] for row in rows if row.get("hs_code")})
+    for row in rows:
+        row["tariff_rate_pct"] = None
+        row["tariff_basis"] = None
+        row["estimated_landed_cost_krw"] = None
+
+    if not hs_codes:
+        return
+
+    r = await db.execute(text("""
+        SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
+        FROM tariff_rate
+        WHERE hs_code = ANY(:codes)
+    """), {"codes": hs_codes})
+    by_hs_code: dict[str, list[dict]] = {}
+    for tr in r.mappings().all():
+        by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
+
+    for row in rows:
+        hs_code = row.get("hs_code")
+        if not hs_code:
+            continue
+        tariff_rows = by_hs_code.get(hs_code)
+        if not tariff_rows:
+            continue
+        origin_country = match_country_in_text(row.get("origin"))
+        tariff = resolve_tariff_rate(tariff_rows, origin_country)
+        if tariff is None:
+            continue
+        row["tariff_rate_pct"] = tariff.rate_pct
+        row["tariff_basis"] = tariff.basis_label
+        row["estimated_landed_cost_krw"] = estimate_landed_cost_krw(
+            float(row["price_usd"]) if row.get("price_usd") is not None else None,
+            tariff,
+        )
 
 
 @app.get("/api/product-sourcing/image/{item_id}")
@@ -2092,7 +2182,7 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
                product_name_en, price_usd, origin, unit, parallel_import, importers,
                recall_status, quality_label_status, legal_risk_status, five_year_issue,
                notes, rating, review_count, url, image_url, (image_data IS NOT NULL) AS has_image_data,
-               brand_group_key, product_group_key,
+               brand_group_key, product_group_key, hs_code,
                DENSE_RANK() OVER (
                    ORDER BY (SELECT MIN(id) FROM product_sourcing_item p2 WHERE p2.product_type = p.product_type)
                ) AS type_priority
@@ -2122,15 +2212,15 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
             END) ELSE 0 END),
             (CASE {order_case} ELSE 99 END), rank
     """))
-    rows = r.mappings().all()
-    return ProductSourcingAllResponse(rows=[
-        ProductSourcingFlatRow(**{
-            **row,
-            "price_usd": float(row["price_usd"]) if row["price_usd"] is not None else None,
-            "rating": float(row["rating"]) if row["rating"] is not None else None,
-            "image_url": _resolve_image_url(request, row["id"], row["image_url"], row["has_image_data"]),
-        }) for row in rows
-    ])
+    rows = [dict(row) for row in r.mappings().all()]
+    for row in rows:
+        row["price_usd"] = float(row["price_usd"]) if row["price_usd"] is not None else None
+        row["rating"] = float(row["rating"]) if row["rating"] is not None else None
+        row["image_url"] = _resolve_image_url(request, row["id"], row["image_url"], row["has_image_data"])
+
+    await _attach_cost_estimates(db, rows)
+
+    return ProductSourcingAllResponse(rows=[ProductSourcingFlatRow(**row) for row in rows])
 
 
 @app.get("/api/product-sourcing/search", response_model=ProductSourcingSearchResponse)
@@ -2144,12 +2234,17 @@ async def search_product_sourcing(
                product_name_en, price_usd, origin, unit, key_criteria_label, key_criteria_value,
                parallel_import, recall_status, quality_label_status, legal_risk_status,
                five_year_issue, notes, rating, review_count, url, image_url,
-               (image_data IS NOT NULL) AS has_image_data, verified_flag
+               (image_data IS NOT NULL) AS has_image_data, verified_flag, hs_code
         FROM product_sourcing_item
         WHERE product_type = :pt
         ORDER BY retailer, rank
     """), {"pt": product_type})
-    rows = r.mappings().all()
+    rows = [dict(row) for row in r.mappings().all()]
+    for row in rows:
+        row["price_usd"] = float(row["price_usd"]) if row["price_usd"] is not None else None
+        row["rating"] = float(row["rating"]) if row["rating"] is not None else None
+
+    await _attach_cost_estimates(db, rows)
 
     groups: dict[str, ProductSourcingRetailerGroup] = {}
     for row in rows:
@@ -2168,7 +2263,7 @@ async def search_product_sourcing(
             brand_kr=row["brand_kr"],
             brand_en=row["brand_en"],
             product_name_en=row["product_name_en"],
-            price_usd=float(row["price_usd"]) if row["price_usd"] is not None else None,
+            price_usd=row["price_usd"],
             origin=row["origin"],
             unit=row["unit"],
             key_criteria_label=row["key_criteria_label"],
@@ -2179,11 +2274,15 @@ async def search_product_sourcing(
             legal_risk_status=row["legal_risk_status"],
             five_year_issue=row["five_year_issue"],
             notes=row["notes"],
-            rating=float(row["rating"]) if row["rating"] is not None else None,
+            rating=row["rating"],
             review_count=row["review_count"],
             url=row["url"],
             image_url=_resolve_image_url(request, row["id"], row["image_url"], row["has_image_data"]),
             verified_flag=row["verified_flag"],
+            hs_code=row["hs_code"],
+            tariff_rate_pct=row["tariff_rate_pct"],
+            tariff_basis=row["tariff_basis"],
+            estimated_landed_cost_krw=row["estimated_landed_cost_krw"],
         ))
 
     ordered = [groups[key] for key in _RETAILER_DISPLAY_ORDER if key in groups]
