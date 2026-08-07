@@ -28,7 +28,7 @@ from sqlalchemy import text
 _EXPECTED_HEADER_PREFIX = ("품목번호", "관세율구분", "관세율")
 # 배치를 작게 유지하면 배치 사이 await 지점이 자주 생겨 이벤트 루프가
 # health check 등 다른 요청을 처리할 기회가 늘어난다.
-_BATCH_SIZE = 1000
+_BATCH_SIZE = 5000
 
 
 @lru_cache(maxsize=1)
@@ -104,34 +104,36 @@ async def import_tariff_rates(content: bytes, db: AsyncSession) -> dict:
     await db.execute(text("TRUNCATE TABLE tariff_rate"))
     await db.commit()
 
-    # db.execute(text(...), [dict, dict, ...]) 형태(executemany)는 asyncpg에서
-    # 행마다 별도 왕복이 일어나 38만 행 기준 왕복만 38만 번 — 배치당 하나의
-    # 다중 VALUES INSERT로 묶어서 왕복 횟수를 줄인다. 배치마다 즉시 commit해서
-    # 전체를 하나의 긴 트랜잭션으로 들고 있지 않게 한다. db.execute/commit은
-    # 비동기 I/O라 배치 사이사이에 이벤트 루프가 다른 요청(health check 등)을
-    # 처리할 틈이 생긴다.
+    # 예전에는 배치당 (:hs_code_0, :rate_type_0, ...), (:hs_code_1, ...) 식으로
+    # 행마다 이름 있는 파라미터를 새로 만들어 하나의 VALUES 문자열로 합쳤는데,
+    # 배치가 커지면(예: 1000행 = 파라미터 6000개) SQLAlchemy의 text() 바인드
+    # 파라미터 자동 인식이 일부 이름을 잘못 파싱해서 최종 SQL에 치환 안 된
+    # ":xxx_123" 리터럴 콜론이 그대로 남아 "syntax error at or near ':'"로
+    # 터지거나(제조사의 다른 함수 _recompute_and_store_cost_estimates에서 실제
+    # 재현/확인됨) 조용히 응답 없이 멎는 원인이 됐다. unnest()로 배열을 통째로
+    # 바인딩하면 배치 크기와 무관하게 파라미터가 항상 6개뿐이라 이 문제 자체가
+    # 발생할 수 없다.
     total_inserted = 0
     hs_codes_seen: set[str] = set()
     for i in range(0, len(records), _BATCH_SIZE):
         chunk = records[i:i + _BATCH_SIZE]
-        values_sql = []
-        params: dict = {}
-        for j, rec in enumerate(chunk):
-            values_sql.append(f"(:hs_code_{j}, :rate_type_{j}, :rate_pct_{j}, :country_group_{j}, :eff_from_{j}, :eff_to_{j})")
-            params[f"hs_code_{j}"] = rec["hs_code"]
-            params[f"rate_type_{j}"] = rec["rate_type"]
-            params[f"rate_pct_{j}"] = rec["rate_pct"]
-            params[f"country_group_{j}"] = rec["country_group"]
-            params[f"eff_from_{j}"] = rec["eff_from"]
-            params[f"eff_to_{j}"] = rec["eff_to"]
-            hs_codes_seen.add(rec["hs_code"])
-
-        await db.execute(text(f"""
+        await db.execute(text("""
             INSERT INTO tariff_rate (hs_code, rate_type, rate_pct, applies_country_group, effective_from, effective_to)
-            VALUES {", ".join(values_sql)}
-        """), params)
+            SELECT * FROM unnest(
+                :hs_codes::varchar[], :rate_types::varchar[], :rate_pcts::numeric[],
+                :country_groups::integer[], :eff_froms::date[], :eff_tos::date[]
+            )
+        """), {
+            "hs_codes": [rec["hs_code"] for rec in chunk],
+            "rate_types": [rec["rate_type"] for rec in chunk],
+            "rate_pcts": [rec["rate_pct"] for rec in chunk],
+            "country_groups": [rec["country_group"] for rec in chunk],
+            "eff_froms": [rec["eff_from"] for rec in chunk],
+            "eff_tos": [rec["eff_to"] for rec in chunk],
+        })
         await db.commit()
         total_inserted += len(chunk)
+        hs_codes_seen.update(rec["hs_code"] for rec in chunk)
 
     return {
         "inserted": total_inserted,
