@@ -20,6 +20,7 @@ OOM이 아니었음). 그래서 파싱 부분만 asyncio.to_thread로 별도 스
 from __future__ import annotations
 import asyncio
 import re
+from datetime import date
 from functools import lru_cache
 from io import BytesIO
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,13 +38,17 @@ def _openpyxl():
     return openpyxl
 
 
-def _parse_date(raw) -> str | None:
+def _parse_date(raw) -> date | None:
+    # unnest()로 :eff_froms ::date[] 처럼 배열 통째로 바인딩하면 asyncpg가
+    # 각 원소를 date 객체로 요구한다 (VALUES(...)::date 캐스팅 때처럼 SQL이
+    # 문자열 리터럴을 파싱해주지 않음) — 문자열을 넘기면
+    # "'str' object has no attribute 'toordinal'"로 실패한다.
     if raw is None:
         return None
     s = str(raw).strip()
     if len(s) != 8 or not s.isdigit():
         return None
-    return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
+    return date(int(s[0:4]), int(s[4:6]), int(s[6:8]))
 
 
 def _parse_int(raw) -> int | None:
