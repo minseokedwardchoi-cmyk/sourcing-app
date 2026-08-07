@@ -15,6 +15,7 @@ import {
   fetchFactoryView, fetchFactoryViewMonthly,
   fetchProductSourcingAll,
   updateProductSourcingHsCode,
+  getProductSourcingExportUrl,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
 
@@ -3828,6 +3829,28 @@ function ProductSourcingPage({ navigate }) {
   const [sortBy, setSortBy] = useState(null);        // "product_type" | "rank" | "price_usd" | "brand_kr" | "rating"
   const [sortDir, setSortDir] = useState("asc");
   const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
+
+  async function downloadOriginalFormat() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const res = await fetch(getProductSourcingExportUrl());
+      if (!res.ok) throw new Error(`다운로드 실패 (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "품목별_유통사_인기상품_원본형식.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError(e.message);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   useEffect(() => {
     fetchProductSourcingAll()
@@ -3970,7 +3993,11 @@ function ProductSourcingPage({ navigate }) {
               <input placeholder="품목명, 브랜드, 상품명 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
             </div>
             <span className="count-label">{allRows ? `총 ${meta.total.toLocaleString()}건 중 표시` : ""}</span>
+            <button className="icon-btn" disabled={exporting} onClick={downloadOriginalFormat} title="원본 엑셀(유형별카드) 형식으로 사진 포함 다운로드">
+              {exporting ? "생성 중..." : "⬇ 원본 형식 다운로드"}
+            </button>
           </div>
+          {exportError && <div className="error-box">다운로드 오류: {exportError}</div>}
 
           {loading ? (
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>

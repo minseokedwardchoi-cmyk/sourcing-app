@@ -384,6 +384,11 @@ export async function updateProductSourcingHsCode(productType, hsCode) {
   return res.json();
 }
 
+/** 원본 엑셀(유형별카드) 형식 다운로드 URL — 사진 포함 .xlsx */
+export function getProductSourcingExportUrl() {
+  return `${BASE_URL}/api/product-sourcing/export-original`;
+}
+
 /** 공장별 보기: SKU 이력 집계 (importer 제외 그룹핑) */
 export async function fetchFactoryView({ search, competitor, sortBy, sortDir, page, pageSize, colFilters = {}, dateFrom, dateTo }) {
   const url = new URL(`${BASE_URL}/api/factory-view`, window.location.origin);

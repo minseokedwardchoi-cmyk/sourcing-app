@@ -55,6 +55,7 @@ from product_sourcing_importer import import_product_sourcing
 from tariff_rate_importer import import_tariff_rates
 from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
 from fta_country_map import match_country_in_text
+from product_sourcing_exporter import build_original_format_workbook
 from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, clear_ranking_caches, TOP5_RETAILERS
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
@@ -2221,6 +2222,36 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
     await _attach_cost_estimates(db, rows)
 
     return ProductSourcingAllResponse(rows=[ProductSourcingFlatRow(**row) for row in rows])
+
+
+@app.get("/api/product-sourcing/export-original")
+async def export_product_sourcing_original():
+    """대시보드 데이터를 원본 엑셀('유형별카드' 시트)과 동일한 카드 레이아웃으로
+    재구성한 .xlsx로 내려준다. 사진은 image_data(백필된 바이트)가 있는 행만
+    셀에 삽입된다 — image_data가 없는 행(백필 전이거나 다운로드 실패한 URL)은
+    사진 없이 나간다."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(text("""
+            SELECT product_type, retailer_label, ranking_method, sample_note, rank,
+                   brand_kr, brand_en, product_name_en, price_usd, origin, unit,
+                   key_criteria_label, key_criteria_value, parallel_import,
+                   recall_status, quality_label_status, legal_risk_status,
+                   five_year_issue, notes, rating, review_count, url, verified_flag,
+                   image_data, image_mime
+            FROM product_sourcing_item
+            ORDER BY id
+        """))
+        rows = result.mappings().all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="데이터 없음")
+
+    buf = build_original_format_workbook(rows)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="product_sourcing_original_format.xlsx"'},
+    )
 
 
 @app.get("/api/product-sourcing/search", response_model=ProductSourcingSearchResponse)
