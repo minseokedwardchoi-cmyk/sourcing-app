@@ -3826,11 +3826,14 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
   );
 }
 
-// 품목(product_type) 단위 추천: 같은 product_group_key로 묶인 유통사 리스팅들 중에서
-// (1) 리스크 3요소(recall/quality/legal) 통과 개수 → (2) 유통사 커버리지(최대 4곳) →
-// (3) 병행수입 가능여부 순으로 우선순위를 매겨 가장 점수가 높은 제품 하나를 고른다.
-// 완벽히 3요소를 다 만족하는 제품이 없어도 점수 기반이라 가장 근접한 제품이 항상 선택된다.
+// 품목(product_type) 단위 추천 목록: 같은 product_group_key로 묶인 유통사 리스팅들 중에서
+// (1) 리스크 3요소(recall/quality/legal) 모두 "통과" + 유통사 2곳 이상 등록을 무조건적인
+// 자격 조건으로 걸러내고, (2) 유통사 커버리지(많은 순) → (3) 병행수입 상태(O > 수입이력
+// 없음 > X) 순으로 정렬해 상위 RECOMMENDATION_LIMIT개까지 보여준다. 자격 조건을 만족하는
+// 제품이 없으면 빈 배열을 반환하고(UI에서 사유를 설명), 억지로 개수를 채우지 않는다.
 const RISK_KEYS = ["recall_status", "quality_label_status", "legal_risk_status"];
+const RECOMMENDATION_LIMIT = 10;
+const RECOMMENDATION_MIN_RETAILERS = 2;
 
 // 병행수입 상태의 상대적 우선순위: 가능(O) > 수입이력 없음(리스크 확인된 바 없음) > 불가/미확인.
 // "수입이력 없음"은 "X(불가 확정)"보다 나은 상태이므로 동점 처리하지 않고 중간 점수를 준다.
@@ -3841,7 +3844,15 @@ function parallelImportScore(value) {
   return 0; // X, 확인필요, 정보없음 등
 }
 
-function scoreProductGroup(rows) {
+function parallelImportLabel(value) {
+  const v = String(value || "").trim();
+  if (v === "O") return "가능";
+  if (v === "수입이력 없음") return "수입이력 없음";
+  if (v === "X") return "불가";
+  return "미확인";
+}
+
+function buildRecommendationCandidate(rows) {
   // 대표 행: 이온몰(순위 없음)보다 판매 순위가 매겨진 유통사 중 순위가 가장 높은 행을 우선.
   const rep = [...rows].sort((a, b) => {
     const ar = a.retailer === "aeon" ? 999 : (a.rank ?? 999);
@@ -3851,12 +3862,11 @@ function scoreProductGroup(rows) {
   const coverage = new Set(rows.map(r => r.retailer));
   const riskPassCount = RISK_KEYS.filter(k => String(rep[k] || "").trim() === "통과").length;
   const parallelScore = parallelImportScore(rep.parallel_import);
-  const score = riskPassCount * 1000 + coverage.size * 10 + parallelScore;
-  return { rep, coverage, riskPassCount, parallelScore, score };
+  return { rep, coverage, riskPassCount, parallelScore };
 }
 
-// 품목(product_type)별 최고 점수 제품을 계산. 현재 필터/페이지와 무관하게 전체 allRows
-// 기준으로 계산해야 "이 품목 전체에서" 가장 좋은 제품을 정확히 고를 수 있다.
+// 품목(product_type)별 추천 후보 리스트를 계산. 현재 필터/페이지와 무관하게 전체 allRows
+// 기준으로 계산해야 "이 품목 전체에서" 자격을 만족하는 제품을 정확히 골라낼 수 있다.
 function useProductTypeRecommendations(allRows) {
   return useMemo(() => {
     const map = new Map();
@@ -3870,48 +3880,65 @@ function useProductTypeRecommendations(allRows) {
       groups.get(r.product_group_key).push(r);
     }
     for (const [type, groups] of byType) {
-      let best = null;
+      const candidates = [];
       for (const rows of groups.values()) {
-        const scored = scoreProductGroup(rows);
-        if (!best || scored.score > best.score) best = scored;
+        const c = buildRecommendationCandidate(rows);
+        if (c.riskPassCount === 3 && c.coverage.size >= RECOMMENDATION_MIN_RETAILERS) candidates.push(c);
       }
-      if (best) map.set(type, best);
+      candidates.sort((a, b) => {
+        if (b.coverage.size !== a.coverage.size) return b.coverage.size - a.coverage.size;
+        return b.parallelScore - a.parallelScore;
+      });
+      map.set(type, candidates.slice(0, RECOMMENDATION_LIMIT));
     }
     return map;
   }, [allRows]);
 }
 
-function parallelImportLabel(value) {
-  const v = String(value || "").trim();
-  if (v === "O") return "가능";
-  if (v === "수입이력 없음") return "수입이력 없음";
-  if (v === "X") return "불가";
-  return "미확인";
-}
-
-function ProductTypeRecommendationCard({ productType, rec }) {
-  if (!rec) return null;
-  const { rep, coverage, riskPassCount, parallelScore } = rec;
-  const fullyQualified = riskPassCount === 3 && parallelScore === 2 && coverage.size >= 3;
+function ProductTypeRecommendationCard({ productType, candidates }) {
+  const list = candidates || [];
   return (
     <tr>
-      <td colSpan={12} style={{ padding: 0, border: "none", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
+      <td colSpan={14} style={{ padding: 0, border: "none", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
         <div style={{ margin: "10px 0", padding: "12px 14px", background: "#f4f8ff", border: "1px solid #d6e4ff", borderRadius: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontWeight: 600, fontSize: 13, color: "#1a3a6b" }}>
-            ✨ '{productType}' 추천 상품
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontWeight: 600, fontSize: 13, color: "#1a3a6b" }}>
+            ✨ '{productType}' 추천 상품{list.length > 0 ? ` (${list.length}개)` : ""}
           </div>
-          <div style={{ fontSize: 13, color: "#1a1a2e", display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-            <RetailerCoverageBadges coverage={coverage} />
-            <span style={{ whiteSpace: "normal", wordBreak: "break-word", flex: "1 1 320px", minWidth: 0 }}>
-              <b>{rep.brand_kr || rep.brand_en || "-"}</b>
-              {rep.product_name_en ? ` — ${rep.product_name_en}` : ""} 을(를) 추천합니다.
-              {" "}유통사 <b>{coverage.size}/4곳</b>에 등록되어 있고, 병행수입 <b>{parallelImportLabel(rep.parallel_import)}</b>,
-              {" "}리스크 <b>{riskPassCount}/3개</b> 통과했습니다.
-            </span>
-          </div>
-          {!fullyQualified && (
-            <div style={{ fontSize: 11.5, color: "#6b7280", marginTop: 4 }}>
-              * 유통사 3곳 이상 등록 + 병행수입 가능 + 리스크 3요소 모두 통과하는 제품이 없어, 가장 근접한 제품을 추천했습니다.
+          {list.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: "#6b7280" }}>
+              리스크 3요소(리콜·품질·표시·법적)를 모두 통과하고 유통사 {RECOMMENDATION_MIN_RETAILERS}곳 이상에 등록된 제품이 없어 추천할 제품이 없습니다.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ tableLayout: "auto", width: "100%", minWidth: 0, borderCollapse: "collapse", fontSize: 12.5, background: "#fff" }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>브랜드-상품명</th>
+                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>유통사</th>
+                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>병행수입</th>
+                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>리스크 3종</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((c, i) => (
+                    <tr key={i}>
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", maxWidth: 420, whiteSpace: "normal", wordBreak: "break-word" }}>
+                        <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
+                        {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
+                      </td>
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
+                        <RetailerCoverageBadges coverage={c.coverage} /> {c.coverage.size}/4곳
+                      </td>
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
+                        <span className={`badge ${statusBadgeClass(c.rep.parallel_import)}`} title={parallelImportTitle(c.rep)}>{parallelImportLabel(c.rep.parallel_import)}</span>
+                      </td>
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
+                        <ProductSourcingRiskCell row={c.rep} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -4187,7 +4214,7 @@ function ProductSourcingPage({ navigate }) {
                           {e.isTypeFirst && (
                             <ProductTypeRecommendationCard
                               productType={e.row.product_type}
-                              rec={productTypeRecommendations.get(e.row.product_type)}
+                              candidates={productTypeRecommendations.get(e.row.product_type)}
                             />
                           )}
                           <ProductSourcingTableRow
