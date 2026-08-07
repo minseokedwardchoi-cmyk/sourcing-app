@@ -237,6 +237,10 @@ class ProductSourcingItemRow(BaseModel):
     url:                   Optional[str]   = Field(None, description="상품 페이지 URL")
     image_url:              Optional[str]   = Field(None, description="상품 이미지 URL")
     verified_flag:         Optional[str]   = Field(None, description="실측여부")
+    hs_code:               Optional[str]   = Field(None, description="HS코드 (품목분류)")
+    tariff_rate_pct:       Optional[float] = Field(None, description="적용 관세율(%) — hs_code+원산지 기준 자동 조회")
+    tariff_basis:          Optional[str]   = Field(None, description="적용 세율 근거 (예: 'FTA 협정세율(FEU1) 0%')")
+    estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님")
 
 
 class ProductSourcingRetailerGroup(BaseModel):
@@ -283,10 +287,30 @@ class ProductSourcingFlatRow(BaseModel):
     image_url:              Optional[str]   = Field(None)
     brand_group_key:        Optional[str]   = Field(None, description="브랜드 그룹핑 키 (프론트 rowspan/배경밴딩용)")
     product_group_key:      Optional[str]   = Field(None, description="동일 제품 그룹핑 키 (프론트 구분선용)")
+    hs_code:                 Optional[str]   = Field(None, description="HS코드 (품목분류)")
+    tariff_rate_pct:         Optional[float] = Field(None, description="적용 관세율(%) — hs_code+원산지 기준 자동 조회")
+    tariff_basis:            Optional[str]   = Field(None, description="적용 세율 근거 (예: 'FTA 협정세율(FEU1) 0%')")
+    estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님")
 
 
 class ProductSourcingAllResponse(BaseModel):
     rows: list[ProductSourcingFlatRow] = Field(default_factory=list)
+
+
+class TariffUploadResponse(BaseModel):
+    inserted:      int = Field(..., description="적재된 관세율 행 수")
+    hs_code_count: int = Field(..., description="적재된 고유 HS코드 개수")
+
+
+class HsCodeUpdateRequest(BaseModel):
+    product_type: str = Field(..., description="HS코드를 지정할 품목유형 (정확히 일치)")
+    hs_code:      Optional[str] = Field(None, description="HS코드 (빈 값/None이면 해제)")
+
+
+class HsCodeUpdateResponse(BaseModel):
+    product_type: str
+    hs_code:      Optional[str]
+    updated_rows: int
 
 
 # ─── 공장별 보기 페이지 ───────────────────────────────────────────────────────

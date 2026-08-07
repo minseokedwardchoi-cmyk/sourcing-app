@@ -14,6 +14,7 @@ import {
   fetchItemCountries,
   fetchFactoryView, fetchFactoryViewMonthly,
   fetchProductSourcingAll,
+  updateProductSourcingHsCode,
   getProductSourcingExportUrl,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
@@ -3704,6 +3705,54 @@ function ClampCell({ children, title }) {
   );
 }
 
+function EstimatedCostCell({ row }) {
+  if (!row.hs_code) {
+    return <span style={{color:"#c2c8d1"}} title="HS코드 미지정 — 지정되면 자동 계산됨">-</span>;
+  }
+  if (row.estimated_landed_cost_krw == null) {
+    return <span style={{color:"#c2c8d1"}} title="해당 HS코드/원산지에 대한 관세율을 찾지 못했습니다 (관세율표 미업로드 또는 원산지 미인식)">세율없음</span>;
+  }
+  return (
+    <span title={row.tariff_basis || ""}>
+      {Math.round(row.estimated_landed_cost_krw).toLocaleString()}원
+    </span>
+  );
+}
+
+function HsCodeCell({ row }) {
+  const [value, setValue] = useState(row.hs_code || "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setValue(row.hs_code || ""); }, [row.hs_code]);
+
+  const save = async () => {
+    const next = value.trim();
+    if (next === (row.hs_code || "")) return;
+    setSaving(true);
+    try {
+      await updateProductSourcingHsCode(row.product_type, next);
+    } catch (e) {
+      alert(e.message || "HS코드 저장 실패");
+      setValue(row.hs_code || "");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      value={value}
+      placeholder="미지정"
+      disabled={saving}
+      onClick={e => e.stopPropagation()}
+      onChange={e => setValue(e.target.value)}
+      onBlur={save}
+      onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+      style={{width:88, fontSize:12, padding:"3px 5px", border:"1px solid #e5e7eb", borderRadius:4}}
+    />
+  );
+}
+
 function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isProductFirst = true, accentIndex = 0, coverage = null }) {
   const [expanded, setExpanded] = useState(false);
   const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
@@ -3750,10 +3799,12 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
         </td>
         <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{row.parallel_import || "정보없음"}</span></td>
         <td><ProductSourcingRiskCell row={row}/></td>
+        <td onClick={e=>e.stopPropagation()}><HsCodeCell row={row}/></td>
+        <td style={{whiteSpace:"nowrap"}}><EstimatedCostCell row={row}/></td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={12} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+          <td colSpan={14} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
             <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
             <div style={{marginBottom: importerVerdictLines(row).length ? 4 : 0}}><b>비고:</b> {row.notes || "특이사항 없음"}</div>
             {importerVerdictLines(row).map((line, i) => (
@@ -3952,7 +4003,7 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1585}}>
+              <table style={{minWidth:1795}}>
                 <thead>
                   <tr>
                     <th style={{width:60}}>
@@ -4017,11 +4068,13 @@ function ProductSourcingPage({ navigate }) {
                         <RiskFilter activeKeys={colFilters.risk_keys||null} onApply={keys=>setColFilters(p=>({...p,risk_keys:keys}))}/>
                       </div>
                     </th>
+                    <th style={{width:100}} title="HS코드 (품목분류) — 지정하면 아래 추정원가가 자동 계산됩니다">HS코드</th>
+                    <th style={{width:110}} title="관세율 자동조회 기반 추정 착지원가 (가정치 기반 추정값, 실측 아님)">추정원가</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageRowsWithGroups.length === 0
-                    ? <tr><td colSpan={12} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
+                    ? <tr><td colSpan={14} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
                     : pageRowsWithGroups.map((e, i) => (
                         <ProductSourcingTableRow
                           key={`${e.row.product_type}-${e.row.retailer}-${e.row.rank}-${i}`}

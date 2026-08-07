@@ -152,10 +152,36 @@ class ProductSourcingItem(Base):
     brand_group_key      = Column(String(200), nullable=True,  comment="브랜드 그룹핑 키 (동일 브랜드 묶음 정렬용, 정규화된 브랜드명)")
     product_group_key    = Column(String(200), nullable=True,  comment="동일 제품 그룹핑 키 (용량/유통사 무관 동일 제품 매칭, 브랜드 내부 정렬용)")
 
+    hs_code               = Column(String(20),  nullable=True,  comment="HS코드 (품목분류, 10자리 — 원가 자동계산용, 현재는 수동 추정치를 입력받음)")
+
     __table_args__ = (
         UniqueConstraint("product_type", "retailer", "rank", name="uq_psi_type_retailer_rank"),
         Index("ix_psi_product_type", "product_type"),
         Index("ix_psi_retailer", "retailer"),
+        Index("ix_psi_hs_code", "hs_code"),
+    )
+
+
+class TariffRate(Base):
+    """
+    HS코드(품목번호)별 관세율표 — 관세청_품목번호별 관세율표(data.go.kr) 원본을 그대로 적재.
+    rate_type: 'A'=기본세율, 'C'=WTO양허세율, 그 외(FEU1/FUS1/FCL1 등)는 FTA 협정세율
+    코드 — 어느 협정/국가에 해당하는지는 fta_country_map.py에서 별도 매핑한다
+    (이 표 자체에는 국가명이 없고 applies_country_group만 있음).
+    """
+    __tablename__ = "tariff_rate"
+
+    id                     = Column(Integer, primary_key=True, autoincrement=True)
+    hs_code                = Column(String(20),  nullable=False, comment="품목번호 (HS코드, 10자리)")
+    rate_type              = Column(String(20),  nullable=False, comment="관세율구분 (A/C/FEU1/FUS1 등)")
+    rate_pct               = Column(Numeric,     nullable=False, comment="관세율 (%)")
+    applies_country_group  = Column(Integer,     nullable=True,  comment="적용국가구분 (원본 컬럼 그대로 보관, 참고용)")
+    effective_from         = Column(Date,        nullable=True,  comment="적용개시일")
+    effective_to           = Column(Date,        nullable=True,  comment="적용만료일")
+
+    __table_args__ = (
+        UniqueConstraint("hs_code", "rate_type", "effective_from", name="uq_tariff_hs_type_from"),
+        Index("ix_tariff_hs_code", "hs_code"),
     )
 
 
