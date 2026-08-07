@@ -51,7 +51,7 @@ from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
 from english_name_importer import import_english_names
 from product_sourcing_importer import import_product_sourcing
-from product_sourcing_exporter import build_original_format_workbook
+from product_sourcing_exporter import build_workbook_skeleton, add_flat_sheet, embed_image
 from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, clear_ranking_caches, TOP5_RETAILERS
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
@@ -2134,20 +2134,28 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
     ])
 
 
+_EXPORT_IMAGE_BATCH = 300
+
+
 @app.get("/api/product-sourcing/export-original")
 async def export_product_sourcing_original():
     """대시보드 데이터를 원본 엑셀('유형별카드' 시트)과 동일한 카드 레이아웃으로
-    재구성한 .xlsx로 내려준다. 사진은 image_data(백필된 바이트)가 있는 행만
-    셀에 삽입된다 — image_data가 없는 행(백필 전이거나 다운로드 실패한 URL)은
-    사진 없이 나간다."""
+    재구성한 .xlsx로 내려준다.
+
+    ~7,200개 이미지를 한 SELECT로 통째로 읽어 openpyxl에 올리면 백엔드
+    인스턴스 메모리가 부족해 프로세스가 죽는 걸 실제로 겪었다(502) — 텍스트
+    골격(가벼움)과 이미지 바이트(무거움)를 분리해서, 이미지는 작은 배치로
+    나눠 읽고 바로 워크북에 심은 뒤 그 배치를 버리는 식으로 피크 메모리를
+    낮춘다. 사진은 image_data(백필된 바이트)가 있는 행만 셀에 삽입되고,
+    없는 행(백필 전이거나 다운로드 실패한 URL)은 사진 없이 나간다."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(text("""
-            SELECT product_type, retailer_label, ranking_method, sample_note, rank,
+            SELECT id, product_type, retailer_label, ranking_method, sample_note, rank,
                    brand_kr, brand_en, product_name_en, price_usd, origin, unit,
                    key_criteria_label, key_criteria_value, parallel_import,
                    recall_status, quality_label_status, legal_risk_status,
                    five_year_issue, notes, rating, review_count, url, verified_flag,
-                   image_data, image_mime
+                   (image_data IS NOT NULL) AS has_image
             FROM product_sourcing_item
             ORDER BY id
         """))
@@ -2156,7 +2164,26 @@ async def export_product_sourcing_original():
     if not rows:
         raise HTTPException(status_code=404, detail="데이터 없음")
 
-    buf = build_original_format_workbook(rows)
+    wb, ws, image_cells = build_workbook_skeleton(rows)
+    add_flat_sheet(wb, rows)
+
+    ids = list(image_cells.keys())
+    async with AsyncSessionLocal() as session:
+        for i in range(0, len(ids), _EXPORT_IMAGE_BATCH):
+            batch_ids = ids[i:i + _EXPORT_IMAGE_BATCH]
+            r = await session.execute(
+                text("SELECT id, image_data FROM product_sourcing_item WHERE id = ANY(:ids)"),
+                {"ids": batch_ids},
+            )
+            for row in r.mappings():
+                data = row["image_data"]
+                if not data:
+                    continue
+                embed_image(ws, image_cells[row["id"]], bytes(data))
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

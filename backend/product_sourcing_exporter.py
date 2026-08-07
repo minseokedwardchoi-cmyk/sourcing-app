@@ -10,6 +10,13 @@ product_sourcing_importer.py의 역방향 작업. id 순서가 원본 파일에�
 "항목" 라벨 행의 나머지 칸(1위/2위/…N위)은 원본 파싱 시 값을 읽지
 않고 건너뛰어서(문자열이라 텍스트로 안 읽음) DB에 남아있지 않다 —
 여기서는 rank 값으로부터 다시 합성한다.
+
+이미지는 텍스트 골격(build_workbook_skeleton)과 분리해서 별도 단계
+(embed_image)로 채운다 — Render 백엔드가 메모리가 넉넉하지 않아서(512MB급),
+전체 텍스트 rows(id + 이미지 유무만)와 실제 이미지 바이트를 동시에 메모리에
+들고 있지 않도록 호출부(main.py)가 이미지 바이트를 작은 배치로 나눠 받아
+그때그때 이 모듈로 흘려보내는 구조. (자세한 배경은 main.py의 export
+엔드포인트 주석 참고)
 """
 from __future__ import annotations
 from io import BytesIO
@@ -19,6 +26,7 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.worksheet import Worksheet
 
 _LABEL_FIELDS: list[tuple[str, str | None]] = [
     ("브랜드(한국명)", "brand_kr"),
@@ -48,6 +56,8 @@ _IMG_MAX_PX = 90
 _IMG_ROW_HEIGHT = 70
 _VALUE_COL_WIDTH = 15
 _LABEL_COL_WIDTH = 22
+
+CARD_SHEET_NAME = "유형별카드"
 
 
 def _group_by_block(rows: Sequence[Mapping[str, Any]]):
@@ -86,11 +96,16 @@ def _num(v):
     return float(v) if v is not None else None
 
 
-def build_original_format_workbook(rows: Sequence[Mapping[str, Any]]) -> BytesIO:
+def build_workbook_skeleton(rows: Sequence[Mapping[str, Any]]) -> tuple[Workbook, Worksheet, dict[int, str]]:
+    """이미지를 뺀 텍스트/스타일 골격을 전부 만들고, 이미지가 있어야 할 자리를
+    {row_id: "B15"} 형태의 셀 주소 맵으로 돌려준다. rows는 image_data 없이
+    id + has_image(불리언)만 있으면 된다 — 실제 이미지 바이트는 이후
+    embed_image()로 별도 주입."""
     wb = Workbook()
     ws = wb.active
-    ws.title = "유형별카드"
+    ws.title = CARD_SHEET_NAME
 
+    image_cells: dict[int, str] = {}
     r = 1
     max_col_seen = 1
 
@@ -147,19 +162,10 @@ def build_original_format_workbook(rows: Sequence[Mapping[str, Any]]) -> BytesIO
             ws.cell(row=img_row, column=1, value="이미지").font = _LABEL_FONT
             ws.row_dimensions[img_row].height = _IMG_ROW_HEIGHT
             for row in sub_rows:
-                data = row.get("image_data")
-                if not data:
+                if not row.get("has_image"):
                     continue
-                try:
-                    img = XLImage(BytesIO(bytes(data)))
-                except Exception:
-                    continue
-                w, h = img.width, img.height
-                if w and h:
-                    scale = min(_IMG_MAX_PX / w, _IMG_MAX_PX / h, 1.0)
-                    img.width, img.height = w * scale, h * scale
                 col_letter = get_column_letter(row["rank"] + 1)
-                ws.add_image(img, f"{col_letter}{img_row}")
+                image_cells[row["id"]] = f"{col_letter}{img_row}"
             r += 2  # 이미지 행 + 서브블록 간 여백
 
         r += 1  # 품목 블록 간 여백
@@ -169,15 +175,25 @@ def build_original_format_workbook(rows: Sequence[Mapping[str, Any]]) -> BytesIO
         ws.column_dimensions[get_column_letter(col)].width = _VALUE_COL_WIDTH
     ws.freeze_panes = "B1"
 
-    _add_flat_sheet(wb, rows)
-
-    buf = BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf
+    return wb, ws, image_cells
 
 
-def _add_flat_sheet(wb: Workbook, rows: Sequence[Mapping[str, Any]]) -> None:
+def embed_image(ws: Worksheet, cell_ref: str, raw_bytes: bytes) -> bool:
+    """cell_ref(예: "B15")에 이미지 바이트를 축소해서 삽입. 손상된 이미지는
+    조용히 건너뛴다(그 칸만 빈 채로 남음)."""
+    try:
+        img = XLImage(BytesIO(raw_bytes))
+    except Exception:
+        return False
+    w, h = img.width, img.height
+    if w and h:
+        scale = min(_IMG_MAX_PX / w, _IMG_MAX_PX / h, 1.0)
+        img.width, img.height = w * scale, h * scale
+    ws.add_image(img, cell_ref)
+    return True
+
+
+def add_flat_sheet(wb: Workbook, rows: Sequence[Mapping[str, Any]]) -> None:
     """원본의 '상품리스트(raw)' 시트에 대응하는 평면 데이터 시트 (이미지 없음)."""
     ws2 = wb.create_sheet("상품리스트")
     headers = [
