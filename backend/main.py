@@ -2232,30 +2232,34 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
             "cost": cost,
         })
 
-    # tariff_rate_importer.py와 같은 이유로, 행마다 개별 UPDATE 대신 배치당 하나의
-    # 다중 VALUES UPDATE...FROM으로 묶어서 왕복 횟수를 줄인다.
-    BATCH = 2000
+    # 예전에는 배치당 (:id_0, :rate_pct_0, ...), (:id_1, ...) 식으로 행마다
+    # 이름 있는 파라미터를 새로 만들어 하나의 VALUES 문자열로 합쳤는데, 배치가
+    # 커지면(실측: 1196행 = 파라미터 4784개) SQLAlchemy의 text() 바인드파라미터
+    # 자동 인식이 일부 이름을 잘못 파싱해서(예: "basis_"에서 뒤 숫자가 누락)
+    # 최종 SQL에 치환 안 된 ":basis_837" 같은 리터럴 콜론이 그대로 남아
+    # "syntax error at or near ':'"로 터졌다 (파라미터 개수 자체는 Postgres/asyncpg
+    # 한도에 한참 못 미쳤음 — 이름 있는 파라미터가 한 쿼리에 너무 많을 때 생기는
+    # SQLAlchemy 쪽 파싱 버그). unnest()로 배열을 통째로 바인딩하면 배치 크기와
+    # 무관하게 파라미터가 항상 4개뿐이라 이 문제 자체가 발생할 수 없다.
+    BATCH = 5000
     for i in range(0, len(updates), BATCH):
         chunk = updates[i:i + BATCH]
-        values_sql = []
-        params: dict = {}
-        for j, u in enumerate(chunk):
-            values_sql.append(
-                f"(:id_{j}::integer, :rate_pct_{j}::numeric, :basis_{j}::varchar, :cost_{j}::numeric)"
-            )
-            params[f"id_{j}"] = u["id"]
-            params[f"rate_pct_{j}"] = u["rate_pct"]
-            params[f"basis_{j}"] = u["basis"]
-            params[f"cost_{j}"] = u["cost"]
-
-        await db.execute(text(f"""
+        await db.execute(text("""
             UPDATE product_sourcing_item AS t
             SET tariff_rate_pct = v.rate_pct,
                 tariff_basis = v.basis,
                 estimated_landed_cost_krw = v.cost
-            FROM (VALUES {", ".join(values_sql)}) AS v(id, rate_pct, basis, cost)
+            FROM (
+                SELECT * FROM unnest(:ids::integer[], :rate_pcts::numeric[], :bases::varchar[], :costs::numeric[])
+                AS v(id, rate_pct, basis, cost)
+            ) AS v
             WHERE t.id = v.id
-        """), params)
+        """), {
+            "ids": [u["id"] for u in chunk],
+            "rate_pcts": [u["rate_pct"] for u in chunk],
+            "bases": [u["basis"] for u in chunk],
+            "costs": [u["cost"] for u in chunk],
+        })
         await db.commit()
 
     return len(updates)
