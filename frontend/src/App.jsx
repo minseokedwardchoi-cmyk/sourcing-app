@@ -3738,18 +3738,27 @@ function HsCodeCell({ row }) {
     }
   };
 
+  const needsReview = row.hs_code_confidence && row.hs_code_confidence !== "high";
+
   return (
-    <input
-      type="text"
-      value={value}
-      placeholder="미지정"
-      disabled={saving}
-      onClick={e => e.stopPropagation()}
-      onChange={e => setValue(e.target.value)}
-      onBlur={save}
-      onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
-      style={{width:88, fontSize:12, padding:"3px 5px", border:"1px solid #e5e7eb", borderRadius:4}}
-    />
+    <div style={{display:"flex", flexDirection:"column", gap:2}}>
+      <input
+        type="text"
+        value={value}
+        placeholder="미지정"
+        disabled={saving}
+        onClick={e => e.stopPropagation()}
+        onChange={e => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+        style={{width:88, fontSize:12, padding:"3px 5px", border:"1px solid #e5e7eb", borderRadius:4}}
+      />
+      {needsReview && (
+        <span style={{fontSize:10, color:"#b45309"}} title={`HS코드 추정 신뢰도: ${row.hs_code_confidence} — 관세사/원본 확인 권장`}>
+          (검토 필요)
+        </span>
+      )}
+    </div>
   );
 }
 

@@ -238,6 +238,7 @@ class ProductSourcingItemRow(BaseModel):
     image_url:              Optional[str]   = Field(None, description="상품 이미지 URL")
     verified_flag:         Optional[str]   = Field(None, description="실측여부")
     hs_code:               Optional[str]   = Field(None, description="HS코드 (품목분류)")
+    hs_code_confidence:    Optional[str]   = Field(None, description="HS코드 추정 신뢰도 (high/medium/very_low 등)")
     tariff_rate_pct:       Optional[float] = Field(None, description="적용 관세율(%) — hs_code+원산지 기준 자동 조회")
     tariff_basis:          Optional[str]   = Field(None, description="적용 세율 근거 (예: 'FTA 협정세율(FEU1) 0%')")
     estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님")
@@ -288,6 +289,7 @@ class ProductSourcingFlatRow(BaseModel):
     brand_group_key:        Optional[str]   = Field(None, description="브랜드 그룹핑 키 (프론트 rowspan/배경밴딩용)")
     product_group_key:      Optional[str]   = Field(None, description="동일 제품 그룹핑 키 (프론트 구분선용)")
     hs_code:                 Optional[str]   = Field(None, description="HS코드 (품목분류)")
+    hs_code_confidence:      Optional[str]   = Field(None, description="HS코드 추정 신뢰도 (high/medium/very_low 등)")
     tariff_rate_pct:         Optional[float] = Field(None, description="적용 관세율(%) — hs_code+원산지 기준 자동 조회")
     tariff_basis:            Optional[str]   = Field(None, description="적용 세율 근거 (예: 'FTA 협정세율(FEU1) 0%')")
     estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님")
@@ -311,6 +313,12 @@ class HsCodeUpdateResponse(BaseModel):
     product_type: str
     hs_code:      Optional[str]
     updated_rows: int
+
+
+class HsCodeUploadResponse(BaseModel):
+    total_rows: int = Field(..., description="파일 내 hs_code가 채워진 행 수")
+    updated:    int = Field(..., description="실제로 DB에 반영된 행 수")
+    skipped:    int = Field(..., description="유형/유통사/순위가 DB와 매칭 안 돼 건너뛴 행 수")
 
 
 # ─── 공장별 보기 페이지 ───────────────────────────────────────────────────────

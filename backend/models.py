@@ -152,7 +152,8 @@ class ProductSourcingItem(Base):
     brand_group_key      = Column(String(200), nullable=True,  comment="브랜드 그룹핑 키 (동일 브랜드 묶음 정렬용, 정규화된 브랜드명)")
     product_group_key    = Column(String(200), nullable=True,  comment="동일 제품 그룹핑 키 (용량/유통사 무관 동일 제품 매칭, 브랜드 내부 정렬용)")
 
-    hs_code               = Column(String(20),  nullable=True,  comment="HS코드 (품목분류, 10자리 — 원가 자동계산용, 현재는 수동 추정치를 입력받음)")
+    hs_code               = Column(String(20),  nullable=True,  comment="HS코드 (품목분류, 10자리 — 원가 자동계산용, 리서치로 추정한 값)")
+    hs_code_confidence    = Column(String(20),  nullable=True,  comment="HS코드 추정 신뢰도 (high/medium/very_low 등) — hs_code_importer.py 참고")
 
     __table_args__ = (
         UniqueConstraint("product_type", "retailer", "rank", name="uq_psi_type_retailer_rank"),

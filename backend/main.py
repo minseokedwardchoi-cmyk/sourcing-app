@@ -46,13 +46,14 @@ from schemas import (
     ProductSourcingTypesResponse, ProductSourcingItemRow,
     ProductSourcingRetailerGroup, ProductSourcingSearchResponse,
     ProductSourcingUploadResponse, ProductSourcingFlatRow, ProductSourcingAllResponse,
-    TariffUploadResponse, HsCodeUpdateRequest, HsCodeUpdateResponse,
+    TariffUploadResponse, HsCodeUpdateRequest, HsCodeUpdateResponse, HsCodeUploadResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
 from english_name_importer import import_english_names
 from product_sourcing_importer import import_product_sourcing
 from tariff_rate_importer import import_tariff_rates
+from hs_code_importer import import_hs_codes
 from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
 from fta_country_map import match_country_in_text
 from product_sourcing_exporter import build_original_format_workbook
@@ -264,6 +265,7 @@ async def _startup_bg():
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS brand_group_key VARCHAR(200)",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS product_group_key VARCHAR(200)",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS hs_code VARCHAR(20)",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS hs_code_confidence VARCHAR(20)",
         ]:
             try:
                 await conn.execute(text(col_sql))
@@ -2073,6 +2075,33 @@ async def upload_tariff_rates(
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
+@app.post("/api/upload-hs-codes", response_model=HsCodeUploadResponse)
+async def upload_hs_codes(
+    file: UploadFile = File(..., description="상품별(유형×유통사×순위) HS코드 리서치 결과 Excel"),
+    db: AsyncSession = Depends(get_db),
+):
+    """confidence='high'인 행은 hs_code 그대로, 'medium'은 hs_code_confidence='medium'으로
+    같이 저장(프론트에서 '(검토 필요)' 표시), 'low'/'very_low'/미상은 반영하지 않는다."""
+    try:
+        if not file.filename.endswith((".xlsx", ".xls")):
+            raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls)만 업로드 가능합니다.")
+
+        content = await file.read()
+        result = await import_hs_codes(content, db)
+
+        print("HS_CODE_UPLOAD_RESULT:", result)
+        return HsCodeUploadResponse(**result)
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
 @app.patch("/api/product-sourcing/hs-code", response_model=HsCodeUpdateResponse)
 async def update_product_sourcing_hs_code(
     payload: HsCodeUpdateRequest,
@@ -2183,7 +2212,7 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
                product_name_en, price_usd, origin, unit, parallel_import, importers,
                recall_status, quality_label_status, legal_risk_status, five_year_issue,
                notes, rating, review_count, url, image_url, (image_data IS NOT NULL) AS has_image_data,
-               brand_group_key, product_group_key, hs_code,
+               brand_group_key, product_group_key, hs_code, hs_code_confidence,
                DENSE_RANK() OVER (
                    ORDER BY (SELECT MIN(id) FROM product_sourcing_item p2 WHERE p2.product_type = p.product_type)
                ) AS type_priority
@@ -2265,7 +2294,7 @@ async def search_product_sourcing(
                product_name_en, price_usd, origin, unit, key_criteria_label, key_criteria_value,
                parallel_import, recall_status, quality_label_status, legal_risk_status,
                five_year_issue, notes, rating, review_count, url, image_url,
-               (image_data IS NOT NULL) AS has_image_data, verified_flag, hs_code
+               (image_data IS NOT NULL) AS has_image_data, verified_flag, hs_code, hs_code_confidence
         FROM product_sourcing_item
         WHERE product_type = :pt
         ORDER BY retailer, rank
@@ -2311,6 +2340,7 @@ async def search_product_sourcing(
             image_url=_resolve_image_url(request, row["id"], row["image_url"], row["has_image_data"]),
             verified_flag=row["verified_flag"],
             hs_code=row["hs_code"],
+            hs_code_confidence=row["hs_code_confidence"],
             tariff_rate_pct=row["tariff_rate_pct"],
             tariff_basis=row["tariff_basis"],
             estimated_landed_cost_krw=row["estimated_landed_cost_krw"],
