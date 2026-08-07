@@ -111,8 +111,13 @@ async def import_tariff_rates(content: bytes, db: AsyncSession) -> dict:
     # ":xxx_123" 리터럴 콜론이 그대로 남아 "syntax error at or near ':'"로
     # 터지거나(제조사의 다른 함수 _recompute_and_store_cost_estimates에서 실제
     # 재현/확인됨) 조용히 응답 없이 멎는 원인이 됐다. unnest()로 배열을 통째로
-    # 바인딩하면 배치 크기와 무관하게 파라미터가 항상 6개뿐이라 이 문제 자체가
-    # 발생할 수 없다.
+    # 바인딩하면 배치 크기와 무관하게 파라미터가 항상 6개뿐이라 규모로 인한
+    # 문제는 없어지는데, 그 대신 다른 SQLAlchemy 파싱 버그를 하나 더 밟았다:
+    # 바인드 파라미터 이름 바로 뒤에 공백 없이 Postgres 캐스트(::)가 붙으면
+    # SQLAlchemy가 파라미터 이름의 마지막 글자를 잘라먹는다
+    # (":hs_codes::varchar"를 "hs_code"라는 이름으로 잘못 인식 — 로컬에서
+    # text(":foo::int")._bindparams로 재현 확인). "::" 앞에 공백을 하나 넣으면
+    # 정상 인식된다.
     total_inserted = 0
     hs_codes_seen: set[str] = set()
     for i in range(0, len(records), _BATCH_SIZE):
@@ -120,8 +125,8 @@ async def import_tariff_rates(content: bytes, db: AsyncSession) -> dict:
         await db.execute(text("""
             INSERT INTO tariff_rate (hs_code, rate_type, rate_pct, applies_country_group, effective_from, effective_to)
             SELECT * FROM unnest(
-                :hs_codes::varchar[], :rate_types::varchar[], :rate_pcts::numeric[],
-                :country_groups::integer[], :eff_froms::date[], :eff_tos::date[]
+                :hs_codes ::varchar[], :rate_types ::varchar[], :rate_pcts ::numeric[],
+                :country_groups ::integer[], :eff_froms ::date[], :eff_tos ::date[]
             )
         """), {
             "hs_codes": [rec["hs_code"] for rec in chunk],
