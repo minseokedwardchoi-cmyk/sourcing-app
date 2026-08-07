@@ -2247,8 +2247,8 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
             FROM (VALUES {", ".join(values_sql)}) AS v(id, rate_pct, basis, cost)
             WHERE t.id = v.id
         """), params)
+        await db.commit()
 
-    await db.commit()
     return len(updates)
 
 
