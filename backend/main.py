@@ -15,6 +15,7 @@ import csv
 import io
 import json
 import math
+import re
 from calendar import monthrange
 from datetime import date
 from typing import Optional, List
@@ -2145,11 +2146,21 @@ def _resolve_image_url(request: Request, row_id: int, image_url: str | None, has
     return None
 
 
+def _normalize_hs_code(hs_code: str | None) -> str | None:
+    """HS코드 표기 통일: 상품 쪽(리서치 결과)은 '2008.11-1000'처럼 점/대시가
+    섞여 있고, 관세청 관세율표(data.go.kr) 쪽은 '2008111000'처럼 숫자만 있다.
+    비교 전에 숫자만 남겨 정규화한다."""
+    if not hs_code:
+        return None
+    digits = re.sub(r"\D", "", hs_code)
+    return digits or None
+
+
 async def _attach_cost_estimates(db: AsyncSession, rows: list[dict]) -> None:
     """hs_code가 채워진 행들에 한해 관세율/추정 착지원가를 계산해 dict를 in-place로
     채운다. hs_code가 아직 없는 행(현재 대부분)은 세 필드 모두 None으로 남는다 —
     나중에 hs_code가 채워지면 별도 코드 변경 없이 자동으로 값이 채워진다."""
-    hs_codes = sorted({row["hs_code"] for row in rows if row.get("hs_code")})
+    hs_codes = sorted({_normalize_hs_code(row["hs_code"]) for row in rows if row.get("hs_code")} - {None})
     for row in rows:
         row["tariff_rate_pct"] = None
         row["tariff_basis"] = None
@@ -2161,14 +2172,14 @@ async def _attach_cost_estimates(db: AsyncSession, rows: list[dict]) -> None:
     r = await db.execute(text("""
         SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
         FROM tariff_rate
-        WHERE hs_code = ANY(:codes)
+        WHERE regexp_replace(hs_code, '\\D', '', 'g') = ANY(:codes)
     """), {"codes": hs_codes})
     by_hs_code: dict[str, list[dict]] = {}
     for tr in r.mappings().all():
-        by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
+        by_hs_code.setdefault(_normalize_hs_code(tr["hs_code"]), []).append(dict(tr))
 
     for row in rows:
-        hs_code = row.get("hs_code")
+        hs_code = _normalize_hs_code(row.get("hs_code"))
         if not hs_code:
             continue
         tariff_rows = by_hs_code.get(hs_code)
