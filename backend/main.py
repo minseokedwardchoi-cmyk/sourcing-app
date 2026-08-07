@@ -48,6 +48,7 @@ from schemas import (
     ProductSourcingRetailerGroup, ProductSourcingSearchResponse,
     ProductSourcingUploadResponse, ProductSourcingFlatRow, ProductSourcingAllResponse,
     TariffUploadResponse, HsCodeUpdateRequest, HsCodeUpdateResponse, HsCodeUploadResponse,
+    CostCoverageRow, CostCoverageResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
@@ -2199,6 +2200,69 @@ async def _attach_cost_estimates(db: AsyncSession, rows: list[dict]) -> None:
             float(row["price_usd"]) if row.get("price_usd") is not None else None,
             tariff,
         )
+
+
+@app.get("/api/product-sourcing/cost-coverage", response_model=CostCoverageResponse)
+async def get_cost_coverage(db: AsyncSession = Depends(get_db)):
+    """hs_code가 채워진 행 전체를 훑어서 추정원가 계산이 실패한 행과 사유를 진단.
+    사유는 두 가지: hs_code_not_in_tariff_table(관세율표에 그 HS코드 자체가 없음),
+    price_missing(관세율은 찾았지만 price_usd가 없어 최종원가를 못 냄)."""
+    rows_r = await db.execute(text("""
+        SELECT id, product_type, retailer, rank, hs_code, origin, price_usd
+        FROM product_sourcing_item
+        WHERE hs_code IS NOT NULL AND hs_code <> ''
+    """))
+    rows = [dict(r) for r in rows_r.mappings().all()]
+
+    hs_codes = sorted({_normalize_hs_code(row["hs_code"]) for row in rows} - {None})
+    by_hs_code: dict[str, list[dict]] = {}
+    if hs_codes:
+        tr_r = await db.execute(text("""
+            SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
+            FROM tariff_rate
+            WHERE hs_code = ANY(:codes)
+        """), {"codes": hs_codes})
+        for tr in tr_r.mappings().all():
+            by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
+
+    fully_estimated = 0
+    tariff_resolved_no_price = 0
+    hs_code_not_found = 0
+    problems: list[CostCoverageRow] = []
+
+    for row in rows:
+        norm = _normalize_hs_code(row["hs_code"])
+        tariff_rows = by_hs_code.get(norm) if norm else None
+        origin_country = match_country_in_text(row.get("origin"))
+        tariff = resolve_tariff_rate(tariff_rows, origin_country) if tariff_rows else None
+
+        if tariff is None:
+            hs_code_not_found += 1
+            problems.append(CostCoverageRow(
+                id=row["id"], product_type=row["product_type"], retailer=row["retailer"], rank=row["rank"],
+                hs_code=row["hs_code"], origin=row["origin"], matched_country=origin_country,
+                reason="hs_code_not_in_tariff_table",
+            ))
+            continue
+
+        if row.get("price_usd") is None:
+            tariff_resolved_no_price += 1
+            problems.append(CostCoverageRow(
+                id=row["id"], product_type=row["product_type"], retailer=row["retailer"], rank=row["rank"],
+                hs_code=row["hs_code"], origin=row["origin"], matched_country=origin_country,
+                reason="price_missing",
+            ))
+            continue
+
+        fully_estimated += 1
+
+    return CostCoverageResponse(
+        total_with_hs_code=len(rows),
+        fully_estimated=fully_estimated,
+        tariff_resolved_no_price=tariff_resolved_no_price,
+        hs_code_not_found=hs_code_not_found,
+        problem_rows=problems[:300],
+    )
 
 
 @app.get("/api/product-sourcing/image/{item_id}")
