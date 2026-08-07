@@ -3832,6 +3832,15 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
 // 완벽히 3요소를 다 만족하는 제품이 없어도 점수 기반이라 가장 근접한 제품이 항상 선택된다.
 const RISK_KEYS = ["recall_status", "quality_label_status", "legal_risk_status"];
 
+// 병행수입 상태의 상대적 우선순위: 가능(O) > 수입이력 없음(리스크 확인된 바 없음) > 불가/미확인.
+// "수입이력 없음"은 "X(불가 확정)"보다 나은 상태이므로 동점 처리하지 않고 중간 점수를 준다.
+function parallelImportScore(value) {
+  const v = String(value || "").trim();
+  if (v === "O") return 2;
+  if (v === "수입이력 없음") return 1;
+  return 0; // X, 확인필요, 정보없음 등
+}
+
 function scoreProductGroup(rows) {
   // 대표 행: 이온몰(순위 없음)보다 판매 순위가 매겨진 유통사 중 순위가 가장 높은 행을 우선.
   const rep = [...rows].sort((a, b) => {
@@ -3841,9 +3850,9 @@ function scoreProductGroup(rows) {
   })[0];
   const coverage = new Set(rows.map(r => r.retailer));
   const riskPassCount = RISK_KEYS.filter(k => String(rep[k] || "").trim() === "통과").length;
-  const parallelOk = String(rep.parallel_import || "").trim() === "O";
-  const score = riskPassCount * 1000 + coverage.size * 10 + (parallelOk ? 1 : 0);
-  return { rep, coverage, riskPassCount, parallelOk, score };
+  const parallelScore = parallelImportScore(rep.parallel_import);
+  const score = riskPassCount * 1000 + coverage.size * 10 + parallelScore;
+  return { rep, coverage, riskPassCount, parallelScore, score };
 }
 
 // 품목(product_type)별 최고 점수 제품을 계산. 현재 필터/페이지와 무관하게 전체 allRows
@@ -3872,23 +3881,31 @@ function useProductTypeRecommendations(allRows) {
   }, [allRows]);
 }
 
+function parallelImportLabel(value) {
+  const v = String(value || "").trim();
+  if (v === "O") return "가능";
+  if (v === "수입이력 없음") return "수입이력 없음";
+  if (v === "X") return "불가";
+  return "미확인";
+}
+
 function ProductTypeRecommendationCard({ productType, rec }) {
   if (!rec) return null;
-  const { rep, coverage, riskPassCount, parallelOk } = rec;
-  const fullyQualified = riskPassCount === 3 && parallelOk && coverage.size >= 3;
+  const { rep, coverage, riskPassCount, parallelScore } = rec;
+  const fullyQualified = riskPassCount === 3 && parallelScore === 2 && coverage.size >= 3;
   return (
     <tr>
-      <td colSpan={12} style={{ padding: 0, border: "none" }}>
+      <td colSpan={12} style={{ padding: 0, border: "none", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
         <div style={{ margin: "10px 0", padding: "12px 14px", background: "#f4f8ff", border: "1px solid #d6e4ff", borderRadius: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontWeight: 600, fontSize: 13, color: "#1a3a6b" }}>
             ✨ '{productType}' 추천 상품
           </div>
-          <div style={{ fontSize: 13, color: "#1a1a2e", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 13, color: "#1a1a2e", display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
             <RetailerCoverageBadges coverage={coverage} />
-            <span>
+            <span style={{ whiteSpace: "normal", wordBreak: "break-word", flex: "1 1 320px", minWidth: 0 }}>
               <b>{rep.brand_kr || rep.brand_en || "-"}</b>
               {rep.product_name_en ? ` — ${rep.product_name_en}` : ""} 을(를) 추천합니다.
-              {" "}유통사 <b>{coverage.size}/4곳</b>에 등록되어 있고, 병행수입 <b>{parallelOk ? "가능" : "불가/미확인"}</b>,
+              {" "}유통사 <b>{coverage.size}/4곳</b>에 등록되어 있고, 병행수입 <b>{parallelImportLabel(rep.parallel_import)}</b>,
               {" "}리스크 <b>{riskPassCount}/3개</b> 통과했습니다.
             </span>
           </div>
