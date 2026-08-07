@@ -6,12 +6,19 @@ tariff_rate_importer.py — 관세청_품목번호별 관세율표(data.go.kr) E
 
 파일에 시트가 여러 개(예: '1.1', '2.12') 있는데 실제로 내용이 거의 동일한
 버전/차수 복사본이다 — 처음 발견되는 형식 일치 시트 하나만 사용하고
-나머지는 건너뛴다 (전부 합쳐서 파싱하면 메모리/처리량이 불필요하게
-두 배가 되고, Render 무료 인스턴스에서 이게 OOM으로 프로세스가 죽는
-원인이었다 — 2026-08 확인됨). 매번 전체 재적재(TRUNCATE 후 INSERT) 방식 —
-관세율은 개정되면 옛 값이 남아있으면 안 되므로.
+나머지는 건너뛴다 (전부 합쳐서 파싱하면 처리량이 불필요하게 두 배가 됨).
+매번 전체 재적재(TRUNCATE 후 INSERT) 방식 — 관세율은 개정되면 옛 값이
+남아있으면 안 되므로.
+
+중요: openpyxl로 38만 행을 파싱하는 건 완전히 동기적(sync)인 CPU 작업이라,
+이걸 그냥 async 함수 안에서 돌리면 그 몇 초~몇십 초 동안 이벤트 루프가
+막혀서 서버가 Render의 health check(5초 타임아웃)에 응답을 못 하고
+"unhealthy"로 판정돼 강제 재시작당한다 (2026-08 실제로 확인된 원인 —
+OOM이 아니었음). 그래서 파싱 부분만 asyncio.to_thread로 별도 스레드에
+돌려서 메인 이벤트 루프가 막히지 않게 한다.
 """
 from __future__ import annotations
+import asyncio
 import re
 from functools import lru_cache
 from io import BytesIO
@@ -19,8 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 _EXPECTED_HEADER_PREFIX = ("품목번호", "관세율구분", "관세율")
-# 배치당 파라미터 개수(행당 6개)와 한 배치 SQL 문 크기를 작게 유지해서
-# 메모리 스파이크를 줄인다 — 5000행/배치에서 OOM으로 프로세스가 죽는 걸 확인함.
+# 배치를 작게 유지하면 배치 사이 await 지점이 자주 생겨 이벤트 루프가
+# health check 등 다른 요청을 처리할 기회가 늘어난다.
 _BATCH_SIZE = 1000
 
 
@@ -48,7 +55,9 @@ def _parse_int(raw) -> int | None:
         return None
 
 
-async def import_tariff_rates(content: bytes, db: AsyncSession) -> dict:
+def _parse_tariff_records(content: bytes) -> list[dict]:
+    """동기(sync) 파싱 함수 — asyncio.to_thread로 별도 스레드에서 호출된다.
+    이벤트 루프를 막지 않으려고 DB 작업과 분리해뒀다."""
     openpyxl = _openpyxl()
     wb = openpyxl.load_workbook(BytesIO(content), read_only=True)
 
@@ -86,20 +95,23 @@ async def import_tariff_rates(content: bytes, db: AsyncSession) -> dict:
                 "country_group": country_group, "eff_from": eff_from, "eff_to": eff_to,
             }
 
+    return list(dedup.values())
+
+
+async def import_tariff_rates(content: bytes, db: AsyncSession) -> dict:
+    records = await asyncio.to_thread(_parse_tariff_records, content)
+
     await db.execute(text("TRUNCATE TABLE tariff_rate"))
     await db.commit()
 
     # db.execute(text(...), [dict, dict, ...]) 형태(executemany)는 asyncpg에서
-    # 행마다 별도 왕복이 일어나 38만 행 기준 왕복만 38만 번 — Render 프록시
-    # 타임아웃에 걸려 요청이 끊겼다. 배치당 하나의 다중 VALUES INSERT로
-    # 묶어서 왕복 횟수를 (전체 행수 / _BATCH_SIZE) 번으로 줄인다.
-    # 배치마다 즉시 commit해서 전체 트랜잭션을 한 번에 들고 있지 않게 한다 —
-    # 38만 행을 커밋 없이 하나의 트랜잭션으로 들고 있는 게 Render 무료
-    # 인스턴스에서 OOM으로 프로세스가 죽는 원인이었다.
+    # 행마다 별도 왕복이 일어나 38만 행 기준 왕복만 38만 번 — 배치당 하나의
+    # 다중 VALUES INSERT로 묶어서 왕복 횟수를 줄인다. 배치마다 즉시 commit해서
+    # 전체를 하나의 긴 트랜잭션으로 들고 있지 않게 한다. db.execute/commit은
+    # 비동기 I/O라 배치 사이사이에 이벤트 루프가 다른 요청(health check 등)을
+    # 처리할 틈이 생긴다.
     total_inserted = 0
     hs_codes_seen: set[str] = set()
-    records = list(dedup.values())
-    dedup.clear()  # 더 이상 필요 없는 원본 dict는 바로 해제
     for i in range(0, len(records), _BATCH_SIZE):
         chunk = records[i:i + _BATCH_SIZE]
         values_sql = []
