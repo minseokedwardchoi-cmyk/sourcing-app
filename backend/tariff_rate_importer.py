@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 _EXPECTED_HEADER_PREFIX = ("품목번호", "관세율구분", "관세율")
-_BATCH_SIZE = 2000
+_BATCH_SIZE = 5000  # 행당 파라미터 6개 → 배치당 3만개, Postgres 파라미터 상한(65535) 대비 여유
 
 
 @lru_cache(maxsize=1)
@@ -80,13 +80,28 @@ async def import_tariff_rates(content: bytes, db: AsyncSession) -> dict:
 
     await db.execute(text("TRUNCATE TABLE tariff_rate"))
 
+    # db.execute(text(...), [dict, dict, ...]) 형태(executemany)는 asyncpg에서
+    # 행마다 별도 왕복이 일어나 38만 행 기준 왕복만 38만 번 — Render 프록시
+    # 타임아웃에 걸려 요청이 끊겼다. 배치당 하나의 다중 VALUES INSERT로
+    # 묶어서 왕복 횟수를 (전체 행수 / _BATCH_SIZE) 번으로 줄인다.
     records = list(dedup.values())
     for i in range(0, len(records), _BATCH_SIZE):
         chunk = records[i:i + _BATCH_SIZE]
-        await db.execute(text("""
+        values_sql = []
+        params: dict = {}
+        for j, rec in enumerate(chunk):
+            values_sql.append(f"(:hs_code_{j}, :rate_type_{j}, :rate_pct_{j}, :country_group_{j}, :eff_from_{j}, :eff_to_{j})")
+            params[f"hs_code_{j}"] = rec["hs_code"]
+            params[f"rate_type_{j}"] = rec["rate_type"]
+            params[f"rate_pct_{j}"] = rec["rate_pct"]
+            params[f"country_group_{j}"] = rec["country_group"]
+            params[f"eff_from_{j}"] = rec["eff_from"]
+            params[f"eff_to_{j}"] = rec["eff_to"]
+
+        await db.execute(text(f"""
             INSERT INTO tariff_rate (hs_code, rate_type, rate_pct, applies_country_group, effective_from, effective_to)
-            VALUES (:hs_code, :rate_type, :rate_pct, :country_group, :eff_from, :eff_to)
-        """), chunk)
+            VALUES {", ".join(values_sql)}
+        """), params)
 
     await db.commit()
     return {
