@@ -370,6 +370,20 @@ export function fetchProductSourcingAll() {
   return request("/api/product-sourcing/all");
 }
 
+/** 품목유형 단위 HS코드 지정/수정 (같은 품목유형의 전체 행에 일괄 적용) */
+export async function updateProductSourcingHsCode(productType, hsCode) {
+  const res = await fetch(`${BASE_URL}/api/product-sourcing/hs-code`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ product_type: productType, hs_code: hsCode || null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "HS코드 저장 실패");
+  }
+  return res.json();
+}
+
 /** 원본 엑셀(유형별카드) 형식 다운로드 URL — 사진 포함 .xlsx */
 export function getProductSourcingExportUrl() {
   return `${BASE_URL}/api/product-sourcing/export-original`;

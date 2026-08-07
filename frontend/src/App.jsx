@@ -14,6 +14,7 @@ import {
   fetchItemCountries,
   fetchFactoryView, fetchFactoryViewMonthly,
   fetchProductSourcingAll,
+  updateProductSourcingHsCode,
   getProductSourcingExportUrl,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
@@ -3704,6 +3705,63 @@ function ClampCell({ children, title }) {
   );
 }
 
+function EstimatedCostCell({ row }) {
+  if (!row.hs_code) {
+    return <span style={{color:"#c2c8d1"}} title="HS코드 미지정 — 지정되면 자동 계산됨">-</span>;
+  }
+  if (row.estimated_landed_cost_krw == null) {
+    return <span style={{color:"#c2c8d1"}} title="해당 HS코드/원산지에 대한 관세율을 찾지 못했습니다 (관세율표 미업로드 또는 원산지 미인식)">세율없음</span>;
+  }
+  return (
+    <span title={row.tariff_basis || ""}>
+      {Math.round(row.estimated_landed_cost_krw).toLocaleString()}원
+    </span>
+  );
+}
+
+function HsCodeCell({ row }) {
+  const [value, setValue] = useState(row.hs_code || "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setValue(row.hs_code || ""); }, [row.hs_code]);
+
+  const save = async () => {
+    const next = value.trim();
+    if (next === (row.hs_code || "")) return;
+    setSaving(true);
+    try {
+      await updateProductSourcingHsCode(row.product_type, next);
+    } catch (e) {
+      alert(e.message || "HS코드 저장 실패");
+      setValue(row.hs_code || "");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const needsReview = row.hs_code_confidence && row.hs_code_confidence !== "high";
+
+  return (
+    <div style={{display:"flex", flexDirection:"column", gap:2}}>
+      <input
+        type="text"
+        value={value}
+        placeholder="미지정"
+        disabled={saving}
+        onClick={e => e.stopPropagation()}
+        onChange={e => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+        style={{width:88, fontSize:12, padding:"3px 5px", border:"1px solid #e5e7eb", borderRadius:4}}
+      />
+      {needsReview && (
+        <span style={{fontSize:10, color:"#b45309"}} title={`HS코드 추정 신뢰도: ${row.hs_code_confidence} — 관세사/원본 확인 권장`}>
+          (검토 필요)
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isProductFirst = true, accentIndex = 0, coverage = null }) {
   const [expanded, setExpanded] = useState(false);
   const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
@@ -3750,10 +3808,12 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
         </td>
         <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{row.parallel_import || "정보없음"}</span></td>
         <td><ProductSourcingRiskCell row={row}/></td>
+        <td onClick={e=>e.stopPropagation()}><HsCodeCell row={row}/></td>
+        <td style={{whiteSpace:"nowrap"}}><EstimatedCostCell row={row}/></td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={12} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+          <td colSpan={14} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
             <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
             <div style={{marginBottom: importerVerdictLines(row).length ? 4 : 0}}><b>비고:</b> {row.notes || "특이사항 없음"}</div>
             {importerVerdictLines(row).map((line, i) => (
@@ -3763,6 +3823,100 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
         </tr>
       )}
     </>
+  );
+}
+
+// 품목(product_type) 단위 추천: 같은 product_group_key로 묶인 유통사 리스팅들 중에서
+// (1) 리스크 3요소(recall/quality/legal) 통과 개수 → (2) 유통사 커버리지(최대 4곳) →
+// (3) 병행수입 가능여부 순으로 우선순위를 매겨 가장 점수가 높은 제품 하나를 고른다.
+// 완벽히 3요소를 다 만족하는 제품이 없어도 점수 기반이라 가장 근접한 제품이 항상 선택된다.
+const RISK_KEYS = ["recall_status", "quality_label_status", "legal_risk_status"];
+
+// 병행수입 상태의 상대적 우선순위: 가능(O) > 수입이력 없음(리스크 확인된 바 없음) > 불가/미확인.
+// "수입이력 없음"은 "X(불가 확정)"보다 나은 상태이므로 동점 처리하지 않고 중간 점수를 준다.
+function parallelImportScore(value) {
+  const v = String(value || "").trim();
+  if (v === "O") return 2;
+  if (v === "수입이력 없음") return 1;
+  return 0; // X, 확인필요, 정보없음 등
+}
+
+function scoreProductGroup(rows) {
+  // 대표 행: 이온몰(순위 없음)보다 판매 순위가 매겨진 유통사 중 순위가 가장 높은 행을 우선.
+  const rep = [...rows].sort((a, b) => {
+    const ar = a.retailer === "aeon" ? 999 : (a.rank ?? 999);
+    const br = b.retailer === "aeon" ? 999 : (b.rank ?? 999);
+    return ar - br;
+  })[0];
+  const coverage = new Set(rows.map(r => r.retailer));
+  const riskPassCount = RISK_KEYS.filter(k => String(rep[k] || "").trim() === "통과").length;
+  const parallelScore = parallelImportScore(rep.parallel_import);
+  const score = riskPassCount * 1000 + coverage.size * 10 + parallelScore;
+  return { rep, coverage, riskPassCount, parallelScore, score };
+}
+
+// 품목(product_type)별 최고 점수 제품을 계산. 현재 필터/페이지와 무관하게 전체 allRows
+// 기준으로 계산해야 "이 품목 전체에서" 가장 좋은 제품을 정확히 고를 수 있다.
+function useProductTypeRecommendations(allRows) {
+  return useMemo(() => {
+    const map = new Map();
+    if (!allRows) return map;
+    const byType = new Map();
+    for (const r of allRows) {
+      if (!r.product_group_key) continue;
+      if (!byType.has(r.product_type)) byType.set(r.product_type, new Map());
+      const groups = byType.get(r.product_type);
+      if (!groups.has(r.product_group_key)) groups.set(r.product_group_key, []);
+      groups.get(r.product_group_key).push(r);
+    }
+    for (const [type, groups] of byType) {
+      let best = null;
+      for (const rows of groups.values()) {
+        const scored = scoreProductGroup(rows);
+        if (!best || scored.score > best.score) best = scored;
+      }
+      if (best) map.set(type, best);
+    }
+    return map;
+  }, [allRows]);
+}
+
+function parallelImportLabel(value) {
+  const v = String(value || "").trim();
+  if (v === "O") return "가능";
+  if (v === "수입이력 없음") return "수입이력 없음";
+  if (v === "X") return "불가";
+  return "미확인";
+}
+
+function ProductTypeRecommendationCard({ productType, rec }) {
+  if (!rec) return null;
+  const { rep, coverage, riskPassCount, parallelScore } = rec;
+  const fullyQualified = riskPassCount === 3 && parallelScore === 2 && coverage.size >= 3;
+  return (
+    <tr>
+      <td colSpan={12} style={{ padding: 0, border: "none", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
+        <div style={{ margin: "10px 0", padding: "12px 14px", background: "#f4f8ff", border: "1px solid #d6e4ff", borderRadius: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontWeight: 600, fontSize: 13, color: "#1a3a6b" }}>
+            ✨ '{productType}' 추천 상품
+          </div>
+          <div style={{ fontSize: 13, color: "#1a1a2e", display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+            <RetailerCoverageBadges coverage={coverage} />
+            <span style={{ whiteSpace: "normal", wordBreak: "break-word", flex: "1 1 320px", minWidth: 0 }}>
+              <b>{rep.brand_kr || rep.brand_en || "-"}</b>
+              {rep.product_name_en ? ` — ${rep.product_name_en}` : ""} 을(를) 추천합니다.
+              {" "}유통사 <b>{coverage.size}/4곳</b>에 등록되어 있고, 병행수입 <b>{parallelImportLabel(rep.parallel_import)}</b>,
+              {" "}리스크 <b>{riskPassCount}/3개</b> 통과했습니다.
+            </span>
+          </div>
+          {!fullyQualified && (
+            <div style={{ fontSize: 11.5, color: "#6b7280", marginTop: 4 }}>
+              * 유통사 3곳 이상 등록 + 병행수입 가능 + 리스크 3요소 모두 통과하는 제품이 없어, 가장 근접한 제품을 추천했습니다.
+            </div>
+          )}
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -3885,9 +4039,13 @@ function ProductSourcingPage({ navigate }) {
       // 서로 다른 브랜드의 인접 제품끼리도 색이 겹치지 않는다(위아래 구분 보장).
       if (e.isProductFirst) productIndexGlobal++;
       e.accentIndex = productIndexGlobal;
+      // 품목(product_type)이 바뀌는 첫 행 위에 추천 요약 카드를 띄운다.
+      e.isTypeFirst = i === 0 || entries[i-1].row.product_type !== e.row.product_type;
     });
     return entries;
   }, [pageRows]);
+
+  const productTypeRecommendations = useProductTypeRecommendations(allRows);
 
   // 제품 그룹별 유통사 커버리지(아마존/월마트/샘스클럽/이온몰 중 몇 곳에 있는지).
   // 페이지네이션/필터와 무관하게 전체 allRows 기준으로 계산해야 정확하다.
@@ -3952,7 +4110,7 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1585}}>
+              <table style={{minWidth:1795}}>
                 <thead>
                   <tr>
                     <th style={{width:60}}>
@@ -4017,21 +4175,30 @@ function ProductSourcingPage({ navigate }) {
                         <RiskFilter activeKeys={colFilters.risk_keys||null} onApply={keys=>setColFilters(p=>({...p,risk_keys:keys}))}/>
                       </div>
                     </th>
+                    <th style={{width:100}} title="HS코드 (품목분류) — 지정하면 아래 추정원가가 자동 계산됩니다">HS코드</th>
+                    <th style={{width:110}} title="관세율 자동조회 기반 추정 착지원가 (가정치 기반 추정값, 실측 아님)">추정원가</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageRowsWithGroups.length === 0
-                    ? <tr><td colSpan={12} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
+                    ? <tr><td colSpan={14} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
                     : pageRowsWithGroups.map((e, i) => (
-                        <ProductSourcingTableRow
-                          key={`${e.row.product_type}-${e.row.retailer}-${e.row.rank}-${i}`}
-                          row={e.row}
-                          isBrandFirst={e.isBrandFirst}
-                          bandIndex={e.bandIndex}
-                          isProductFirst={e.isProductFirst}
-                          accentIndex={e.accentIndex}
-                          coverage={e.row.product_group_key ? productCoverageMap.get(e.row.product_group_key) : null}
-                        />
+                        <React.Fragment key={`${e.row.product_type}-${e.row.retailer}-${e.row.rank}-${i}`}>
+                          {e.isTypeFirst && (
+                            <ProductTypeRecommendationCard
+                              productType={e.row.product_type}
+                              rec={productTypeRecommendations.get(e.row.product_type)}
+                            />
+                          )}
+                          <ProductSourcingTableRow
+                            row={e.row}
+                            isBrandFirst={e.isBrandFirst}
+                            bandIndex={e.bandIndex}
+                            isProductFirst={e.isProductFirst}
+                            accentIndex={e.accentIndex}
+                            coverage={e.row.product_group_key ? productCoverageMap.get(e.row.product_group_key) : null}
+                          />
+                        </React.Fragment>
                       ))
                   }
                 </tbody>

@@ -3,7 +3,7 @@ schemas.py — API 요청/응답 스키마 (Pydantic v2)
 """
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 from datetime import date
 
 
@@ -237,6 +237,11 @@ class ProductSourcingItemRow(BaseModel):
     url:                   Optional[str]   = Field(None, description="상품 페이지 URL")
     image_url:              Optional[str]   = Field(None, description="상품 이미지 URL")
     verified_flag:         Optional[str]   = Field(None, description="실측여부")
+    hs_code:               Optional[str]   = Field(None, description="HS코드 (품목분류)")
+    hs_code_confidence:    Optional[str]   = Field(None, description="HS코드 추정 신뢰도 (high/medium/very_low 등)")
+    tariff_rate_pct:       Optional[float] = Field(None, description="적용 관세율(%) — hs_code+원산지 기준 자동 조회")
+    tariff_basis:          Optional[str]   = Field(None, description="적용 세율 근거 (예: 'FTA 협정세율(FEU1) 0%')")
+    estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님")
 
 
 class ProductSourcingRetailerGroup(BaseModel):
@@ -283,10 +288,47 @@ class ProductSourcingFlatRow(BaseModel):
     image_url:              Optional[str]   = Field(None)
     brand_group_key:        Optional[str]   = Field(None, description="브랜드 그룹핑 키 (프론트 rowspan/배경밴딩용)")
     product_group_key:      Optional[str]   = Field(None, description="동일 제품 그룹핑 키 (프론트 구분선용)")
+    hs_code:                 Optional[str]   = Field(None, description="HS코드 (품목분류)")
+    hs_code_confidence:      Optional[str]   = Field(None, description="HS코드 추정 신뢰도 (high/medium/very_low 등)")
+    tariff_rate_pct:         Optional[float] = Field(None, description="적용 관세율(%) — hs_code+원산지 기준 자동 조회")
+    tariff_basis:            Optional[str]   = Field(None, description="적용 세율 근거 (예: 'FTA 협정세율(FEU1) 0%')")
+    estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님")
 
 
 class ProductSourcingAllResponse(BaseModel):
     rows: list[ProductSourcingFlatRow] = Field(default_factory=list)
+
+
+class TariffUploadResponse(BaseModel):
+    inserted:      int = Field(..., description="적재된 관세율 행 수")
+    hs_code_count: int = Field(..., description="적재된 고유 HS코드 개수")
+
+
+class HsCodeUpdateRequest(BaseModel):
+    product_type: str = Field(..., description="HS코드를 지정할 품목유형 (정확히 일치)")
+    hs_code:      Optional[str] = Field(None, description="HS코드 (빈 값/None이면 해제)")
+
+
+class HsCodeUpdateResponse(BaseModel):
+    product_type: str
+    hs_code:      Optional[str]
+    updated_rows: int
+
+
+class HsCodeUnmatchedRow(BaseModel):
+    product_type: str
+    retailer_raw: str  = Field(..., description="원본 유통사 서브타이틀 텍스트")
+    rank:         Optional[Any] = Field(None, description="원본 순위 값 (파싱 실패 시 원본 그대로)")
+    hs_code:      str
+    reason:       str  = Field(..., description="retailer_text_parse_failed / rank_missing / rank_not_integer / no_matching_db_row")
+
+
+class HsCodeUploadResponse(BaseModel):
+    total_rows:              int = Field(..., description="파일 내 hs_code가 채워진 행 수")
+    updated:                 int = Field(..., description="실제로 DB에 반영된 행 수")
+    skipped_low_confidence:  int = Field(..., description="low/very_low 신뢰도라 의도적으로 반영 안 한 행 수")
+    skipped_unmatched:       int = Field(..., description="파싱 실패 또는 DB에 매칭되는 행이 없어 반영 못한 행 수 — 실제 확인이 필요한 케이스")
+    unmatched_samples:       list[HsCodeUnmatchedRow] = Field(default_factory=list, description="skipped_unmatched 상세 목록 (최대 200개)")
 
 
 # ─── 공장별 보기 페이지 ───────────────────────────────────────────────────────
