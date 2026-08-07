@@ -10,6 +10,7 @@ tariff_rate_importer.py — 관세청_품목번호별 관세율표(data.go.kr) E
 개정되면 옛 값이 남아있으면 안 되므로.
 """
 from __future__ import annotations
+import re
 from functools import lru_cache
 from io import BytesIO
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,7 +59,13 @@ async def import_tariff_rates(content: bytes, db: AsyncSession) -> dict:
         for r in rows:
             if not r or not r[0] or r[1] is None or r[2] is None:
                 continue
-            hs_code   = str(r[0]).strip()
+            # 상품 쪽(product_sourcing_item.hs_code)은 '2008.11-1000'처럼 점/대시가
+            # 섞인 표기라, 여기서도 숫자만 남겨 저장해둬야 main.py의
+            # _attach_cost_estimates가 인덱스를 그대로 타는 단순 등가비교로
+            # 매칭할 수 있다 (조회 시점에 함수로 정규화하면 인덱스를 못 타 느려짐).
+            hs_code   = re.sub(r"\D", "", str(r[0]).strip())
+            if not hs_code:
+                continue
             rate_type = str(r[1]).strip()
             rate_pct  = float(r[2])
             country_group = _parse_int(r[5]) if len(r) > 5 else None

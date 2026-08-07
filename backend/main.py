@@ -2169,14 +2169,18 @@ async def _attach_cost_estimates(db: AsyncSession, rows: list[dict]) -> None:
     if not hs_codes:
         return
 
+    # tariff_rate.hs_code는 import_tariff_rates()가 적재 시점에 이미 숫자만
+    # 남겨 정규화해서 저장하므로(아래 tariff_rate_importer.py), 여기서는 인덱스를
+    # 그대로 타는 단순 등가비교로 조회한다 — 컬럼에 함수를 씌우면(예: regexp_replace)
+    # ix_tariff_hs_code 인덱스를 못 타고 매 요청마다 전체 스캔이 돌아 느려진다.
     r = await db.execute(text("""
         SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
         FROM tariff_rate
-        WHERE regexp_replace(hs_code, '\\D', '', 'g') = ANY(:codes)
+        WHERE hs_code = ANY(:codes)
     """), {"codes": hs_codes})
     by_hs_code: dict[str, list[dict]] = {}
     for tr in r.mappings().all():
-        by_hs_code.setdefault(_normalize_hs_code(tr["hs_code"]), []).append(dict(tr))
+        by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
 
     for row in rows:
         hs_code = _normalize_hs_code(row.get("hs_code"))
