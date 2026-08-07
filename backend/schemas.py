@@ -3,7 +3,7 @@ schemas.py — API 요청/응답 스키마 (Pydantic v2)
 """
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 from datetime import date
 
 
@@ -315,10 +315,20 @@ class HsCodeUpdateResponse(BaseModel):
     updated_rows: int
 
 
+class HsCodeUnmatchedRow(BaseModel):
+    product_type: str
+    retailer_raw: str  = Field(..., description="원본 유통사 서브타이틀 텍스트")
+    rank:         Optional[Any] = Field(None, description="원본 순위 값 (파싱 실패 시 원본 그대로)")
+    hs_code:      str
+    reason:       str  = Field(..., description="retailer_text_parse_failed / rank_missing / rank_not_integer / no_matching_db_row")
+
+
 class HsCodeUploadResponse(BaseModel):
-    total_rows: int = Field(..., description="파일 내 hs_code가 채워진 행 수")
-    updated:    int = Field(..., description="실제로 DB에 반영된 행 수")
-    skipped:    int = Field(..., description="유형/유통사/순위가 DB와 매칭 안 돼 건너뛴 행 수")
+    total_rows:              int = Field(..., description="파일 내 hs_code가 채워진 행 수")
+    updated:                 int = Field(..., description="실제로 DB에 반영된 행 수")
+    skipped_low_confidence:  int = Field(..., description="low/very_low 신뢰도라 의도적으로 반영 안 한 행 수")
+    skipped_unmatched:       int = Field(..., description="파싱 실패 또는 DB에 매칭되는 행이 없어 반영 못한 행 수 — 실제 확인이 필요한 케이스")
+    unmatched_samples:       list[HsCodeUnmatchedRow] = Field(default_factory=list, description="skipped_unmatched 상세 목록 (최대 200개)")
 
 
 # ─── 공장별 보기 페이지 ───────────────────────────────────────────────────────
