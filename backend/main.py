@@ -266,6 +266,7 @@ async def _startup_bg():
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS product_group_key VARCHAR(200)",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS hs_code VARCHAR(20)",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS hs_code_confidence VARCHAR(20)",
+            "ALTER TABLE country_item_amount ADD COLUMN IF NOT EXISTS weight_ton NUMERIC",
         ]:
             try:
                 await conn.execute(text(col_sql))

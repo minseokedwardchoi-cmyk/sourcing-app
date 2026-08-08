@@ -215,6 +215,7 @@ class CountryItemAmount(Base):
     country      = Column(String(100), nullable=False, comment="국가명")
     item_name    = Column(String(200), nullable=False, comment="수입품목명")
     amount_usd_k = Column(Numeric,     nullable=False, comment="수입금액 (천달러)")
+    weight_ton   = Column(Numeric,     nullable=True,  comment="수입중량 (톤) — MFDS cnd=wt 응답. 평균단가($/kg) = amount_usd_k / weight_ton")
 
     __table_args__ = (
         UniqueConstraint("country", "item_name", name="uq_cia_country_item"),

@@ -129,6 +129,7 @@ class TopItem:
 class ItemAmount:
     item_name: str
     amount_usd_k: float
+    weight_ton: float | None = None
 
 
 @dataclass
@@ -239,6 +240,52 @@ async def _fetch_country_items_httpx(
     return items_by_country
 
 
+async def _fetch_country_items_weight_httpx(
+    client: httpx.AsyncClient, year: str
+) -> dict[tuple[str, str], float]:
+    """
+    같은 selectCFSBB01F050 화면을 cnd="wt"(중량 기준)로 호출해 (국가코드, 품목명) →
+    연간 수입중량(톤 추정 — 화면에 단위가 별도 표시되지 않아 amt/wt 비율로
+    역산 추정한 값. 예: 그리스 올리브유 2025년 amt=8,268천달러, wt=597 →
+    kg당 약 $13.85로 실제 도매 유통가와 근사해 톤 단위로 판단) 딕셔너리로 반환.
+    금액 조회(_fetch_country_items_httpx)와 별도 호출이 필요 — 같은 API가 cnd
+    파라미터로 amt/wt/ccnt(건수)를 나눠서 내려준다.
+    """
+    resp = await client.post(
+        _ITEM_REPORT_URL,
+        json={"dma_Search": {
+            "stdrYear": year,
+            "itmLclsCd": "", "itmLclsCdList": "",
+            "itmMclsCd": "", "itmMclsCdList": "",
+            "itmSclsCd": "", "itmSclsCdList": "", "itmSclsNm": "",
+            "cnd": "wt",
+            "columnInfo": "ntncd,ntnnm,itmLclsCd,itmLclsNm,itmMclsCd,itmMclsNm,"
+                           "itmSclsCd,itmSclsNm,tot,jan,feb,mar,apr,may,jun,jul,aug,sep,oct,nov,dec",
+            "ntncd": "", "ntncdList": "",
+            "mberNo": "", "transferYn": "",
+        }},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    rows = data.get("dlt_DataList") or []
+
+    weight_by_key: dict[tuple[str, str], float] = {}
+    for r in rows:
+        code = str(r.get("ntncd") or "").strip()
+        if not code:
+            continue
+        if str(r.get("itmLclsCd")) == "0":
+            continue
+        item_name = r.get("itmSclsNm")
+        if not item_name or item_name == "소계":
+            continue
+        weight_by_key[(code, str(item_name).strip())] = float(r.get("tot") or 0)
+
+    log.info("품목별 수입중량 수집 (httpx): %d건", len(weight_by_key))
+    return weight_by_key
+
+
 def _top_items_from_all(
     all_items: dict[str, list[ItemAmount]], top_n: int = 10
 ) -> dict[str, list[TopItem]]:
@@ -281,6 +328,15 @@ async def fetch_all_stats(year: str | None = None) -> FetchResult:
         except Exception as e:
             log.warning("품목별 수입현황 수집 실패: %s", e)
             result.errors.append(f"품목 수집 실패: {e}")
+
+        try:
+            weight_by_key = await _fetch_country_items_weight_httpx(client, year)
+            for code, items in result.all_items.items():
+                for item in items:
+                    item.weight_ton = weight_by_key.get((code, item.item_name))
+        except Exception as e:
+            log.warning("품목별 수입중량 수집 실패 (금액 데이터는 유지): %s", e)
+            result.errors.append(f"중량 수집 실패: {e}")
 
     return result
 
@@ -329,13 +385,16 @@ async def upsert_stats_to_db(result: FetchResult, conn) -> dict:
         ko = COUNTRY_CODE_TO_KO.get(code, code)
         for item in items:
             await conn.execute(text("""
-                INSERT INTO country_item_amount (country, item_name, amount_usd_k)
-                VALUES (:country, :item_name, :amount)
-                ON CONFLICT (country, item_name) DO UPDATE SET amount_usd_k = EXCLUDED.amount_usd_k
+                INSERT INTO country_item_amount (country, item_name, amount_usd_k, weight_ton)
+                VALUES (:country, :item_name, :amount, :weight)
+                ON CONFLICT (country, item_name) DO UPDATE SET
+                    amount_usd_k = EXCLUDED.amount_usd_k,
+                    weight_ton   = EXCLUDED.weight_ton
             """), {
                 "country":   normalize_country_name(ko),
                 "item_name": item.item_name,
                 "amount":    item.amount_usd_k,
+                "weight":    item.weight_ton,
             })
             updated_item_amounts += 1
 

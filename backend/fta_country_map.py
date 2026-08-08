@@ -104,3 +104,23 @@ def match_country_in_text(origin_text: str | None) -> str | None:
         if country in origin_text:
             return country
     return None
+
+
+def match_all_countries_in_text(origin_text: str | None) -> list[str]:
+    """match_country_in_text()와 같은 텍스트지만, "다국적 블렌드(이탈리아·그리스·
+    스페인 등)"처럼 국가명이 여러 개 들어있는 origin을 위해 매칭되는 국가를
+    전부(중복 없이, 텍스트에 등장하는 순서대로) 반환한다.
+    이 앱의 FTA 코드가 커버하는 국가명(_KNOWN_COUNTRIES_BY_LEN)만 대상이라, MFDS
+    통계에는 있지만 우리가 FTA 매핑을 안 해둔 국가는 여기서 못 찾을 수 있다."""
+    if not origin_text:
+        return []
+    found: list[str] = []
+    seen: set[str] = set()
+    for country in _KNOWN_COUNTRIES_BY_LEN:
+        if country in origin_text and country not in seen:
+            found.append(country)
+            seen.add(country)
+    # 텍스트에 등장하는 위치 순서로 정렬 (블렌드 문구에서 언급 순서가 보통
+    # 비중 순서와 어느 정도 상관관계가 있어, 동률 처리 시 참고가 됨)
+    found.sort(key=lambda c: origin_text.find(c))
+    return found
