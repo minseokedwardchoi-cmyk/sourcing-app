@@ -20,6 +20,8 @@ UNCERTAIN_PRODUCT_TYPES = {
     "MAILLE 홀그레인 머스타드",    # 서양식 홀그레인 머스타드와 한국 "겨자" 분류가 완전히 같은 제품군은 아님
     "LES COMTES DE PROVENCE 멀티베리 스프레드",  # "스프레드"가 MFDS에 없어 "잼"으로 대체
     "CAVENDISH 크리스피 스파이시",  # 정확한 제품 형태 확인 안 됨 — 감자 스낵/웨지류로 추정하고 "감자"로 매칭
+    "EMMI 이탈리안 티라미슈",      # 케이크/디저트/티라미슈 카테고리 자체가 MFDS에 없음 — 주재료인 마스카포네
+                                  # 치즈 기준으로 "치즈"에 대신 매칭(원가의 상당 부분이 치즈이긴 하나 크림/설탕/코코아 등은 미반영)
 }
 
 PRODUCT_TYPE_TO_MFDS_ITEM: dict[str, str | None] = {
@@ -72,7 +74,7 @@ PRODUCT_TYPE_TO_MFDS_ITEM: dict[str, str | None] = {
     "CP 통새우완탕": "새우",
     "CP 플레이밍 치킨 텐더": "닭고기",
     "DR.Q 과즙젤리 4종": "캔디류",
-    "EMMI 이탈리안 티라미슈": None,
+    "EMMI 이탈리안 티라미슈": "치즈",
     "EURO POMELLA 부라타치즈": "치즈",
     "GENERAL MILLS 골든그레이엄": "과자",
     "GENERAL MILLS 시나몬토스트크런치": "과자",

@@ -2,9 +2,12 @@
 cost_estimator.py — HS코드 + 원산지 국가 기준으로 관세율을 찾아 착지원가(추정)를 계산.
 
 전제와 한계 (반드시 읽을 것):
-  - 실제 매입단가(FOB, 공급사 견적가)를 이 앱이 아직 안 갖고 있다. 지금은
-    product_sourcing_item.price_usd(유통사 진열가/소비자가)를 매입원가의
-    근사치로 대신 쓴다. 실제 견적을 받으면 이 근사를 실측값으로 교체해야 한다.
+  - 매입원가(FOB) 근사치는 mfds_pricing.estimate_purchase_price_usd()가 계산해서
+    넘겨준다 — 식품안전나라(MFDS) 국가×품목 평균 수입단가($/kg) × 상품 실제
+    용량(unit 컬럼)으로 산출한 값이다. 예전에는 product_sourcing_item.price_usd
+    (유통사 진열가/소비자가)를 그대로 썼는데, 이건 미국 현지 유통마진·수수료가
+    다 얹힌 가격이라 매입원가로 쓰기엔 부적절해서(2026-08) 교체했다. 실제 공급사
+    견적을 받으면 이 근사치도 실측값으로 교체해야 한다.
   - 해상운임/보험료/통관/국내물류 비용은 실측 데이터가 없어 DEFAULT_ASSUMPTIONS의
     가정치를 쓴다. 물동량·품목마다 실제 비용은 다르므로 이 값은 나중에 실제
     포워딩/관세사 견적으로 교체 가능하도록 상수로 분리해뒀다.
@@ -71,18 +74,18 @@ def resolve_tariff_rate(
 
 
 def estimate_landed_cost_krw(
-    price_usd: float | None,
+    purchase_price_usd: float | None,
     tariff: TariffLookup | None,
     assumptions: dict | None = None,
 ) -> float | None:
-    """price_usd(구매원가 근사치) → 관세 포함 착지원가(원) 추정.
-    tariff가 없으면(HS코드 미확정 등) None을 반환 — "추정 불가"로 취급."""
-    if price_usd is None or tariff is None:
+    """purchase_price_usd(매입원가 근사치, mfds_pricing 산출값) → 관세 포함
+    착지원가(원) 추정. tariff가 없으면(HS코드 미확정 등) None을 반환 — "추정 불가"로 취급."""
+    if purchase_price_usd is None or tariff is None:
         return None
 
     a = {**DEFAULT_ASSUMPTIONS, **(assumptions or {})}
 
-    fob_krw = price_usd * a["fx_rate_krw_per_usd"]
+    fob_krw = purchase_price_usd * a["fx_rate_krw_per_usd"]
     freight_insurance = fob_krw * a["freight_insurance_ratio"]
     cif_krw = fob_krw + freight_insurance
 

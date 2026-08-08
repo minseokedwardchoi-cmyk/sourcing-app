@@ -331,13 +331,13 @@ class CostCoverageRow(BaseModel):
     hs_code:          str
     origin:           Optional[str]
     matched_country:  Optional[str] = Field(None, description="origin 텍스트에서 인식된 FTA 상대국명 (없으면 기본세율만 후보)")
-    reason:           str = Field(..., description="hs_code_not_in_tariff_table / price_missing")
+    reason:           str = Field(..., description="hs_code_not_in_tariff_table / mfds_item_not_matched / origin_country_not_resolved / mfds_weight_data_missing / unit_not_parseable")
 
 
 class CostCoverageResponse(BaseModel):
     total_with_hs_code:        int = Field(..., description="hs_code가 채워진 전체 행 수")
     fully_estimated:           int = Field(..., description="추정원가까지 정상 계산된 행 수")
-    tariff_resolved_no_price:  int = Field(..., description="관세율은 찾았지만 price_usd가 없어 최종원가를 못 낸 행 수")
+    tariff_resolved_no_price:  int = Field(..., description="관세율은 찾았지만 MFDS 매입원가 근사치를 못 구해 최종원가를 못 낸 행 수 (mfds_item_not_matched/origin_country_not_resolved/mfds_weight_data_missing/unit_not_parseable 합계)")
     hs_code_not_found:         int = Field(..., description="hs_code가 관세율표에 아예 없어 관세율 자체를 못 찾은 행 수")
     problem_rows:              list[CostCoverageRow] = Field(default_factory=list, description="문제 행 상세 (최대 300개)")
 

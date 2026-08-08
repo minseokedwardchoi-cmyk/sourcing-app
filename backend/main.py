@@ -58,7 +58,11 @@ from product_sourcing_exporter import build_workbook_skeleton, add_flat_sheet, e
 from tariff_rate_importer import import_tariff_rates
 from hs_code_importer import import_hs_codes
 from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
-from fta_country_map import match_country_in_text
+from fta_country_map import match_country_in_text, match_all_countries_in_text
+from mfds_pricing import estimate_purchase_price_usd, resolve_mfds_price
+from mfds_manual_overrides import get_mfds_item
+from mfds_item_matcher import match_product_to_mfds_item
+from unit_converter import parse_unit_to_kg
 from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, clear_ranking_caches, TOP5_RETAILERS
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
@@ -2183,11 +2187,24 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
 
     반환값: 갱신한 행 수."""
     rows_r = await db.execute(text("""
-        SELECT id, hs_code, origin, price_usd
+        SELECT id, hs_code, origin, price_usd, product_type, unit
         FROM product_sourcing_item
         WHERE hs_code IS NOT NULL AND hs_code <> ''
     """))
     rows = [dict(r) for r in rows_r.mappings().all()]
+
+    # MFDS 평균단가 조회용 룩업 테이블을 한 번에 통째로 읽어둔다(7,900행 정도라
+    # 가볍다) — price_usd(소비자가)를 매입원가로 잘못 쓰던 걸 대체하는 계산이라
+    # 행마다 따로 조회하지 않고 미리 메모리에 올려두고 순회한다.
+    item_names_r = await db.execute(text("SELECT DISTINCT item_name FROM country_item_amount"))
+    all_mfds_item_names = [r[0] for r in item_names_r.all()]
+    price_lookup_r = await db.execute(text(
+        "SELECT country, item_name, amount_usd_k, weight_ton FROM country_item_amount"
+    ))
+    mfds_price_lookup = {
+        (r["country"], r["item_name"]): (float(r["amount_usd_k"]), float(r["weight_ton"]) if r["weight_ton"] else None)
+        for r in price_lookup_r.mappings().all()
+    }
 
     # hs_code가 없어진(지워진) 행은 캐시값도 같이 비워준다.
     await db.execute(text("""
@@ -2222,8 +2239,12 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
         if tariff_rows:
             origin_country = match_country_in_text(row.get("origin"))
             tariff = resolve_tariff_rate(tariff_rows, origin_country)
+        purchase_price_usd = estimate_purchase_price_usd(
+            row.get("product_type"), row.get("origin"), row.get("unit"),
+            all_mfds_item_names, mfds_price_lookup,
+        )
         cost = estimate_landed_cost_krw(
-            float(row["price_usd"]) if row.get("price_usd") is not None else None,
+            purchase_price_usd,
             tariff,
         ) if tariff else None
         updates.append({
@@ -2270,10 +2291,13 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
 @app.get("/api/product-sourcing/cost-coverage", response_model=CostCoverageResponse)
 async def get_cost_coverage(db: AsyncSession = Depends(get_db)):
     """hs_code가 채워진 행 전체를 훑어서 추정원가 계산이 실패한 행과 사유를 진단.
-    사유는 두 가지: hs_code_not_in_tariff_table(관세율표에 그 HS코드 자체가 없음),
-    price_missing(관세율은 찾았지만 price_usd가 없어 최종원가를 못 냄)."""
+    사유: hs_code_not_in_tariff_table(관세율표에 그 HS코드 자체가 없음),
+    mfds_item_not_matched(product_type을 MFDS 소분류에 못 붙임),
+    origin_country_not_resolved(origin 텍스트에서 국가를 못 찾음),
+    mfds_weight_data_missing((국가,소분류) 조합의 수입중량 데이터가 없어 $/kg을 못 냄),
+    unit_not_parseable(unit 표기가 "36개입"처럼 중량으로 환산 불가)."""
     rows_r = await db.execute(text("""
-        SELECT id, product_type, retailer, rank, hs_code, origin, price_usd
+        SELECT id, product_type, retailer, rank, hs_code, origin, unit
         FROM product_sourcing_item
         WHERE hs_code IS NOT NULL AND hs_code <> ''
     """))
@@ -2289,6 +2313,16 @@ async def get_cost_coverage(db: AsyncSession = Depends(get_db)):
         """), {"codes": hs_codes})
         for tr in tr_r.mappings().all():
             by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
+
+    item_names_r = await db.execute(text("SELECT DISTINCT item_name FROM country_item_amount"))
+    all_mfds_item_names = [r[0] for r in item_names_r.all()]
+    price_lookup_r = await db.execute(text(
+        "SELECT country, item_name, amount_usd_k, weight_ton FROM country_item_amount"
+    ))
+    mfds_price_lookup = {
+        (r["country"], r["item_name"]): (float(r["amount_usd_k"]), float(r["weight_ton"]) if r["weight_ton"] else None)
+        for r in price_lookup_r.mappings().all()
+    }
 
     fully_estimated = 0
     tariff_resolved_no_price = 0
@@ -2310,12 +2344,30 @@ async def get_cost_coverage(db: AsyncSession = Depends(get_db)):
             ))
             continue
 
-        if row.get("price_usd") is None:
+        mfds_item = get_mfds_item(row.get("product_type")) or match_product_to_mfds_item(
+            row.get("product_type") or "", all_mfds_item_names
+        ).matched_item_name
+        if not mfds_item:
+            reason = "mfds_item_not_matched"
+        else:
+            candidates = match_all_countries_in_text(row.get("origin"))
+            if not candidates:
+                reason = "origin_country_not_resolved"
+            else:
+                lookup = resolve_mfds_price(row.get("product_type") or "", row.get("origin"), all_mfds_item_names, mfds_price_lookup)
+                if lookup is None:
+                    reason = "mfds_weight_data_missing"
+                elif parse_unit_to_kg(row.get("unit")) is None:
+                    reason = "unit_not_parseable"
+                else:
+                    reason = None
+
+        if reason:
             tariff_resolved_no_price += 1
             problems.append(CostCoverageRow(
                 id=row["id"], product_type=row["product_type"], retailer=row["retailer"], rank=row["rank"],
                 hs_code=row["hs_code"], origin=row["origin"], matched_country=origin_country,
-                reason="price_missing",
+                reason=reason,
             ))
             continue
 
