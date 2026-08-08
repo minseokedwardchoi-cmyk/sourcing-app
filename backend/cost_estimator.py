@@ -2,15 +2,19 @@
 cost_estimator.py — HS코드 + 원산지 국가 기준으로 관세율을 찾아 착지원가(추정)를 계산.
 
 전제와 한계 (반드시 읽을 것):
-  - 매입원가(FOB) 근사치는 mfds_pricing.estimate_purchase_price_usd()가 계산해서
-    넘겨준다 — 식품안전나라(MFDS) 국가×품목 평균 수입단가($/kg) × 상품 실제
-    용량(unit 컬럼)으로 산출한 값이다. 예전에는 product_sourcing_item.price_usd
-    (유통사 진열가/소비자가)를 그대로 썼는데, 이건 미국 현지 유통마진·수수료가
-    다 얹힌 가격이라 매입원가로 쓰기엔 부적절해서(2026-08) 교체했다. 실제 공급사
-    견적을 받으면 이 근사치도 실측값으로 교체해야 한다.
-  - 해상운임/보험료/통관/국내물류 비용은 실측 데이터가 없어 DEFAULT_ASSUMPTIONS의
-    가정치를 쓴다. 물동량·품목마다 실제 비용은 다르므로 이 값은 나중에 실제
-    포워딩/관세사 견적으로 교체 가능하도록 상수로 분리해뒀다.
+  - 매입원가 근사치는 mfds_pricing.estimate_purchase_price()가 계산해서 넘겨준다
+    — 식품안전나라(MFDS) 국가×품목 평균 수입단가($/kg) × 상품 실제 용량(unit
+    컬럼)으로 산출한 값이다. 예전에는 product_sourcing_item.price_usd(유통사
+    진열가/소비자가)를 그대로 썼는데, 이건 미국 현지 유통마진·수수료가 다 얹힌
+    가격이라 매입원가로 쓰기엔 부적절해서(2026-08) 교체했다.
+  - 이 MFDS 단가는 FOB(공급사 출고가)가 아니라 CIF(국제 무역통계 관행상 한국
+    도착 기준, 운임·보험 포함) 값으로 보는 게 맞다 — 그래서 여기에 해상운임/
+    보험료를 또 얹으면 이중계산이 된다(2026-08 확인, freight_insurance_ratio=0.0
+    으로 반영). CIF로 이미 들어온 값에 관세·통관수수료·국내물류만 더한다.
+    실제 공급사 견적을 받으면 이 근사치도 실측값으로 교체해야 한다.
+  - 통관/국내물류 비용은 실측 데이터가 없어 DEFAULT_ASSUMPTIONS의 가정치를
+    쓴다. 물동량·품목마다 실제 비용은 다르므로 이 값은 나중에 실제 포워딩/
+    관세사 견적으로 교체 가능하도록 상수로 분리해뒀다.
   - 부가세(10%)는 사업자 매입세액공제 대상이라 기본적으로 "원가"에 포함하지
     않는다 (INCLUDE_VAT_IN_COST=False로 필요시 켤 수 있음).
 """
@@ -22,7 +26,8 @@ from fta_country_map import get_fta_codes_for_country
 
 DEFAULT_ASSUMPTIONS = {
     "fx_rate_krw_per_usd": 1380.0,     # 환율 (원/$) — 실제 수입일 환율로 교체 필요
-    "freight_insurance_ratio": 0.10,   # 해상운임+보험료를 FOB(가정) 대비 비율로 근사
+    "freight_insurance_ratio": 0.0,    # MFDS 수입단가가 이미 CIF 기준이라 0 — 그 위에
+                                        # 또 얹으면 운임/보험 이중계산이 된다(2026-08)
     "customs_broker_fee_ratio": 0.02,  # 통관/관세사 수수료 (CIF 대비 비율로 근사)
     "domestic_logistics_ratio": 0.015, # 국내운송+보세창고료 (CIF 대비 비율로 근사)
 }

@@ -4,7 +4,7 @@ models.py — DB 테이블 정의
 실제 Excel 컬럼명이 달라질 경우 FIELD_MAP(importer.py)만 수정하면 됨.
 """
 from sqlalchemy import (
-    Column, Integer, String, Date, DateTime, Text, Index, UniqueConstraint, Numeric, LargeBinary
+    Column, Integer, String, Date, DateTime, Text, Index, UniqueConstraint, Numeric, LargeBinary, Boolean
 )
 from database import Base
 
@@ -160,7 +160,8 @@ class ProductSourcingItem(Base):
     # 참고) — 조회 경로는 이 컬럼을 그대로 읽기만 해서 응답 속도를 지킨다.
     tariff_rate_pct            = Column(Numeric,     nullable=True,  comment="적용 관세율(%) — 캐시된 계산 결과")
     tariff_basis                = Column(String(100), nullable=True,  comment="적용 세율 근거 (캐시된 계산 결과)")
-    estimated_landed_cost_krw  = Column(Numeric,     nullable=True,  comment="추정 착지원가(원) — 캐시된 계산 결과")
+    estimated_landed_cost_krw  = Column(Numeric,     nullable=True,  comment="추정 착지원가(원) — 캐시된 계산 결과. landed_cost_is_per_kg=True면 상품 1개당이 아니라 1kg당 금액")
+    landed_cost_is_per_kg      = Column(Boolean,      nullable=True,  comment="True면 estimated_landed_cost_krw가 unit 환산 실패로 1kg당 금액(원/kg)임 — 상품 1개당 총액이 아님")
 
     __table_args__ = (
         UniqueConstraint("product_type", "retailer", "rank", name="uq_psi_type_retailer_rank"),

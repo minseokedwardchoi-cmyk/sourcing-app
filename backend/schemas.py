@@ -241,7 +241,8 @@ class ProductSourcingItemRow(BaseModel):
     hs_code_confidence:    Optional[str]   = Field(None, description="HS코드 추정 신뢰도 (high/medium/very_low 등)")
     tariff_rate_pct:       Optional[float] = Field(None, description="적용 관세율(%) — hs_code+원산지 기준 자동 조회")
     tariff_basis:          Optional[str]   = Field(None, description="적용 세율 근거 (예: 'FTA 협정세율(FEU1) 0%')")
-    estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님")
+    estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님. landed_cost_is_per_kg=True면 상품 1개당이 아니라 1kg당 금액")
+    landed_cost_is_per_kg:  Optional[bool]  = Field(None, description="True면 estimated_landed_cost_krw가 unit 환산 실패로 1kg당 금액(원/kg)임 — 상품 1개당 총액이 아니니 화면에 '원/kg'으로 표시할 것")
 
 
 class ProductSourcingRetailerGroup(BaseModel):
@@ -292,7 +293,8 @@ class ProductSourcingFlatRow(BaseModel):
     hs_code_confidence:      Optional[str]   = Field(None, description="HS코드 추정 신뢰도 (high/medium/very_low 등)")
     tariff_rate_pct:         Optional[float] = Field(None, description="적용 관세율(%) — hs_code+원산지 기준 자동 조회")
     tariff_basis:            Optional[str]   = Field(None, description="적용 세율 근거 (예: 'FTA 협정세율(FEU1) 0%')")
-    estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님")
+    estimated_landed_cost_krw: Optional[float] = Field(None, description="추정 착지원가(원) — hs_code 없으면 null. 가정치 기반 추정값, 실측 아님. landed_cost_is_per_kg=True면 상품 1개당이 아니라 1kg당 금액")
+    landed_cost_is_per_kg:  Optional[bool]  = Field(None, description="True면 estimated_landed_cost_krw가 unit 환산 실패로 1kg당 금액(원/kg)임 — 상품 1개당 총액이 아니니 화면에 '원/kg'으로 표시할 것")
 
 
 class ProductSourcingAllResponse(BaseModel):
@@ -331,13 +333,13 @@ class CostCoverageRow(BaseModel):
     hs_code:          str
     origin:           Optional[str]
     matched_country:  Optional[str] = Field(None, description="origin 텍스트에서 인식된 FTA 상대국명 (없으면 기본세율만 후보)")
-    reason:           str = Field(..., description="hs_code_not_in_tariff_table / mfds_item_not_matched / origin_country_not_resolved / mfds_weight_data_missing / unit_not_parseable")
+    reason:           str = Field(..., description="hs_code_not_in_tariff_table / mfds_item_not_matched / origin_country_not_resolved / mfds_weight_data_missing")
 
 
 class CostCoverageResponse(BaseModel):
     total_with_hs_code:        int = Field(..., description="hs_code가 채워진 전체 행 수")
     fully_estimated:           int = Field(..., description="추정원가까지 정상 계산된 행 수")
-    tariff_resolved_no_price:  int = Field(..., description="관세율은 찾았지만 MFDS 매입원가 근사치를 못 구해 최종원가를 못 낸 행 수 (mfds_item_not_matched/origin_country_not_resolved/mfds_weight_data_missing/unit_not_parseable 합계)")
+    tariff_resolved_no_price:  int = Field(..., description="관세율은 찾았지만 MFDS 매입원가 근사치를 못 구해 최종원가를 못 낸 행 수 (mfds_item_not_matched/origin_country_not_resolved/mfds_weight_data_missing 합계)")
     hs_code_not_found:         int = Field(..., description="hs_code가 관세율표에 아예 없어 관세율 자체를 못 찾은 행 수")
     problem_rows:              list[CostCoverageRow] = Field(default_factory=list, description="문제 행 상세 (최대 300개)")
 

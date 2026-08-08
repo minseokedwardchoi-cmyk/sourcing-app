@@ -58,11 +58,11 @@ from product_sourcing_exporter import build_workbook_skeleton, add_flat_sheet, e
 from tariff_rate_importer import import_tariff_rates
 from hs_code_importer import import_hs_codes
 from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
-from fta_country_map import match_country_in_text, match_all_countries_in_text
-from mfds_pricing import estimate_purchase_price_usd, resolve_mfds_price
+from fta_country_map import match_country_in_text
+from country_utils import match_all_countries_in_text_broad
+from mfds_pricing import estimate_purchase_price, resolve_mfds_price
 from mfds_manual_overrides import get_mfds_item
 from mfds_item_matcher import match_product_to_mfds_item
-from unit_converter import parse_unit_to_kg
 from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, clear_ranking_caches, TOP5_RETAILERS
 from country_data import (
     COUNTRY_TOTALS_USD_K, COUNTRY_TOP_ITEMS, NATIONAL_TOTAL_AMOUNT_USD_K, get_flag,
@@ -275,6 +275,7 @@ async def _startup_bg():
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS tariff_rate_pct NUMERIC",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS tariff_basis VARCHAR(100)",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS estimated_landed_cost_krw NUMERIC",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS landed_cost_is_per_kg BOOLEAN",
             "ALTER TABLE country_item_amount ADD COLUMN IF NOT EXISTS weight_ton NUMERIC",
         ]:
             try:
@@ -2209,7 +2210,7 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
     # hs_code가 없어진(지워진) 행은 캐시값도 같이 비워준다.
     await db.execute(text("""
         UPDATE product_sourcing_item
-        SET tariff_rate_pct = NULL, tariff_basis = NULL, estimated_landed_cost_krw = NULL
+        SET tariff_rate_pct = NULL, tariff_basis = NULL, estimated_landed_cost_krw = NULL, landed_cost_is_per_kg = NULL
         WHERE (hs_code IS NULL OR hs_code = '')
           AND (tariff_rate_pct IS NOT NULL OR tariff_basis IS NOT NULL OR estimated_landed_cost_krw IS NOT NULL)
     """))
@@ -2239,12 +2240,12 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
         if tariff_rows:
             origin_country = match_country_in_text(row.get("origin"))
             tariff = resolve_tariff_rate(tariff_rows, origin_country)
-        purchase_price_usd = estimate_purchase_price_usd(
+        price_estimate = estimate_purchase_price(
             row.get("product_type"), row.get("origin"), row.get("unit"),
             all_mfds_item_names, mfds_price_lookup,
         )
         cost = estimate_landed_cost_krw(
-            purchase_price_usd,
+            price_estimate.price_usd if price_estimate else None,
             tariff,
         ) if tariff else None
         updates.append({
@@ -2252,6 +2253,7 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
             "rate_pct": tariff.rate_pct if tariff else None,
             "basis": tariff.basis_label if tariff else None,
             "cost": cost,
+            "is_per_kg": price_estimate.is_per_kg if (price_estimate and cost is not None) else None,
         })
 
     # 예전에는 배치당 (:id_0::integer, :rate_pct_0::numeric, ...), (:id_1::integer, ...)
@@ -2271,10 +2273,11 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
             UPDATE product_sourcing_item AS t
             SET tariff_rate_pct = v.rate_pct,
                 tariff_basis = v.basis,
-                estimated_landed_cost_krw = v.cost
+                estimated_landed_cost_krw = v.cost,
+                landed_cost_is_per_kg = v.is_per_kg
             FROM (
-                SELECT * FROM unnest(:ids ::integer[], :rate_pcts ::numeric[], :bases ::varchar[], :costs ::numeric[])
-                AS v(id, rate_pct, basis, cost)
+                SELECT * FROM unnest(:ids ::integer[], :rate_pcts ::numeric[], :bases ::varchar[], :costs ::numeric[], :is_per_kgs ::boolean[])
+                AS v(id, rate_pct, basis, cost, is_per_kg)
             ) AS v
             WHERE t.id = v.id
         """), {
@@ -2282,6 +2285,7 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
             "rate_pcts": [u["rate_pct"] for u in chunk],
             "bases": [u["basis"] for u in chunk],
             "costs": [u["cost"] for u in chunk],
+            "is_per_kgs": [u["is_per_kg"] for u in chunk],
         })
         await db.commit()
 
@@ -2293,9 +2297,11 @@ async def get_cost_coverage(db: AsyncSession = Depends(get_db)):
     """hs_code가 채워진 행 전체를 훑어서 추정원가 계산이 실패한 행과 사유를 진단.
     사유: hs_code_not_in_tariff_table(관세율표에 그 HS코드 자체가 없음),
     mfds_item_not_matched(product_type을 MFDS 소분류에 못 붙임),
-    origin_country_not_resolved(origin 텍스트에서 국가를 못 찾음),
-    mfds_weight_data_missing((국가,소분류) 조합의 수입중량 데이터가 없어 $/kg을 못 냄),
-    unit_not_parseable(unit 표기가 "36개입"처럼 중량으로 환산 불가)."""
+    origin_country_not_resolved(origin 텍스트에서 국가를 못 찾음 — FTA 체결국
+    한정이 아니라 MFDS가 다루는 전체 국가 기준),
+    mfds_weight_data_missing((국가,소분류) 조합의 수입중량 데이터가 없어 $/kg을 못 냄).
+    unit이 "36개입"처럼 중량으로 환산 안 되는 경우는 실패로 안 치고 1kg당
+    금액(원/kg)으로 대체하므로 여기엔 안 잡힌다."""
     rows_r = await db.execute(text("""
         SELECT id, product_type, retailer, rank, hs_code, origin, unit
         FROM product_sourcing_item
@@ -2350,17 +2356,12 @@ async def get_cost_coverage(db: AsyncSession = Depends(get_db)):
         if not mfds_item:
             reason = "mfds_item_not_matched"
         else:
-            candidates = match_all_countries_in_text(row.get("origin"))
+            candidates = match_all_countries_in_text_broad(row.get("origin"))
             if not candidates:
                 reason = "origin_country_not_resolved"
             else:
                 lookup = resolve_mfds_price(row.get("product_type") or "", row.get("origin"), all_mfds_item_names, mfds_price_lookup)
-                if lookup is None:
-                    reason = "mfds_weight_data_missing"
-                elif parse_unit_to_kg(row.get("unit")) is None:
-                    reason = "unit_not_parseable"
-                else:
-                    reason = None
+                reason = "mfds_weight_data_missing" if lookup is None else None
 
         if reason:
             tariff_resolved_no_price += 1
@@ -2418,7 +2419,7 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
                recall_status, quality_label_status, legal_risk_status, five_year_issue,
                notes, rating, review_count, url, image_url, (image_data IS NOT NULL) AS has_image_data,
                brand_group_key, product_group_key, hs_code, hs_code_confidence,
-               tariff_rate_pct, tariff_basis, estimated_landed_cost_krw,
+               tariff_rate_pct, tariff_basis, estimated_landed_cost_krw, landed_cost_is_per_kg,
                DENSE_RANK() OVER (
                    ORDER BY (SELECT MIN(id) FROM product_sourcing_item p2 WHERE p2.product_type = p.product_type)
                ) AS type_priority
@@ -2582,7 +2583,7 @@ async def search_product_sourcing(
                parallel_import, recall_status, quality_label_status, legal_risk_status,
                five_year_issue, notes, rating, review_count, url, image_url,
                (image_data IS NOT NULL) AS has_image_data, verified_flag, hs_code, hs_code_confidence,
-               tariff_rate_pct, tariff_basis, estimated_landed_cost_krw
+               tariff_rate_pct, tariff_basis, estimated_landed_cost_krw, landed_cost_is_per_kg
         FROM product_sourcing_item
         WHERE product_type = :pt
         ORDER BY retailer, rank
@@ -2634,6 +2635,7 @@ async def search_product_sourcing(
             tariff_rate_pct=row["tariff_rate_pct"],
             tariff_basis=row["tariff_basis"],
             estimated_landed_cost_krw=row["estimated_landed_cost_krw"],
+            landed_cost_is_per_kg=row["landed_cost_is_per_kg"],
         ))
 
     ordered = [groups[key] for key in _RETAILER_DISPLAY_ORDER if key in groups]

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fta_country_map import match_all_countries_in_text
+from country_utils import match_all_countries_in_text_broad
 from mfds_item_matcher import match_product_to_mfds_item, resolve_origin_country_for_item
 from mfds_manual_overrides import get_mfds_item
 from unit_converter import parse_unit_to_kg
@@ -49,7 +49,7 @@ def resolve_mfds_price(
     if not mfds_item:
         return None
 
-    candidates = match_all_countries_in_text(origin)
+    candidates = match_all_countries_in_text_broad(origin)
     if not candidates:
         return None
 
@@ -78,18 +78,28 @@ def resolve_mfds_price(
     )
 
 
-def estimate_purchase_price_usd(
+@dataclass
+class PurchasePriceEstimate:
+    price_usd: float
+    is_per_kg: bool  # True면 unit을 kg으로 못 바꿔서 "상품 1개당"이 아니라
+                      # "1kg당" 가격을 그대로 쓴 것 — 화면에 원/kg으로 표시해야 함
+
+
+def estimate_purchase_price(
     product_type: str,
     origin: str | None,
     unit_text: str | None,
     all_item_names: list[str],
     price_lookup: PriceLookupTable,
-) -> float | None:
-    """상품 1개당 매입원가 추정치(USD). 못 구하면 None ("추정 불가")."""
+) -> PurchasePriceEstimate | None:
+    """매입원가 추정치(USD). unit이 "36개입"처럼 중량으로 환산이 안 되거나
+    아예 없으면, 상품 1개당 금액 대신 1kg당 금액(is_per_kg=True)을 돌려준다 —
+    "추정 불가"로 버리기보다 단가(원/kg) 형태로라도 보여주는 쪽을 택했다.
+    MFDS 매칭/국가/중량 데이터 자체가 없으면 None ("추정 불가")."""
     lookup = resolve_mfds_price(product_type, origin, all_item_names, price_lookup)
     if lookup is None:
         return None
     unit_kg = parse_unit_to_kg(unit_text)
-    if unit_kg is None:
-        return None
-    return lookup.price_usd_per_kg * unit_kg
+    if unit_kg is not None:
+        return PurchasePriceEstimate(lookup.price_usd_per_kg * unit_kg, is_per_kg=False)
+    return PurchasePriceEstimate(lookup.price_usd_per_kg, is_per_kg=True)

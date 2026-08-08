@@ -3710,7 +3710,14 @@ function EstimatedCostCell({ row }) {
     return <span style={{color:"#c2c8d1"}} title="HS코드 미지정 — 지정되면 자동 계산됨">-</span>;
   }
   if (row.estimated_landed_cost_krw == null) {
-    return <span style={{color:"#c2c8d1"}} title="해당 HS코드/원산지에 대한 관세율을 찾지 못했습니다 (관세율표 미업로드 또는 원산지 미인식)">세율없음</span>;
+    return <span style={{color:"#c2c8d1"}} title="관세율 또는 MFDS 평균 수입단가를 찾지 못했습니다 (관세율표 미업로드, 원산지 미인식, 해당 품목 수입통계 없음 등)">추정불가</span>;
+  }
+  if (row.landed_cost_is_per_kg) {
+    return (
+      <span title={`${row.tariff_basis || ""} — 상품 용량 표기(unit)를 무게로 환산하지 못해 1kg당 금액으로 표시`}>
+        {Math.round(row.estimated_landed_cost_krw).toLocaleString()}원/kg
+      </span>
+    );
   }
   return (
     <span title={row.tariff_basis || ""}>
