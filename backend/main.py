@@ -15,6 +15,7 @@ import csv
 import io
 import json
 import math
+import re
 from calendar import monthrange
 from datetime import date
 from typing import Optional, List
@@ -47,6 +48,7 @@ from schemas import (
     ProductSourcingRetailerGroup, ProductSourcingSearchResponse,
     ProductSourcingUploadResponse, ProductSourcingFlatRow, ProductSourcingAllResponse,
     TariffUploadResponse, HsCodeUpdateRequest, HsCodeUpdateResponse, HsCodeUploadResponse,
+    CostCoverageRow, CostCoverageResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
@@ -266,6 +268,9 @@ async def _startup_bg():
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS product_group_key VARCHAR(200)",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS hs_code VARCHAR(20)",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS hs_code_confidence VARCHAR(20)",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS tariff_rate_pct NUMERIC",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS tariff_basis VARCHAR(100)",
+            "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS estimated_landed_cost_krw NUMERIC",
             "ALTER TABLE country_item_amount ADD COLUMN IF NOT EXISTS weight_ton NUMERIC",
         ]:
             try:
@@ -2063,14 +2068,16 @@ async def upload_tariff_rates(
     file: UploadFile = File(..., description="관세청_품목번호별 관세율표 Excel 파일 (data.go.kr)"),
     db: AsyncSession = Depends(get_db),
 ):
-    """관세청_품목번호별 관세율표(data.go.kr) 원본을 그대로 tariff_rate 테이블에 재적재.
-    hs_code가 채워진 품목행들의 추정원가가 다음 조회부터 자동으로 갱신된다."""
+    """관세청_품목번호별 관세율표(data.go.kr) 원본을 그대로 tariff_rate 테이블에 재적재하고,
+    hs_code가 채워진 품목행들의 추정원가 캐시를 이 자리에서 한 번에 다시 계산해둔다
+    (조회할 때마다 계산하지 않고 저장해둔 값을 읽기만 하도록 하기 위함)."""
     try:
         if not file.filename.endswith((".xlsx", ".xls")):
             raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls)만 업로드 가능합니다.")
 
         content = await file.read()
         result = await import_tariff_rates(content, db)
+        await _recompute_and_store_cost_estimates(db)
 
         print("TARIFF_RATE_UPLOAD_RESULT:", result)
         return TariffUploadResponse(**result)
@@ -2098,6 +2105,7 @@ async def upload_hs_codes(
 
         content = await file.read()
         result = await import_hs_codes(content, db)
+        await _recompute_and_store_cost_estimates(db)
 
         print("HS_CODE_UPLOAD_RESULT:", result)
         return HsCodeUploadResponse(**result)
@@ -2126,7 +2134,17 @@ async def update_product_sourcing_hs_code(
         UPDATE product_sourcing_item SET hs_code = :hs_code WHERE product_type = :pt
     """), {"hs_code": hs_code, "pt": payload.product_type})
     await db.commit()
+    await _recompute_and_store_cost_estimates(db)
     return HsCodeUpdateResponse(product_type=payload.product_type, hs_code=hs_code, updated_rows=r.rowcount)
+
+
+@app.post("/api/product-sourcing/recompute-costs")
+async def recompute_product_sourcing_costs(db: AsyncSession = Depends(get_db)):
+    """추정원가 캐시를 수동으로 재계산. 평소엔 관세율표/HS코드 업로드 시 자동으로
+    호출되므로 따로 부를 필요 없고, 계산 로직 자체를 바꾼 뒤 재배포했을 때처럼
+    입력 데이터는 그대로인데 캐시만 다시 계산하고 싶을 때 쓴다."""
+    updated = await _recompute_and_store_cost_estimates(db)
+    return {"updated": updated}
 
 
 @app.get("/api/product-sourcing/types", response_model=ProductSourcingTypesResponse)
@@ -2146,45 +2164,170 @@ def _resolve_image_url(request: Request, row_id: int, image_url: str | None, has
     return None
 
 
-async def _attach_cost_estimates(db: AsyncSession, rows: list[dict]) -> None:
-    """hs_code가 채워진 행들에 한해 관세율/추정 착지원가를 계산해 dict를 in-place로
-    채운다. hs_code가 아직 없는 행(현재 대부분)은 세 필드 모두 None으로 남는다 —
-    나중에 hs_code가 채워지면 별도 코드 변경 없이 자동으로 값이 채워진다."""
-    hs_codes = sorted({row["hs_code"] for row in rows if row.get("hs_code")})
-    for row in rows:
-        row["tariff_rate_pct"] = None
-        row["tariff_basis"] = None
-        row["estimated_landed_cost_krw"] = None
+def _normalize_hs_code(hs_code: str | None) -> str | None:
+    """HS코드 표기 통일: 상품 쪽(리서치 결과)은 '2008.11-1000'처럼 점/대시가
+    섞여 있고, 관세청 관세율표(data.go.kr) 쪽은 '2008111000'처럼 숫자만 있다.
+    비교 전에 숫자만 남겨 정규화한다."""
+    if not hs_code:
+        return None
+    digits = re.sub(r"\D", "", hs_code)
+    return digits or None
 
-    if not hs_codes:
-        return
 
-    r = await db.execute(text("""
-        SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
-        FROM tariff_rate
-        WHERE hs_code = ANY(:codes)
-    """), {"codes": hs_codes})
+async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
+    """hs_code가 채워진 모든 행의 관세율/추정 착지원가를 다시 계산해서
+    product_sourcing_item.tariff_rate_pct/tariff_basis/estimated_landed_cost_krw에
+    저장해둔다. 조회(GET /all, /search)는 이 컬럼을 그대로 읽기만 하므로
+    페이지를 열 때마다 계산이 반복되지 않는다 — 이 함수는 tariff_rate 재적재,
+    HS코드 신규 입력/일괄 업로드 시점에만 호출하면 된다.
+
+    반환값: 갱신한 행 수."""
+    rows_r = await db.execute(text("""
+        SELECT id, hs_code, origin, price_usd
+        FROM product_sourcing_item
+        WHERE hs_code IS NOT NULL AND hs_code <> ''
+    """))
+    rows = [dict(r) for r in rows_r.mappings().all()]
+
+    # hs_code가 없어진(지워진) 행은 캐시값도 같이 비워준다.
+    await db.execute(text("""
+        UPDATE product_sourcing_item
+        SET tariff_rate_pct = NULL, tariff_basis = NULL, estimated_landed_cost_krw = NULL
+        WHERE (hs_code IS NULL OR hs_code = '')
+          AND (tariff_rate_pct IS NOT NULL OR tariff_basis IS NOT NULL OR estimated_landed_cost_krw IS NOT NULL)
+    """))
+
+    if not rows:
+        await db.commit()
+        return 0
+
+    hs_codes = sorted({_normalize_hs_code(row["hs_code"]) for row in rows} - {None})
     by_hs_code: dict[str, list[dict]] = {}
-    for tr in r.mappings().all():
-        by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
+    if hs_codes:
+        # tariff_rate.hs_code는 적재 시점에 이미 숫자만 남겨 정규화해서 저장하므로
+        # (tariff_rate_importer.py) 인덱스를 그대로 타는 단순 등가비교로 조회한다.
+        tr_r = await db.execute(text("""
+            SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
+            FROM tariff_rate
+            WHERE hs_code = ANY(:codes)
+        """), {"codes": hs_codes})
+        for tr in tr_r.mappings().all():
+            by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
 
+    updates = []
     for row in rows:
-        hs_code = row.get("hs_code")
-        if not hs_code:
-            continue
-        tariff_rows = by_hs_code.get(hs_code)
-        if not tariff_rows:
-            continue
-        origin_country = match_country_in_text(row.get("origin"))
-        tariff = resolve_tariff_rate(tariff_rows, origin_country)
-        if tariff is None:
-            continue
-        row["tariff_rate_pct"] = tariff.rate_pct
-        row["tariff_basis"] = tariff.basis_label
-        row["estimated_landed_cost_krw"] = estimate_landed_cost_krw(
+        norm = _normalize_hs_code(row["hs_code"])
+        tariff_rows = by_hs_code.get(norm) if norm else None
+        tariff = None
+        if tariff_rows:
+            origin_country = match_country_in_text(row.get("origin"))
+            tariff = resolve_tariff_rate(tariff_rows, origin_country)
+        cost = estimate_landed_cost_krw(
             float(row["price_usd"]) if row.get("price_usd") is not None else None,
             tariff,
-        )
+        ) if tariff else None
+        updates.append({
+            "id": row["id"],
+            "rate_pct": tariff.rate_pct if tariff else None,
+            "basis": tariff.basis_label if tariff else None,
+            "cost": cost,
+        })
+
+    # 예전에는 배치당 (:id_0::integer, :rate_pct_0::numeric, ...), (:id_1::integer, ...)
+    # 식으로 행마다 이름 있는 파라미터를 새로 만들어 하나의 VALUES 문자열로
+    # 합쳤는데, SQLAlchemy의 text() 바인드파라미터 자동 인식이 "이름 바로 뒤에
+    # 공백 없이 Postgres 캐스트(::)가 붙으면 이름의 마지막 글자를 잘라먹는" 버그가
+    # 있어서 (":id_0::integer" → "id_"로 인식, ":id_10::integer" → "id_1"로 인식 등)
+    # 서로 다른 파라미터 이름들이 같은 잘린 이름으로 충돌했다. 그 결과 최종 SQL에
+    # 치환 안 된 리터럴 콜론이 그대로 남아 "syntax error at or near ':'"로 터졌다.
+    # unnest()로 배열을 통째로 바인딩하고 파라미터 이름과 "::" 사이에 공백을
+    # 넣어 이 버그를 피하면 배치 크기와
+    # 무관하게 파라미터가 항상 4개뿐이라 이 문제 자체가 발생할 수 없다.
+    BATCH = 5000
+    for i in range(0, len(updates), BATCH):
+        chunk = updates[i:i + BATCH]
+        await db.execute(text("""
+            UPDATE product_sourcing_item AS t
+            SET tariff_rate_pct = v.rate_pct,
+                tariff_basis = v.basis,
+                estimated_landed_cost_krw = v.cost
+            FROM (
+                SELECT * FROM unnest(:ids ::integer[], :rate_pcts ::numeric[], :bases ::varchar[], :costs ::numeric[])
+                AS v(id, rate_pct, basis, cost)
+            ) AS v
+            WHERE t.id = v.id
+        """), {
+            "ids": [u["id"] for u in chunk],
+            "rate_pcts": [u["rate_pct"] for u in chunk],
+            "bases": [u["basis"] for u in chunk],
+            "costs": [u["cost"] for u in chunk],
+        })
+        await db.commit()
+
+    return len(updates)
+
+
+@app.get("/api/product-sourcing/cost-coverage", response_model=CostCoverageResponse)
+async def get_cost_coverage(db: AsyncSession = Depends(get_db)):
+    """hs_code가 채워진 행 전체를 훑어서 추정원가 계산이 실패한 행과 사유를 진단.
+    사유는 두 가지: hs_code_not_in_tariff_table(관세율표에 그 HS코드 자체가 없음),
+    price_missing(관세율은 찾았지만 price_usd가 없어 최종원가를 못 냄)."""
+    rows_r = await db.execute(text("""
+        SELECT id, product_type, retailer, rank, hs_code, origin, price_usd
+        FROM product_sourcing_item
+        WHERE hs_code IS NOT NULL AND hs_code <> ''
+    """))
+    rows = [dict(r) for r in rows_r.mappings().all()]
+
+    hs_codes = sorted({_normalize_hs_code(row["hs_code"]) for row in rows} - {None})
+    by_hs_code: dict[str, list[dict]] = {}
+    if hs_codes:
+        tr_r = await db.execute(text("""
+            SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
+            FROM tariff_rate
+            WHERE hs_code = ANY(:codes)
+        """), {"codes": hs_codes})
+        for tr in tr_r.mappings().all():
+            by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
+
+    fully_estimated = 0
+    tariff_resolved_no_price = 0
+    hs_code_not_found = 0
+    problems: list[CostCoverageRow] = []
+
+    for row in rows:
+        norm = _normalize_hs_code(row["hs_code"])
+        tariff_rows = by_hs_code.get(norm) if norm else None
+        origin_country = match_country_in_text(row.get("origin"))
+        tariff = resolve_tariff_rate(tariff_rows, origin_country) if tariff_rows else None
+
+        if tariff is None:
+            hs_code_not_found += 1
+            problems.append(CostCoverageRow(
+                id=row["id"], product_type=row["product_type"], retailer=row["retailer"], rank=row["rank"],
+                hs_code=row["hs_code"], origin=row["origin"], matched_country=origin_country,
+                reason="hs_code_not_in_tariff_table",
+            ))
+            continue
+
+        if row.get("price_usd") is None:
+            tariff_resolved_no_price += 1
+            problems.append(CostCoverageRow(
+                id=row["id"], product_type=row["product_type"], retailer=row["retailer"], rank=row["rank"],
+                hs_code=row["hs_code"], origin=row["origin"], matched_country=origin_country,
+                reason="price_missing",
+            ))
+            continue
+
+        fully_estimated += 1
+
+    return CostCoverageResponse(
+        total_with_hs_code=len(rows),
+        fully_estimated=fully_estimated,
+        tariff_resolved_no_price=tariff_resolved_no_price,
+        hs_code_not_found=hs_code_not_found,
+        problem_rows=problems[:300],
+    )
 
 
 @app.get("/api/product-sourcing/image/{item_id}")
@@ -2223,6 +2366,7 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
                recall_status, quality_label_status, legal_risk_status, five_year_issue,
                notes, rating, review_count, url, image_url, (image_data IS NOT NULL) AS has_image_data,
                brand_group_key, product_group_key, hs_code, hs_code_confidence,
+               tariff_rate_pct, tariff_basis, estimated_landed_cost_krw,
                DENSE_RANK() OVER (
                    ORDER BY (SELECT MIN(id) FROM product_sourcing_item p2 WHERE p2.product_type = p.product_type)
                ) AS type_priority
@@ -2257,8 +2401,10 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
         row["price_usd"] = float(row["price_usd"]) if row["price_usd"] is not None else None
         row["rating"] = float(row["rating"]) if row["rating"] is not None else None
         row["image_url"] = _resolve_image_url(request, row["id"], row["image_url"], row["has_image_data"])
-
-    await _attach_cost_estimates(db, rows)
+        row["tariff_rate_pct"] = float(row["tariff_rate_pct"]) if row["tariff_rate_pct"] is not None else None
+        row["estimated_landed_cost_krw"] = (
+            float(row["estimated_landed_cost_krw"]) if row["estimated_landed_cost_krw"] is not None else None
+        )
 
     return ProductSourcingAllResponse(rows=[ProductSourcingFlatRow(**row) for row in rows])
 
@@ -2383,7 +2529,8 @@ async def search_product_sourcing(
                product_name_en, price_usd, origin, unit, key_criteria_label, key_criteria_value,
                parallel_import, recall_status, quality_label_status, legal_risk_status,
                five_year_issue, notes, rating, review_count, url, image_url,
-               (image_data IS NOT NULL) AS has_image_data, verified_flag, hs_code, hs_code_confidence
+               (image_data IS NOT NULL) AS has_image_data, verified_flag, hs_code, hs_code_confidence,
+               tariff_rate_pct, tariff_basis, estimated_landed_cost_krw
         FROM product_sourcing_item
         WHERE product_type = :pt
         ORDER BY retailer, rank
@@ -2392,8 +2539,10 @@ async def search_product_sourcing(
     for row in rows:
         row["price_usd"] = float(row["price_usd"]) if row["price_usd"] is not None else None
         row["rating"] = float(row["rating"]) if row["rating"] is not None else None
-
-    await _attach_cost_estimates(db, rows)
+        row["tariff_rate_pct"] = float(row["tariff_rate_pct"]) if row["tariff_rate_pct"] is not None else None
+        row["estimated_landed_cost_krw"] = (
+            float(row["estimated_landed_cost_krw"]) if row["estimated_landed_cost_krw"] is not None else None
+        )
 
     groups: dict[str, ProductSourcingRetailerGroup] = {}
     for row in rows:

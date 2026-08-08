@@ -155,6 +155,13 @@ class ProductSourcingItem(Base):
     hs_code               = Column(String(20),  nullable=True,  comment="HS코드 (품목분류, 10자리 — 원가 자동계산용, 리서치로 추정한 값)")
     hs_code_confidence    = Column(String(20),  nullable=True,  comment="HS코드 추정 신뢰도 (high/medium/very_low 등) — hs_code_importer.py 참고")
 
+    # 아래 3개는 매 조회마다 계산하지 않고, tariff_rate 재적재/HS코드 변경
+    # 시점에 미리 계산해서 저장해둔 캐시값이다 (cost_estimator.recompute_cost_estimates
+    # 참고) — 조회 경로는 이 컬럼을 그대로 읽기만 해서 응답 속도를 지킨다.
+    tariff_rate_pct            = Column(Numeric,     nullable=True,  comment="적용 관세율(%) — 캐시된 계산 결과")
+    tariff_basis                = Column(String(100), nullable=True,  comment="적용 세율 근거 (캐시된 계산 결과)")
+    estimated_landed_cost_krw  = Column(Numeric,     nullable=True,  comment="추정 착지원가(원) — 캐시된 계산 결과")
+
     __table_args__ = (
         UniqueConstraint("product_type", "retailer", "rank", name="uq_psi_type_retailer_rank"),
         Index("ix_psi_product_type", "product_type"),
