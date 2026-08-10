@@ -3690,13 +3690,6 @@ function parallelImportTitle(row) {
   return `${prefix}병행수입 가능여부 — 판정 근거\n${lines.join("\n")}`;
 }
 
-// 이온몰은 판매량순 랭킹이 아니라서 순위 없이 유통사명만 표기
-function retailerRankLabel(row) {
-  const meta = RETAILER_META[row.retailer] || { label: row.retailer_label || row.retailer };
-  if (row.retailer === "aeon") return meta.label;
-  return `${meta.label} ${row.rank}위`;
-}
-
 function ProductSourcingRiskCell({ row }) {
   return (
     <div style={{display:"flex", flexDirection:"column", alignItems:"flex-start", gap:3, width:"fit-content"}}>
@@ -3918,7 +3911,10 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
             {row.brand_en && <div style={{fontSize:11, color: isBrandFirst ? "#9ca3af" : "#d7dce4"}}>{row.brand_en}</div>}
           </ClampCell>
         </td>
-        <td style={{whiteSpace:"nowrap"}}>{meta.emoji} {retailerRankLabel(row)}</td>
+        <td style={{whiteSpace:"nowrap", lineHeight:1.3}}>
+          {meta.label}
+          {row.retailer !== "aeon" && <><br/>{row.rank}위</>}
+        </td>
         <td style={{width:50}}>
           {row.image_url
             ? <img src={row.image_url} alt="" style={{width:32,height:32,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
@@ -4293,7 +4289,7 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1339}}>
+              <table style={{minWidth:1304}}>
                 <thead>
                   <tr>
                     <th style={{width:117}}>
@@ -4308,9 +4304,9 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:110}}>
-                      <div className="th-inner">
-                        <span className="th-label">유통사+순위</span>
+                    <th style={{width:75, padding:"6px 8px"}}>
+                      <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
+                        <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>유통사<br/>순위</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.retailer_label||null} activeSortCol={sortBy==="rank"} activeSortDir={sortDir} localValues={retailerVals} onSort={dir=>applySort("rank",dir)} onApply={vals=>setColFilters(p=>({...p,retailer_label:vals}))}/>
                       </div>
                     </th>
