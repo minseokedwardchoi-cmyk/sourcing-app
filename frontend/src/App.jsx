@@ -654,6 +654,33 @@ function Pagination({ meta, page, setPage }) {
   );
 }
 
+// 미국식 단위(oz/fl oz/lb)를 ml·L·g·kg으로 환산해 표시한다. 원본 unit 텍스트의
+// 단위 표기(oz vs fl oz)를 그대로 신뢰한다 — 카테고리별 액체/고체 추정은 하지 않음.
+const _OZ_TO_G = 28.349523125;
+const _FLOZ_TO_ML = 29.5735295625;
+const _LB_TO_G = 453.59237;
+const _UNIT_DISPLAY_RE = /^([\d.,]+)\s*(fl\s*oz|kg|g|ml|l|oz|lb)\b/i;
+
+function formatUnitDisplay(unitText) {
+  if (!unitText) return unitText;
+  const primary = unitText.split("(")[0].trim();
+  const m = primary.match(_UNIT_DISPLAY_RE);
+  if (!m) return unitText;
+  const value = parseFloat(m[1].replace(/,/g, ""));
+  if (isNaN(value)) return unitText;
+  const unit = m[2].toLowerCase().replace(/\s+/g, " ").trim();
+
+  if (unit === "ml" || unit === "l" || unit === "fl oz") {
+    const ml = unit === "ml" ? value : unit === "l" ? value * 1000 : value * _FLOZ_TO_ML;
+    return ml >= 1000 ? `${(ml / 1000).toFixed(1)}L` : `${Math.round(ml)}ml`;
+  }
+  if (unit === "g" || unit === "kg" || unit === "oz" || unit === "lb") {
+    const g = unit === "g" ? value : unit === "kg" ? value * 1000 : unit === "oz" ? value * _OZ_TO_G : value * _LB_TO_G;
+    return g >= 1000 ? `${(g / 1000).toFixed(1)}kg` : `${Math.round(g)}g`;
+  }
+  return unitText;
+}
+
 function downloadCSV(data, filename) {
   if (!data?.length) return;
   const keys = Object.keys(data[0]);
@@ -3804,7 +3831,7 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
         </td>
         <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
         <td><ClampCell>{row.origin || "-"}</ClampCell></td>
-        <td style={{whiteSpace:"nowrap"}}>{row.unit || "-"}</td>
+        <td style={{whiteSpace:"nowrap"}}>{formatUnitDisplay(row.unit) || "-"}</td>
         <td style={{whiteSpace:"nowrap"}}>
           {row.rating != null
             ? <div style={{lineHeight:1.4}}>
@@ -4190,7 +4217,7 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.origin||null} activeSortCol={sortBy==="origin"} activeSortDir={sortDir} localValues={originVals} onSort={dir=>applySort("origin",dir)} onApply={vals=>setColFilters(p=>({...p,origin:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:70}}>단량</th>
+                    <th style={{width:95}}>단량</th>
                     <th style={{width:80}}>
                       <div className="th-inner">
                         <span className="th-label">평점</span>
