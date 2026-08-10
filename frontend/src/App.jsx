@@ -3896,10 +3896,10 @@ function productTypeDisplay(value) {
   return PRODUCT_TYPE_DISPLAY_OVERRIDES[value] || value;
 }
 
-function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isProductFirst = true, accentIndex = 0, coverage = null }) {
+function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isProductFirst = true, accentIndex = 0, coverage = null, highlight = false }) {
   const [expanded, setExpanded] = useState(false);
   const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
-  const rowBg = bandIndex % 2 === 1 ? "#f8fafc" : undefined;
+  const rowBg = highlight ? "#f4f8ff" : (bandIndex % 2 === 1 ? "#f8fafc" : undefined);
   const accentColor = PRODUCT_ACCENT_COLORS[accentIndex % PRODUCT_ACCENT_COLORS.length];
   const productNameStyle = { borderLeft: `3px solid ${accentColor}` };
   return (
@@ -4081,77 +4081,32 @@ function useProductTypeRecommendations(allRows) {
 function ProductTypeRecommendationCard({ productType, candidates }) {
   const list = candidates || [];
   return (
-    <tr>
-      <td colSpan={12} style={{ padding: 0, border: "none", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
-        <div style={{ margin: "10px 0", padding: "12px 14px", background: "#f4f8ff", border: "1px solid #d6e4ff", borderRadius: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontWeight: 600, fontSize: 13, color: "#1a3a6b" }}>
+    <>
+      <tr>
+        <td colSpan={12} style={{ padding: "8px 10px", border: "none", borderTop: "1px solid #d6e4ff", background: "#f4f8ff", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: 13, color: "#1a3a6b" }}>
             ✨ '{productType}' 추천 상품{list.length > 0 ? ` (${list.length}개)` : ""}
           </div>
-          {list.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: "#6b7280" }}>
+          {list.length === 0 && (
+            <div style={{ fontSize: 12.5, color: "#6b7280", marginTop: 4 }}>
               리스크 3요소(리콜·품질·표시·법적)를 모두 통과하고 병행수입이 가능(O) 하거나 수입이력이 없는 제품이 없어 추천할 제품이 없습니다.
             </div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ tableLayout: "auto", width: "auto", minWidth: 0, borderCollapse: "collapse", fontSize: 12.5, background: "#fff" }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>이미지</th>
-                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>브랜드-상품명</th>
-                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>유통사</th>
-                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>병행수입</th>
-                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>리스크 3종</th>
-                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>HS코드</th>
-                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>추정원가</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {list.map((c, i) => (
-                    <tr key={i}>
-                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9" }}>
-                        {c.rep.image_url
-                          ? <img src={c.rep.image_url} alt="" style={{width:32,height:32,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
-                          : <div style={{width:32,height:32,borderRadius:6,background:"#f3f4f6"}}/>
-                        }
-                      </td>
-                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", maxWidth: 210, whiteSpace: "normal", wordBreak: "break-word" }}>
-                        <ClampCell title={`${c.rep.brand_kr || c.rep.brand_en || "-"}${c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}`}>
-                          {c.rep.url
-                            ? <a className="link-cell" href={c.rep.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{whiteSpace:"normal", overflow:"visible", textOverflow:"clip", display:"inline", maxWidth:"none"}}>
-                                <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
-                                {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
-                              </a>
-                            : <>
-                                <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
-                                {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
-                              </>
-                          }
-                        </ClampCell>
-                      </td>
-                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
-                        <RetailerCoverageBadges coverage={c.coverage} /> {c.coverage.size}/4곳
-                      </td>
-                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
-                        <span className={`badge ${statusBadgeClass(c.rep.parallel_import)}`} title={parallelImportTitle(c.rep)}>{parallelImportDisplay(c.rep.parallel_import) || "정보없음"}</span>
-                      </td>
-                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
-                        <ProductSourcingRiskCell row={c.rep} />
-                      </td>
-                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
-                        <HsCodeCell row={c.rep} />
-                      </td>
-                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
-                        <EstimatedCostCell row={c.rep} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           )}
-        </div>
-      </td>
-    </tr>
+        </td>
+      </tr>
+      {list.map((c, i) => (
+        <ProductSourcingTableRow
+          key={`rec-${productType}-${i}`}
+          row={c.rep}
+          isBrandFirst={true}
+          isProductFirst={true}
+          bandIndex={0}
+          accentIndex={i}
+          coverage={c.coverage}
+          highlight
+        />
+      ))}
+    </>
   );
 }
 
@@ -4280,6 +4235,27 @@ function ProductSourcingPage({ navigate }) {
 
   const productTypeRecommendations = useProductTypeRecommendations(allRows);
 
+  // 히어로/툴바 영역은 페이지와 함께 스크롤되어 사라지고, 그 아래 테이블 영역이
+  // 남은 뷰포트 높이를 모두 차지하며 자체적으로 스크롤되어 테이블 헤더가 항상 보이도록 높이를 계산.
+  const stickyHeaderRef = useRef(null);
+  const paginationRef = useRef(null);
+  const [tableMaxHeight, setTableMaxHeight] = useState(null);
+  useLayoutEffect(() => {
+    const headerEl = stickyHeaderRef.current;
+    if (!headerEl) return;
+    const update = () => {
+      const headerHeight = headerEl.offsetHeight;
+      const paginationHeight = paginationRef.current ? paginationRef.current.offsetHeight : 0;
+      setTableMaxHeight(Math.max(200, window.innerHeight - headerHeight - paginationHeight - 16));
+    };
+    update();
+    window.addEventListener("resize", update);
+    const ro = new ResizeObserver(update);
+    ro.observe(headerEl);
+    if (paginationRef.current) ro.observe(paginationRef.current);
+    return () => { window.removeEventListener("resize", update); ro.disconnect(); };
+  }, [loading]);
+
   // 제품 그룹별 유통사 커버리지(아마존/월마트/샘스클럽/이온몰 중 몇 곳에 있는지).
   // 페이지네이션/필터와 무관하게 전체 allRows 기준으로 계산해야 정확하다.
   const productCoverageMap = useMemo(() => {
@@ -4327,22 +4303,24 @@ function ProductSourcingPage({ navigate }) {
         {error && <div className="error-box">오류: {error}</div>}
 
         <div className="card">
-          <div className="toolbar">
-            <div className="search-wrap">
-              <span className="search-icon">🔍</span>
-              <input placeholder="품목명, 브랜드, 상품명 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+          <div className="sticky-panel-header" ref={stickyHeaderRef}>
+            <div className="toolbar">
+              <div className="search-wrap">
+                <span className="search-icon">🔍</span>
+                <input placeholder="품목명, 브랜드, 상품명 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              </div>
+              <span className="count-label">{allRows ? `총 ${meta.total.toLocaleString()}건 중 표시` : ""}</span>
+              <button className="icon-btn" disabled={exporting} onClick={downloadOriginalFormat} title="원본 엑셀(유형별카드) 형식으로 사진 포함 다운로드">
+                {exporting ? "생성 중..." : "⬇ 원본 형식 다운로드"}
+              </button>
             </div>
-            <span className="count-label">{allRows ? `총 ${meta.total.toLocaleString()}건 중 표시` : ""}</span>
-            <button className="icon-btn" disabled={exporting} onClick={downloadOriginalFormat} title="원본 엑셀(유형별카드) 형식으로 사진 포함 다운로드">
-              {exporting ? "생성 중..." : "⬇ 원본 형식 다운로드"}
-            </button>
+            {exportError && <div className="error-box">다운로드 오류: {exportError}</div>}
           </div>
-          {exportError && <div className="error-box">다운로드 오류: {exportError}</div>}
 
           {loading ? (
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
-            <div style={{overflowX:"auto"}}>
+            <div className="table-wrap" style={{overflow:"auto", maxHeight: tableMaxHeight ? `${tableMaxHeight}px` : undefined}}>
               {/* width를 명시하지 않으면 전역 `table{width:100%}` 규칙 때문에 넓은 화면에서
                   테이블이 컨테이너 폭까지 늘어나고, 각 열 폭이 비율대로 함께 커지면서
                   셀 안에 불필요한 여백이 생긴다. width를 각 열 폭의 합과 동일하게 고정해
@@ -4350,58 +4328,58 @@ function ProductSourcingPage({ navigate }) {
               <table style={{width:1288}}>
                 <thead>
                   <tr>
-                    <th style={{width:117}}>
+                    <th style={{width:117, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">품목명</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_type||null} activeSortCol={sortBy==="product_type"} activeSortDir={sortDir} localValues={productTypeVals} onSort={dir=>applySort("product_type",dir)} onApply={vals=>setColFilters(p=>({...p,product_type:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:122}}>
+                    <th style={{width:122, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">브랜드</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:75, padding:"6px 8px"}}>
+                    <th style={{width:75, padding:"6px 8px", position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
                         <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>유통사<br/>순위</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.retailer_label||null} activeSortCol={sortBy==="rank"} activeSortDir={sortDir} localValues={retailerVals} onSort={dir=>applySort("rank",dir)} onApply={vals=>setColFilters(p=>({...p,retailer_label:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:50}}>이미지</th>
-                    <th style={{width:320}}>
+                    <th style={{width:50, position:"sticky", top:0, zIndex:30}}>이미지</th>
+                    <th style={{width:320, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">상품명</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_name_en||null} activeSortCol={sortBy==="product_name_en"} activeSortDir={sortDir} localValues={productNameVals} onSort={dir=>applySort("product_name_en",dir)} onApply={vals=>setColFilters(p=>({...p,product_name_en:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:65}}>
+                    <th style={{width:65, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">가격</span>
                         <RangeFilter label="가격 범위 (USD)" activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} onSort={dir=>applySort("price_usd",dir)} activeRange={colFilters.price_range||null} onApplyRange={range=>setColFilters(p=>({...p,price_range:range}))}/>
                       </div>
                     </th>
-                    <th style={{width:135}}>
+                    <th style={{width:135, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">원산지</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.origin||null} activeSortCol={sortBy==="origin"} activeSortDir={sortDir} localValues={originVals} onSort={dir=>applySort("origin",dir)} onApply={vals=>setColFilters(p=>({...p,origin:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:65}}>단량</th>
-                    <th style={{width:45, padding:"6px 4px"}}>
+                    <th style={{width:65, position:"sticky", top:0, zIndex:30}}>단량</th>
+                    <th style={{width:45, padding:"6px 4px", position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
                         <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>병행<br/>수입</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:90}}>
+                    <th style={{width:90, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">리스크</span>
                         <RiskFilter activeKeys={colFilters.risk_keys||null} onApply={keys=>setColFilters(p=>({...p,risk_keys:keys}))}/>
                       </div>
                     </th>
-                    <th style={{width:100}} title="HS코드 (품목분류) — 지정하면 아래 추정원가가 자동 계산됩니다">HS코드</th>
-                    <th style={{width:104}} title="관세율 자동조회 기반 추정 착지원가 (가정치 기반 추정값, 실측 아님)">추정원가</th>
+                    <th style={{width:100, position:"sticky", top:0, zIndex:30}} title="HS코드 (품목분류) — 지정하면 아래 추정원가가 자동 계산됩니다">HS코드</th>
+                    <th style={{width:104, position:"sticky", top:0, zIndex:30}} title="관세율 자동조회 기반 추정 착지원가 (가정치 기반 추정값, 실측 아님)">추정원가</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -4431,7 +4409,9 @@ function ProductSourcingPage({ navigate }) {
             </div>
           )}
 
-          <Pagination meta={meta} page={page} setPage={setPage}/>
+          <div ref={paginationRef}>
+            <Pagination meta={meta} page={page} setPage={setPage}/>
+          </div>
         </div>
       </div>
     </div>
