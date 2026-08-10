@@ -4297,14 +4297,19 @@ function ProductSourcingPage({ navigate }) {
           {loading ? (
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
-            <div className="table-wrap">
+            <div>
               {/* width를 명시하지 않으면 전역 `table{width:100%}` 규칙 때문에 넓은 화면에서
                   테이블이 컨테이너 폭까지 늘어나고, 각 열 폭이 비율대로 함께 커지면서
                   셀 안에 불필요한 여백이 생긴다. width를 각 열 폭의 합과 동일하게 고정해
-                  화면이 넓어도 늘어나지 않게 한다(부족한 화면에서는 overflowX:auto로 스크롤).
-                  세로는 페이지 전체 스크롤에 맡기고(overflow-x만), thead의 position:sticky가
-                  뷰포트 상단에 붙어 헤더가 계속 보이도록 한다 — 별도 높이 제한 박스를 두면
-                  한 화면에 보이는 행 수가 줄어들어 답답해지므로 쓰지 않는다. */}
+                  화면이 넓어도 늘어나지 않게 한다.
+                  이 래퍼에는 overflow-x:auto를 주지 않는다 — CSS 스펙상 overflow-x가
+                  visible이 아니면 overflow-y가 자동으로 auto가 되어 이 div가 별도의
+                  스크롤 컨테이너가 되고, thead의 position:sticky는 실제 브라우저
+                  뷰포트가 아니라 그 컨테이너 기준으로 계산된다. 이 컨테이너는 내부적으로
+                  스크롤되지 않으므로(페이지 전체가 스크롤됨) 결과적으로 헤더가 스크롤을
+                  따라 움직이지 않는 것처럼 보인다 — 그래서 세로 sticky가 페이지 스크롤을
+                  따라가려면 이 래퍼가 overflow를 갖지 않아야 한다(가로 스크롤이 필요한
+                  좁은 화면에서는 테이블 폭 때문에 .page/.card 자체가 가로로 스크롤된다). */}
               <table style={{width:1194}}>
                 <thead>
                   <tr>
