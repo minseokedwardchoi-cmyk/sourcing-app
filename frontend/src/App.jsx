@@ -3695,7 +3695,7 @@ function retailerRankLabel(row) {
 
 function ProductSourcingRiskCell({ row }) {
   return (
-    <div style={{display:"flex", flexWrap:"wrap", gap:3, maxWidth:200}}>
+    <div style={{display:"flex", flexDirection:"column", alignItems:"flex-start", gap:3, width:"fit-content"}}>
       <span className={`badge ${statusBadgeClass(row.recall_status)}`} title="리콜 이력">리콜 {row.recall_status || "-"}</span>
       <span className={`badge ${statusBadgeClass(row.quality_label_status)}`} title="품질·표시">품질 {row.quality_label_status || "-"}</span>
       <span className={`badge ${statusBadgeClass(row.legal_risk_status)}`} title="법적·평판 리스크">법적 {row.legal_risk_status || "-"}</span>
@@ -3845,14 +3845,6 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
         <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
         <td><ClampCell>{row.origin || "-"}</ClampCell></td>
         <td style={{whiteSpace:"nowrap"}}>{formatUnitDisplay(row.unit) || "-"}</td>
-        <td style={{whiteSpace:"nowrap"}}>
-          {row.rating != null
-            ? <div style={{lineHeight:1.4}}>
-                <div>⭐{row.rating}</div>
-                <div style={{fontSize:11,color:"#9ca3af"}}>{(row.review_count||0).toLocaleString()}</div>
-              </div>
-            : "-"}
-        </td>
         <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{row.parallel_import || "정보없음"}</span></td>
         <td><ProductSourcingRiskCell row={row}/></td>
         <td onClick={e=>e.stopPropagation()}><HsCodeCell row={row}/></td>
@@ -3860,7 +3852,7 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={14} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+          <td colSpan={13} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
             <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
             <div style={{marginBottom: importerVerdictLines(row).length ? 4 : 0}}><b>비고:</b> {row.notes || "특이사항 없음"}</div>
             {importerVerdictLines(row).map((line, i) => (
@@ -3943,11 +3935,33 @@ function useProductTypeRecommendations(allRows) {
   }, [allRows]);
 }
 
+function RecommendationNameCell({ rep }) {
+  const [expanded, setExpanded] = useState(false);
+  const name = rep.product_name_en || "";
+  const needsClamp = name.length > 40;
+  const halfLen = Math.ceil(name.length / 2);
+  const shown = expanded || !needsClamp ? name : name.slice(0, halfLen).trimEnd() + "…";
+  return (
+    <span>
+      <b>{rep.brand_kr || rep.brand_en || "-"}</b>
+      {name ? ` — ${shown}` : ""}
+      {needsClamp && (
+        <button
+          onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
+          style={{ marginLeft: 6, fontSize: 11, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+        >
+          {expanded ? "접기" : "더보기"}
+        </button>
+      )}
+    </span>
+  );
+}
+
 function ProductTypeRecommendationCard({ productType, candidates }) {
   const list = candidates || [];
   return (
     <tr>
-      <td colSpan={14} style={{ padding: 0, border: "none", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
+      <td colSpan={13} style={{ padding: 0, border: "none", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
         <div style={{ margin: "10px 0", padding: "12px 14px", background: "#f4f8ff", border: "1px solid #d6e4ff", borderRadius: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontWeight: 600, fontSize: 13, color: "#1a3a6b" }}>
             ✨ '{productType}' 추천 상품{list.length > 0 ? ` (${list.length}개)` : ""}
@@ -3965,14 +3979,15 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>유통사</th>
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>병행수입</th>
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>리스크 3종</th>
+                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>HS코드</th>
+                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>추정원가</th>
                   </tr>
                 </thead>
                 <tbody>
                   {list.map((c, i) => (
                     <tr key={i}>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", maxWidth: 420, whiteSpace: "normal", wordBreak: "break-word" }}>
-                        <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
-                        {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
+                        <RecommendationNameCell rep={c.rep} />
                       </td>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
                         <RetailerCoverageBadges coverage={c.coverage} /> {c.coverage.size}/4곳
@@ -3982,6 +3997,12 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
                       </td>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
                         <ProductSourcingRiskCell row={c.rep} />
+                      </td>
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
+                        <HsCodeCell row={c.rep} />
+                      </td>
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
+                        <EstimatedCostCell row={c.rep} />
                       </td>
                     </tr>
                   ))}
@@ -4190,7 +4211,7 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1795}}>
+              <table style={{minWidth:1575}}>
                 <thead>
                   <tr>
                     <th style={{width:60}}>
@@ -4237,19 +4258,13 @@ function ProductSourcingPage({ navigate }) {
                       </div>
                     </th>
                     <th style={{width:95}}>단량</th>
-                    <th style={{width:80}}>
-                      <div className="th-inner">
-                        <span className="th-label">평점</span>
-                        <ColumnFilter colKey={null} isNumeric={true} activeValues={null} activeSortCol={sortBy==="rating"} activeSortDir={sortDir} localValues={null} onSort={dir=>applySort("rating",dir)} onApply={()=>{}}/>
-                      </div>
-                    </th>
                     <th style={{width:110}}>
                       <div className="th-inner">
                         <span className="th-label">병행수입</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:220}}>
+                    <th style={{width:100}}>
                       <div className="th-inner">
                         <span className="th-label">리스크</span>
                         <RiskFilter activeKeys={colFilters.risk_keys||null} onApply={keys=>setColFilters(p=>({...p,risk_keys:keys}))}/>
@@ -4261,7 +4276,7 @@ function ProductSourcingPage({ navigate }) {
                 </thead>
                 <tbody>
                   {pageRowsWithGroups.length === 0
-                    ? <tr><td colSpan={14} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
+                    ? <tr><td colSpan={13} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
                     : pageRowsWithGroups.map((e, i) => (
                         <React.Fragment key={`${e.row.product_type}-${e.row.retailer}-${e.row.rank}-${i}`}>
                           {e.isTypeFirst && (
