@@ -58,9 +58,8 @@ from product_sourcing_exporter import build_workbook_skeleton, add_flat_sheet, e
 from tariff_rate_importer import import_tariff_rates
 from hs_code_importer import import_hs_codes
 from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
-from fta_country_map import match_country_in_text
 from country_utils import match_all_countries_in_text_broad
-from mfds_pricing import estimate_purchase_price, resolve_mfds_price
+from mfds_pricing import estimate_purchase_price, resolve_mfds_price, resolve_origin_country
 from mfds_manual_overrides import get_mfds_item
 from mfds_item_matcher import match_product_to_mfds_item
 from ranking import compute_factory_rankings, compute_manufacturer_rankings_by_country, compute_best_sku_rankings_for_country, clear_ranking_caches, TOP5_RETAILERS
@@ -2236,14 +2235,24 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
     for row in rows:
         norm = _normalize_hs_code(row["hs_code"])
         tariff_rows = by_hs_code.get(norm) if norm else None
-        tariff = None
-        if tariff_rows:
-            origin_country = match_country_in_text(row.get("origin"))
-            tariff = resolve_tariff_rate(tariff_rows, origin_country)
         price_estimate = estimate_purchase_price(
             row.get("product_type"), row.get("origin"), row.get("unit"),
             all_mfds_item_names, mfds_price_lookup,
         )
+        tariff = None
+        if tariff_rows:
+            # 블렌드(여러 원산지) 상품이면 매입원가 계산에 이미 쓰인 "최다 수입국"을
+            # 관세율 조회에도 그대로 재사용한다 — 매입원가와 관세율이 서로 다른
+            # 원산지를 근거로 삼아 어긋나는 걸 막기 위함. price_estimate가 없으면
+            # (MFDS 품목 미매칭 등) 관세율만이라도 같은 로직으로 best-effort 재시도한다.
+            origin_country = (
+                price_estimate.country if price_estimate
+                else resolve_origin_country(
+                    row.get("product_type") or "", row.get("origin"),
+                    all_mfds_item_names, mfds_price_lookup,
+                )
+            )
+            tariff = resolve_tariff_rate(tariff_rows, origin_country)
         cost = estimate_landed_cost_krw(
             price_estimate.price_usd if price_estimate else None,
             tariff,
@@ -2338,7 +2347,9 @@ async def get_cost_coverage(db: AsyncSession = Depends(get_db)):
     for row in rows:
         norm = _normalize_hs_code(row["hs_code"])
         tariff_rows = by_hs_code.get(norm) if norm else None
-        origin_country = match_country_in_text(row.get("origin"))
+        origin_country = resolve_origin_country(
+            row.get("product_type") or "", row.get("origin"), all_mfds_item_names, mfds_price_lookup,
+        )
         tariff = resolve_tariff_rate(tariff_rows, origin_country) if tariff_rows else None
 
         if tariff is None:

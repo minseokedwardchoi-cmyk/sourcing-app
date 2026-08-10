@@ -94,20 +94,9 @@ def get_fta_codes_for_country(country_kr: str) -> list[str]:
 _KNOWN_COUNTRIES_BY_LEN = sorted(_COUNTRY_TO_CODES.keys(), key=len, reverse=True)
 
 
-def match_country_in_text(origin_text: str | None) -> str | None:
-    """product_sourcing_item.origin은 자유 텍스트(예: "이탈리아", "이탈리아 (풀리아)")라
-    정확히 국가명만 들어있다는 보장이 없다. 알려진 FTA 상대국명이 텍스트 안에
-    포함돼 있으면 그 국가명을 반환한다 (best-effort, 실측 원산지증명과는 별개)."""
-    if not origin_text:
-        return None
-    for country in _KNOWN_COUNTRIES_BY_LEN:
-        if country in origin_text:
-            return country
-    return None
-
-
 def match_all_countries_in_text(origin_text: str | None) -> list[str]:
-    """match_country_in_text()와 같은 텍스트지만, "다국적 블렌드(이탈리아·그리스·
+    """product_sourcing_item.origin은 자유 텍스트(예: "이탈리아", "이탈리아 (풀리아)")라
+    정확히 국가명만 들어있다는 보장이 없다. "다국적 블렌드(이탈리아·그리스·
     스페인 등)"처럼 국가명이 여러 개 들어있는 origin을 위해 매칭되는 국가를
     전부(중복 없이, 텍스트에 등장하는 순서대로) 반환한다.
     이 앱의 FTA 코드가 커버하는 국가명(_KNOWN_COUNTRIES_BY_LEN)만 대상이라, MFDS
