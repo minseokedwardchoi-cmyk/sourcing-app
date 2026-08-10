@@ -16,6 +16,7 @@ import {
   fetchProductSourcingAll,
   updateProductSourcingHsCode,
   getProductSourcingExportUrl,
+  fetchQuickCheck,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
 
@@ -758,6 +759,13 @@ function MainDashboard({ navigate }) {
     [searchActive, data]
   );
   const [showCompCards, setShowCompCards] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  useEffect(()=>{
+    fetchQuickCheck()
+      .then(r=>setLastUpdated(r.latest_process_date))
+      .catch(()=>{});
+  },[]);
 
   function cellKey(colKey, i) { return `${colKey}:${i}`; }
 
@@ -967,6 +975,9 @@ function MainDashboard({ navigate }) {
                 📗 상세 가이드
               </a>
             </div>
+            <span style={{fontSize:12,color:"#6b7280"}}>
+              업데이트 일자: {lastUpdated ? lastUpdated.replaceAll("-", ".") : "-"}
+            </span>
           </div>
 
           {/* 경쟁사 카드 */}
@@ -3861,13 +3872,14 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
 }
 
 // 품목(product_type) 단위 추천 목록: 같은 product_group_key로 묶인 유통사 리스팅들 중에서
-// (1) 리스크 3요소(recall/quality/legal) 모두 "통과" + 유통사 2곳 이상 등록을 무조건적인
-// 자격 조건으로 걸러내고, (2) 유통사 커버리지(많은 순) → (3) 병행수입 상태(O > 수입이력
-// 없음 > X) 순으로 정렬해 상위 RECOMMENDATION_LIMIT개까지 보여준다. 자격 조건을 만족하는
-// 제품이 없으면 빈 배열을 반환하고(UI에서 사유를 설명), 억지로 개수를 채우지 않는다.
+// (1) 리스크 3요소(recall/quality/legal) 모두 "통과" + (2) 병행수입 O 또는 "수입이력 없음"
+// (X·미확인 제외) + (3) 유통사 1곳 이상 등록을 무조건적인 자격 조건으로 걸러내고, 자격을
+// 만족하는 제품은 개수 제한 없이 전부 보여준다(상위 N개로 자르지 않음). 정렬은 유통사
+// 커버리지(많은 순)를 1순위, 병행수입 상태(O > 수입이력 없음)를 동점 시 타이브레이커로
+// 삼는다 — 여러 유통망에서 동시에 팔린다는 게 검증된 수요 신호로 더 결정적이기 때문.
+// 자격 조건을 만족하는 제품이 없으면 빈 배열을 반환하고 UI에서 사유를 설명한다.
 const RISK_KEYS = ["recall_status", "quality_label_status", "legal_risk_status"];
-const RECOMMENDATION_LIMIT = 10;
-const RECOMMENDATION_MIN_RETAILERS = 2;
+const RECOMMENDATION_MIN_RETAILERS = 1;
 
 // 병행수입 상태의 상대적 우선순위: 가능(O) > 수입이력 없음(리스크 확인된 바 없음) > 불가/미확인.
 // "수입이력 없음"은 "X(불가 확정)"보다 나은 상태이므로 동점 처리하지 않고 중간 점수를 준다.
@@ -3917,13 +3929,13 @@ function useProductTypeRecommendations(allRows) {
       const candidates = [];
       for (const rows of groups.values()) {
         const c = buildRecommendationCandidate(rows);
-        if (c.riskPassCount === 3 && c.coverage.size >= RECOMMENDATION_MIN_RETAILERS) candidates.push(c);
+        if (c.riskPassCount === 3 && c.parallelScore >= 1 && c.coverage.size >= RECOMMENDATION_MIN_RETAILERS) candidates.push(c);
       }
       candidates.sort((a, b) => {
         if (b.coverage.size !== a.coverage.size) return b.coverage.size - a.coverage.size;
         return b.parallelScore - a.parallelScore;
       });
-      map.set(type, candidates.slice(0, RECOMMENDATION_LIMIT));
+      map.set(type, candidates);
     }
     return map;
   }, [allRows]);
@@ -3962,7 +3974,7 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
           </div>
           {list.length === 0 ? (
             <div style={{ fontSize: 12.5, color: "#6b7280" }}>
-              리스크 3요소(리콜·품질·표시·법적)를 모두 통과하고 유통사 {RECOMMENDATION_MIN_RETAILERS}곳 이상에 등록된 제품이 없어 추천할 제품이 없습니다.
+              리스크 3요소(리콜·품질·표시·법적)를 모두 통과하고 병행수입이 가능(O) 하거나 수입이력이 없는 제품이 없어 추천할 제품이 없습니다.
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>
@@ -4136,6 +4148,10 @@ function ProductSourcingPage({ navigate }) {
   }, [pageRows]);
 
   const productTypeRecommendations = useProductTypeRecommendations(allRows);
+  const recommendationTotalCount = useMemo(
+    () => [...productTypeRecommendations.values()].reduce((sum, list) => sum + list.length, 0),
+    [productTypeRecommendations]
+  );
 
   // 제품 그룹별 유통사 커버리지(아마존/월마트/샘스클럽/이온몰 중 몇 곳에 있는지).
   // 페이지네이션/필터와 무관하게 전체 allRows 기준으로 계산해야 정확하다.
@@ -4165,9 +4181,10 @@ function ProductSourcingPage({ navigate }) {
           {allRows && (
             <div className="hero-kpi">
               {[
-                { label: "품목 수",   val: productTypeVals.length, unit: "개" },
-                { label: "전체 상품", val: allRows.length,         unit: "건" },
-                { label: "유통사",    val: 4,                      unit: "곳" },
+                { label: "품목 수",     val: productTypeVals.length, unit: "개" },
+                { label: "전체 상품",   val: allRows.length,         unit: "건" },
+                { label: "유통사",      val: 4,                      unit: "곳" },
+                { label: "추천 대상 제품", val: recommendationTotalCount, unit: "개" },
               ].map(({ label, val, unit }) => (
                 <div key={label} className="hero-kpi-item">
                   <div className="hero-kpi-label">{label}</div>
