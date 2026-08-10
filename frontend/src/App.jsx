@@ -3680,10 +3680,12 @@ function importerVerdictLines(row) {
 }
 
 // 병행수입 판정 근거(factory별 수입업체 목록)를 호버 툴팁 텍스트로 만든다.
+// "수입이력 없음"은 배지에 △로 축약 표시되므로, 툴팁에 원래 의미를 풀어서 보여준다.
 function parallelImportTitle(row) {
+  const prefix = row.parallel_import === "수입이력 없음" ? "수입이력 없음 — " : "";
   const lines = importerVerdictLines(row);
-  if (lines.length === 0) return "병행수입 가능여부";
-  return `병행수입 가능여부 — 판정 근거\n${lines.join("\n")}`;
+  if (lines.length === 0) return `${prefix}병행수입 가능여부`;
+  return `${prefix}병행수입 가능여부 — 판정 근거\n${lines.join("\n")}`;
 }
 
 // 이온몰은 판매량순 랭킹이 아니라서 순위 없이 유통사명만 표기
@@ -3809,6 +3811,95 @@ function HsCodeCell({ row }) {
   );
 }
 
+// 품목명(product_type) 원문 맨 앞에는 리서치 당시 기준으로 삼은 대표 제품의 브랜드명이
+// 붙어 있는 경우가 많다(예: "OLITALIA 엑스트라버진 올리브유"). 이 값은 실제 각 행의
+// brand_kr/brand_en과 무관한 참고용 라벨일 뿐이라, 품목명 열에서는 유형만 남기고 뗀다.
+// 브랜드 유무·경계가 규칙적이지 않아(공백 없는 결합, 한글 고유 브랜드명 등) 자동 판별이
+// 불가능한 항목이 많으므로 현재 등록된 83개 품목 전체를 수동 검수해 표로 관리한다.
+// 새 품목이 추가되면 이 표에 없는 이름은 원문 그대로 노출된다(안전한 기본 동작).
+const PRODUCT_TYPE_DISPLAY_OVERRIDES = {
+  "타바스코핫소스": "핫소스",
+  "네이처밸리 프로틴바": "프로틴바",
+  "네이처밸리 트레일 믹스바": "트레일 믹스바",
+  "도리토스 나초칩": "나초칩",
+  "스니커즈 미니스": "미니스",
+  "스타벅스 다크아메리카노": "다크아메리카노",
+  "네스카페 테이스터스 초이스커피": "테이스터스 초이스커피",
+  "프링글스 오리지널 멀티팩": "오리지널 멀티팩",
+  "프링글스 사워크림&어니언 멀티팩": "사워크림&어니언 멀티팩",
+  "카네후쿠 짜먹는 명란젓갈": "짜먹는 명란젓갈",
+  "스타벅스 미디엄 아메리카노": "미디엄 아메리카노",
+  "스니커즈 땅콩 펀사이즈": "땅콩 펀사이즈",
+  "오리히로 과일 곤약젤리": "과일 곤약젤리",
+  "레이즈 클래식": "클래식",
+  "페레로 누텔라": "누텔라",
+  "본마망 무화과잼": "무화과잼",
+  "하리보 골드베렌": "골드베렌",
+  "데체코 바질페스토": "바질페스토",
+  "하리보 푸르티부시": "푸르티부시",
+  "하인즈 굿마요네즈": "굿마요네즈",
+  "하리보 스타믹스젤리": "스타믹스젤리",
+  "퀘이커 심플리그래놀라": "심플리그래놀라",
+  "맥비티 다이제스티브 투고": "다이제스티브 투고",
+  "이금기 프리미엄 굴소스": "프리미엄 굴소스",
+  "덴로쿠 스낵믹스 (개별포장 믹스)": "스낵믹스 (개별포장 믹스)",
+  "트롤리 사우어 구미": "사우어 구미",
+  "트롤리 올인원 젤리": "올인원 젤리",
+  "하인즈 토마토 케찹": "토마토 케찹",
+  "스키피 크런치 땅콩버터": "크런치 땅콩버터",
+  "스키피 크리미 땅콩버터": "크리미 땅콩버터",
+  "하인즈 유기농 토마토케찹": "유기농 토마토케찹",
+  "하리보 메가 파티 젤리": "메가 파티 젤리",
+  "엘로 토티야칩스": "토티야칩스",
+  "본마망 4프루츠잼": "4프루츠잼",
+  "A1스테이크소스": "스테이크소스",
+  "AGROMONTE 토마토 파스타 소스": "토마토 파스타 소스",
+  "CAVENDISH 스트레이트컷 감자": "스트레이트컷 감자",
+  "CAVENDISH 크리스피 스파이시": "크리스피 스파이시",
+  "CHOSEN FOODS 아보카도오일": "아보카도오일",
+  "CP 통새우완탕": "통새우완탕",
+  "CP 플레이밍 치킨 텐더": "플레이밍 치킨 텐더",
+  "DR.Q 과즙젤리 4종": "과즙젤리 4종",
+  "EMMI 이탈리안 티라미슈": "이탈리안 티라미슈",
+  "EURO POMELLA 부라타치즈": "부라타치즈",
+  "GENERAL MILLS 골든그레이엄": "골든그레이엄",
+  "GENERAL MILLS 시나몬토스트크런치": "시나몬토스트크런치",
+  "GENERAL MILLS 후르츠거거셔스 젤리": "후르츠거거셔스 젤리",
+  "GENERAL MILLS 후르츠 롤업 젤리": "후르츠 롤업 젤리",
+  "HEINZ 클레시코 알프레도소스": "클레시코 알프레도소스",
+  "JUVER 사과주스": "사과주스",
+  "JUVER 레몬에이드": "레몬에이드",
+  "KASUGAI 와사비콩 스낵 (그린피스+잠두)": "와사비콩 스낵 (그린피스+잠두)",
+  "KRACKCORN 카라멜 팝콘": "카라멜 팝콘",
+  "LES COMTES DE PROVENCE 딸기잼": "딸기잼",
+  "LES COMTES DE PROVENCE 멀티베리 스프레드": "멀티베리 스프레드",
+  "LIKE AIR 퍼프콘 클래식": "퍼프콘 클래식",
+  "MAILLE 홀그레인 머스타드": "홀그레인 머스타드",
+  "MCCAIN 해쉬브라운 감자": "해쉬브라운 감자",
+  "MENISSEZ 미니 프렌치롤": "미니 프렌치롤",
+  "MISURA 프로틴 플레이크": "프로틴 플레이크",
+  "MISURA 통밀 크래커": "통밀 크래커",
+  "NABISCO 오레오쿠키": "오레오쿠키",
+  "NABISCO 리츠 오리지널": "리츠 오리지널",
+  "O'DAY 누가샌드위치 크래커": "누가샌드위치 크래커",
+  "OLITALIA 엑스트라버진 올리브유": "엑스트라버진 올리브유",
+  "OLITALIA 유기농 엑스트라버진 올리브유": "유기농 엑스트라버진 올리브유",
+  "OTTAVIO 포도씨유": "포도씨유",
+  "OTTAVIO 아보카도 오일": "아보카도 오일",
+  "PM SWEET 36 마카롱": "36 마카롱",
+  "RAGU 토마토 파스타소스": "토마토 파스타소스",
+  "RAO'S 마리나라소스": "마리나라소스",
+  "S&B생와사비": "생와사비",
+  "S&B 골든카레 (중간맛/매운맛)": "골든카레 (중간맛/매운맛)",
+  "TENKEI 종합 모나카": "종합 모나카",
+  "TIPCO 오렌지자몽주스 (착즙)": "오렌지자몽주스 (착즙)",
+  "TIPCO 파인애플주스 (착즙)": "파인애플주스 (착즙)",
+};
+
+function productTypeDisplay(value) {
+  return PRODUCT_TYPE_DISPLAY_OVERRIDES[value] || value;
+}
+
 function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isProductFirst = true, accentIndex = 0, coverage = null }) {
   const [expanded, setExpanded] = useState(false);
   const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
@@ -3818,8 +3909,7 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
   return (
     <>
       <tr style={{cursor:"pointer", background: rowBg}} onClick={()=>setExpanded(v=>!v)}>
-        <td style={{whiteSpace:"nowrap", textAlign:"center", color:"#6b7280"}}>{row.type_priority}</td>
-        <td><ClampCell>{row.product_type}</ClampCell></td>
+        <td><ClampCell title={row.product_type}>{productTypeDisplay(row.product_type)}</ClampCell></td>
         <td>
           <ClampCell>
             <div style={{fontWeight: isBrandFirst ? 600 : 500, color: isBrandFirst ? "#111827" : "#c2c8d1"}}>{row.brand_kr || "-"}</div>
@@ -3845,14 +3935,14 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
         <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
         <td><ClampCell>{row.origin || "-"}</ClampCell></td>
         <td style={{whiteSpace:"nowrap"}}>{formatUnitDisplay(row.unit) || "-"}</td>
-        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{row.parallel_import || "정보없음"}</span></td>
+        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{parallelImportDisplay(row.parallel_import) || "정보없음"}</span></td>
         <td><ProductSourcingRiskCell row={row}/></td>
         <td onClick={e=>e.stopPropagation()}><HsCodeCell row={row}/></td>
         <td style={{whiteSpace:"nowrap"}}><EstimatedCostCell row={row}/></td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={13} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+          <td colSpan={12} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
             <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
             <div style={{marginBottom: importerVerdictLines(row).length ? 4 : 0}}><b>비고:</b> {row.notes || "특이사항 없음"}</div>
             {importerVerdictLines(row).map((line, i) => (
@@ -3887,9 +3977,15 @@ function parallelImportScore(value) {
 function parallelImportLabel(value) {
   const v = String(value || "").trim();
   if (v === "O") return "가능";
-  if (v === "수입이력 없음") return "수입이력 없음";
+  if (v === "수입이력 없음") return "△";
   if (v === "X") return "불가";
   return "미확인";
+}
+
+// 메인 테이블용: O/X/기타 상세 사유는 원문 그대로 보여주되, "수입이력 없음"만
+// O/X처럼 짧은 기호(△ = 리스크 확인된 바 없는 중간 상태)로 축약해 배지·열 폭을 줄인다.
+function parallelImportDisplay(value) {
+  return value === "수입이력 없음" ? "△" : value;
 }
 
 function buildRecommendationCandidate(rows) {
@@ -3939,7 +4035,7 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
   const list = candidates || [];
   return (
     <tr>
-      <td colSpan={13} style={{ padding: 0, border: "none", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
+      <td colSpan={12} style={{ padding: 0, border: "none", whiteSpace: "normal", overflow: "visible", maxWidth: "none" }}>
         <div style={{ margin: "10px 0", padding: "12px 14px", background: "#f4f8ff", border: "1px solid #d6e4ff", borderRadius: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontWeight: 600, fontSize: 13, color: "#1a3a6b" }}>
             ✨ '{productType}' 추천 상품{list.length > 0 ? ` (${list.length}개)` : ""}
@@ -3950,7 +4046,7 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ tableLayout: "auto", width: "100%", minWidth: 0, borderCollapse: "collapse", fontSize: 12.5, background: "#fff" }}>
+              <table style={{ tableLayout: "auto", width: "auto", minWidth: 0, borderCollapse: "collapse", fontSize: 12.5, background: "#fff" }}>
                 <thead>
                   <tr>
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>브랜드-상품명</th>
@@ -4039,7 +4135,6 @@ function ProductSourcingPage({ navigate }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const typePriorityVals  = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.type_priority).filter(v=>v!=null))].sort((a,b)=>a-b) : [], [allRows]);
   const productTypeVals   = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_type))].sort() : [], [allRows]);
   const retailerVals      = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.retailer_label||r.retailer))] : [], [allRows]);
   const brandVals         = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.brand_kr).filter(Boolean))].sort() : [], [allRows]);
@@ -4055,7 +4150,6 @@ function ProductSourcingPage({ navigate }) {
         const hay = `${r.product_type} ${r.brand_kr||""} ${r.brand_en||""} ${r.product_name_en||""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      if (colFilters.type_priority?.length && !colFilters.type_priority.includes(String(r.type_priority))) return false;
       if (colFilters.product_type?.length && !colFilters.product_type.includes(r.product_type)) return false;
       if (colFilters.retailer_label?.length && !colFilters.retailer_label.includes(r.retailer_label||r.retailer)) return false;
       if (colFilters.brand_kr?.length && !colFilters.brand_kr.includes(r.brand_kr)) return false;
@@ -4123,10 +4217,6 @@ function ProductSourcingPage({ navigate }) {
   }, [pageRows]);
 
   const productTypeRecommendations = useProductTypeRecommendations(allRows);
-  const recommendationTotalCount = useMemo(
-    () => [...productTypeRecommendations.values()].reduce((sum, list) => sum + list.length, 0),
-    [productTypeRecommendations]
-  );
 
   // 제품 그룹별 유통사 커버리지(아마존/월마트/샘스클럽/이온몰 중 몇 곳에 있는지).
   // 페이지네이션/필터와 무관하게 전체 allRows 기준으로 계산해야 정확하다.
@@ -4159,7 +4249,6 @@ function ProductSourcingPage({ navigate }) {
                 { label: "품목 수",     val: productTypeVals.length, unit: "개" },
                 { label: "전체 상품",   val: allRows.length,         unit: "건" },
                 { label: "유통사",      val: 4,                      unit: "곳" },
-                { label: "추천 대상 제품", val: recommendationTotalCount, unit: "개" },
               ].map(({ label, val, unit }) => (
                 <div key={label} className="hero-kpi-item">
                   <div className="hero-kpi-label">{label}</div>
@@ -4192,22 +4281,16 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1575}}>
+              <table style={{minWidth:1418}}>
                 <thead>
                   <tr>
-                    <th style={{width:60}}>
-                      <div className="th-inner">
-                        <span className="th-label">우선순위</span>
-                        <ColumnFilter colKey="_l" isNumeric={true} activeValues={colFilters.type_priority||null} activeSortCol={sortBy==="type_priority"} activeSortDir={sortDir} localValues={typePriorityVals} onSort={dir=>applySort("type_priority",dir)} onApply={vals=>setColFilters(p=>({...p,type_priority:vals}))}/>
-                      </div>
-                    </th>
-                    <th style={{width:150}}>
+                    <th style={{width:130}}>
                       <div className="th-inner">
                         <span className="th-label">품목명</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_type||null} activeSortCol={sortBy==="product_type"} activeSortDir={sortDir} localValues={productTypeVals} onSort={dir=>applySort("product_type",dir)} onApply={vals=>setColFilters(p=>({...p,product_type:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:170}}>
+                    <th style={{width:128}}>
                       <div className="th-inner">
                         <span className="th-label">브랜드</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
@@ -4239,7 +4322,7 @@ function ProductSourcingPage({ navigate }) {
                       </div>
                     </th>
                     <th style={{width:95}}>단량</th>
-                    <th style={{width:110}}>
+                    <th style={{width:90}}>
                       <div className="th-inner">
                         <span className="th-label">병행수입</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
@@ -4257,7 +4340,7 @@ function ProductSourcingPage({ navigate }) {
                 </thead>
                 <tbody>
                   {pageRowsWithGroups.length === 0
-                    ? <tr><td colSpan={13} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
+                    ? <tr><td colSpan={12} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
                     : pageRowsWithGroups.map((e, i) => (
                         <React.Fragment key={`${e.row.product_type}-${e.row.retailer}-${e.row.rank}-${i}`}>
                           {e.isTypeFirst && (
