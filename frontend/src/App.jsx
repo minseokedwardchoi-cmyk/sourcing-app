@@ -967,6 +967,7 @@ function MainDashboard({ navigate }) {
                 📗 상세 가이드
               </a>
             </div>
+            <span style={{fontSize:12,color:"#6b7280"}}>업데이트 일자: 2026.08.10</span>
           </div>
 
           {/* 경쟁사 카드 */}
