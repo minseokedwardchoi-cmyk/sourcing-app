@@ -4289,7 +4289,11 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1304}}>
+              {/* width를 명시하지 않으면 전역 `table{width:100%}` 규칙 때문에 넓은 화면에서
+                  테이블이 컨테이너 폭까지 늘어나고, 각 열 폭이 비율대로 함께 커지면서
+                  셀 안에 불필요한 여백이 생긴다. width를 각 열 폭의 합과 동일하게 고정해
+                  화면이 넓어도 늘어나지 않게 한다(부족한 화면에서는 overflowX:auto로 스크롤). */}
+              <table style={{width:1288}}>
                 <thead>
                   <tr>
                     <th style={{width:117}}>
@@ -4336,14 +4340,14 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:100}}>
+                    <th style={{width:90}}>
                       <div className="th-inner">
                         <span className="th-label">리스크</span>
                         <RiskFilter activeKeys={colFilters.risk_keys||null} onApply={keys=>setColFilters(p=>({...p,risk_keys:keys}))}/>
                       </div>
                     </th>
                     <th style={{width:100}} title="HS코드 (품목분류) — 지정하면 아래 추정원가가 자동 계산됩니다">HS코드</th>
-                    <th style={{width:110}} title="관세율 자동조회 기반 추정 착지원가 (가정치 기반 추정값, 실측 아님)">추정원가</th>
+                    <th style={{width:104}} title="관세율 자동조회 기반 추정 착지원가 (가정치 기반 추정값, 실측 아님)">추정원가</th>
                   </tr>
                 </thead>
                 <tbody>
