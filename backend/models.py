@@ -230,3 +230,18 @@ class CountryItemAmount(Base):
         Index("ix_cia_country", "country"),
         Index("ix_cia_item_name", "item_name"),
     )
+
+
+class CrawlRunStatus(Base):
+    """
+    수입이력 크롤링(/api/crawl) 실행 이력 기록용 — GitHub Actions 워크플로우가
+    언제 실제로 실행/완료됐는지를 대시보드에 보여주기 위해 항상 단일 행(id=1)만
+    유지하며 크롤링 시작/종료마다 UPDATE.
+    """
+    __tablename__ = "crawl_run_status"
+
+    id           = Column(Integer, primary_key=True)
+    started_at   = Column(DateTime, nullable=True, comment="가장 최근 크롤링 시작 시각 (UTC)")
+    finished_at  = Column(DateTime, nullable=True, comment="가장 최근 크롤링 완료 시각 (UTC)")
+    status       = Column(String(20), nullable=True, comment="running / success / error")
+    error        = Column(Text,     nullable=True, comment="실패 시 오류 메시지")

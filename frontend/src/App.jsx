@@ -763,7 +763,7 @@ function MainDashboard({ navigate }) {
 
   useEffect(()=>{
     fetchQuickCheck()
-      .then(r=>setLastUpdated(r.latest_process_date))
+      .then(r=>setLastUpdated(r.last_crawl_finished_at || r.last_crawl_started_at))
       .catch(()=>{});
   },[]);
 
@@ -976,7 +976,9 @@ function MainDashboard({ navigate }) {
               </a>
             </div>
             <span style={{fontSize:12,color:"#6b7280"}}>
-              업데이트 일자: {lastUpdated ? lastUpdated.replaceAll("-", ".") : "-"}
+              업데이트 일자: {lastUpdated
+                ? new Date(lastUpdated).toLocaleDateString("en-CA", {timeZone:"Asia/Seoul"}).replaceAll("-", ".")
+                : "-"}
             </span>
           </div>
 
