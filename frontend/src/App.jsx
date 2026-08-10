@@ -3680,8 +3680,8 @@ function importerVerdictLines(row) {
 }
 
 // 병행수입 판정 근거(factory별 수입업체 목록)를 호버 툴팁 텍스트로 만든다.
-// O/X를 제외한 값(수입이력 없음/브랜드불명확/확인불가 등)은 배지에 △로 축약 표시되므로,
-// 툴팁에 원래 의미를 풀어서 보여준다.
+// "수입이력 없음"은 배지에 △로 축약 표시되므로, 툴팁에 원래 의미를 풀어서 보여준다.
+// 그 외 값은 배지에 원문이 그대로(잘릴 수 있게) 노출되지만 참고용으로 여기도 함께 적어둔다.
 function parallelImportTitle(row) {
   const v = String(row.parallel_import || "").trim();
   const prefix = v && v !== "O" && v !== "X" ? `${v} — ` : "";
@@ -3937,7 +3937,7 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
         <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
         <td><ClampCell>{row.origin || "-"}</ClampCell></td>
         <td style={{whiteSpace:"nowrap"}}>{formatUnitDisplay(row.unit) || "-"}</td>
-        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{parallelImportDisplay(row.parallel_import)}</span></td>
+        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{parallelImportDisplay(row.parallel_import) || "정보없음"}</span></td>
         <td><ProductSourcingRiskCell row={row}/></td>
         <td onClick={e=>e.stopPropagation()}><HsCodeCell row={row}/></td>
         <td style={{whiteSpace:"nowrap"}}><EstimatedCostCell row={row}/></td>
@@ -3945,6 +3945,7 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
       {expanded && (
         <tr>
           <td colSpan={12} style={{background:"#f9fafb", fontSize:12, color:"#374151", padding:"10px 12px"}}>
+            <div style={{marginBottom:4}}><b>병행수입:</b> {row.parallel_import || "정보없음"}</div>
             <div style={{marginBottom:4}}><b>5년내 이슈:</b> {row.five_year_issue || "-"}</div>
             <div style={{marginBottom: importerVerdictLines(row).length ? 4 : 0}}><b>비고:</b> {row.notes || "특이사항 없음"}</div>
             {importerVerdictLines(row).map((line, i) => (
@@ -3984,12 +3985,11 @@ function parallelImportLabel(value) {
   return "미확인";
 }
 
-// 메인 테이블용: O/X는 그대로, 그 외 모든 값(수입이력 없음/브랜드불명확/확인불가/정보없음 등
-// 길이가 제각각인 사유 문구)은 O/X와 같은 폭의 짧은 기호(△ = 확정되지 않은 중간 상태)로
-// 통일해 배지·열 폭을 좁게 유지한다. 상세 사유는 배지 호버 툴팁(parallelImportTitle)에서 확인.
+// 메인 테이블용: O/X와 "수입이력 없음"(△)만 짧은 기호로 축약하고, 그 외 사유 문구
+// (브랜드불명확/확인불가 등)는 원문을 그대로 둔다 — 좁은 열 폭 때문에 배지가 잘려도
+// 괜찮고, 전체 문구는 행을 펼치면(5년내 이슈 상세 영역) 확인할 수 있다.
 function parallelImportDisplay(value) {
-  const v = String(value || "").trim();
-  return v === "O" || v === "X" ? v : "△";
+  return value === "수입이력 없음" ? "△" : value;
 }
 
 function buildRecommendationCandidate(rows) {
@@ -4341,9 +4341,9 @@ function ProductSourcingPage({ navigate }) {
                       </div>
                     </th>
                     <th style={{width:81}}>단량</th>
-                    <th style={{width:45}}>
-                      <div className="th-inner">
-                        <span className="th-label">병행수입</span>
+                    <th style={{width:45, padding:"6px 4px"}}>
+                      <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
+                        <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>병행<br/>수입</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
                       </div>
                     </th>
