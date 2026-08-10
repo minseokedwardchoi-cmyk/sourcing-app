@@ -4067,7 +4067,7 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", maxWidth: 210, whiteSpace: "normal", wordBreak: "break-word" }}>
                         <ClampCell title={`${c.rep.brand_kr || c.rep.brand_en || "-"}${c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}`}>
                           {c.rep.url
-                            ? <a className="link-cell" href={c.rep.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>
+                            ? <a className="link-cell" href={c.rep.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{whiteSpace:"normal", overflow:"visible", textOverflow:"clip", display:"inline", maxWidth:"none"}}>
                                 <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
                                 {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
                               </a>
