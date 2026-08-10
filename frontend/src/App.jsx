@@ -3929,6 +3929,28 @@ function useProductTypeRecommendations(allRows) {
   }, [allRows]);
 }
 
+function RecommendationNameCell({ rep }) {
+  const [expanded, setExpanded] = useState(false);
+  const name = rep.product_name_en || "";
+  const needsClamp = name.length > 40;
+  const halfLen = Math.ceil(name.length / 2);
+  const shown = expanded || !needsClamp ? name : name.slice(0, halfLen).trimEnd() + "…";
+  return (
+    <span>
+      <b>{rep.brand_kr || rep.brand_en || "-"}</b>
+      {name ? ` — ${shown}` : ""}
+      {needsClamp && (
+        <button
+          onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
+          style={{ marginLeft: 6, fontSize: 11, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
+        >
+          {expanded ? "접기" : "더보기"}
+        </button>
+      )}
+    </span>
+  );
+}
+
 function ProductTypeRecommendationCard({ productType, candidates }) {
   const list = candidates || [];
   return (
@@ -3951,14 +3973,15 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>유통사</th>
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>병행수입</th>
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>리스크 3종</th>
+                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>HS코드</th>
+                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>추정원가</th>
                   </tr>
                 </thead>
                 <tbody>
                   {list.map((c, i) => (
                     <tr key={i}>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", maxWidth: 420, whiteSpace: "normal", wordBreak: "break-word" }}>
-                        <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
-                        {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
+                        <RecommendationNameCell rep={c.rep} />
                       </td>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
                         <RetailerCoverageBadges coverage={c.coverage} /> {c.coverage.size}/4곳
@@ -3968,6 +3991,12 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
                       </td>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
                         <ProductSourcingRiskCell row={c.rep} />
+                      </td>
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
+                        <HsCodeCell row={c.rep} />
+                      </td>
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
+                        <EstimatedCostCell row={c.rep} />
                       </td>
                     </tr>
                   ))}
