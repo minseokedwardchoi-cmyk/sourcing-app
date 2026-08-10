@@ -17,7 +17,7 @@ import json
 import math
 import re
 from calendar import monthrange
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, List
 import logging
 from fastapi import FastAPI, BackgroundTasks, Depends, Query, UploadFile, File, HTTPException, Form, Request
@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from database import get_db, engine, Base, AsyncSessionLocal
-from models import ImportHistory, ProductSourcingItem
+from models import ImportHistory, ProductSourcingItem, CrawlRunStatus
 from schemas import (
     SkuHistoryResponse, SkuHistoryRow, PaginationMeta,
     SkuFactoriesResponse, SkuInfo, FactoryRow,
@@ -3462,12 +3462,19 @@ async def quick_check(db: AsyncSession = Depends(get_db)):
     ))
     june_total = june_total_r.scalar() or 0
 
+    crawl_status_row = (await db.execute(
+        select(CrawlRunStatus).where(CrawlRunStatus.id == 1)
+    )).scalar_one_or_none()
+
     return {
         "approx_total_rows": approx_count,
         "oem_exists": oem_exists,
         "latest_process_date": str(latest) if latest else None,
         "june_total": june_total,
         "june_oem_count": june_oem_count,
+        "last_crawl_started_at": (crawl_status_row.started_at.isoformat() + "Z") if crawl_status_row and crawl_status_row.started_at else None,
+        "last_crawl_finished_at": (crawl_status_row.finished_at.isoformat() + "Z") if crawl_status_row and crawl_status_row.finished_at else None,
+        "last_crawl_status": crawl_status_row.status if crawl_status_row else None,
     }
 
 # ─── Health check ────────────────────────────────────────────────────────────
@@ -3477,10 +3484,29 @@ async def health():
 
 
 # ─── 크롤링 트리거 ───────────────────────────────────────────────────────────
+async def _record_crawl_status(status: str, started_at: datetime, finished_at: Optional[datetime], error: Optional[str]):
+    """crawl_run_status 싱글턴 행(id=1)을 갱신 — 워크플로우 실행 시각을 대시보드에 보여주기 위함."""
+    from database import get_db
+    async for db in get_db():
+        row = (await db.execute(
+            select(CrawlRunStatus).where(CrawlRunStatus.id == 1)
+        )).scalar_one_or_none()
+        if row is None:
+            row = CrawlRunStatus(id=1)
+            db.add(row)
+        row.started_at = started_at
+        row.finished_at = finished_at
+        row.status = status
+        row.error = error[:2000] if error else None
+        await db.commit()
+        break
+
+
 async def _crawl_task(start_date: str, end_date: str):
     """백그라운드에서 실행되는 크롤링 작업"""
     from crawler import run_crawl
     from database import get_db
+    started_at = datetime.utcnow()
     async for db in get_db():
         try:
             result = await run_crawl(start_date, end_date, db)
@@ -3489,6 +3515,7 @@ async def _crawl_task(start_date: str, end_date: str):
         except Exception as e:
             log.error("크롤링 백그라운드 실패: %s", e, exc_info=True)
             print(f"CRAWL ERROR: {e}", flush=True)
+            await _record_crawl_status("error", started_at, datetime.utcnow(), str(e))
             return
 
         # MV 갱신 — 데이터 적재와 분리해서 실패해도 크롤링 결과는 보존
@@ -3500,6 +3527,8 @@ async def _crawl_task(start_date: str, end_date: str):
             log.error("MV 갱신 실패 (데이터는 저장됨): %s", e, exc_info=True)
             print(f"MV REFRESH ERROR (data saved): {e}", flush=True)
 
+    await _record_crawl_status("success", started_at, datetime.utcnow(), None)
+
 
 @app.post("/api/crawl")
 async def trigger_crawl(
@@ -3508,7 +3537,7 @@ async def trigger_crawl(
     background_tasks: BackgroundTasks = None,
 ):
     """크롤링 즉시 202 반환, 실제 작업은 백그라운드에서 실행"""
-    from datetime import date, timedelta
+    from datetime import timedelta
     import asyncio
 
     if not start_date or not end_date:
