@@ -4325,10 +4325,10 @@ function ProductSourcingPage({ navigate }) {
                   테이블이 컨테이너 폭까지 늘어나고, 각 열 폭이 비율대로 함께 커지면서
                   셀 안에 불필요한 여백이 생긴다. width를 각 열 폭의 합과 동일하게 고정해
                   화면이 넓어도 늘어나지 않게 한다(부족한 화면에서는 overflowX:auto로 스크롤). */}
-              <table style={{width:1288}}>
+              <table style={{width:1194}}>
                 <thead>
                   <tr>
-                    <th style={{width:117, position:"sticky", top:0, zIndex:30}}>
+                    <th style={{width:105, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">품목명</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_type||null} activeSortCol={sortBy==="product_type"} activeSortDir={sortDir} localValues={productTypeVals} onSort={dir=>applySort("product_type",dir)} onApply={vals=>setColFilters(p=>({...p,product_type:vals}))}/>
@@ -4347,7 +4347,7 @@ function ProductSourcingPage({ navigate }) {
                       </div>
                     </th>
                     <th style={{width:50, position:"sticky", top:0, zIndex:30}}>이미지</th>
-                    <th style={{width:320, position:"sticky", top:0, zIndex:30}}>
+                    <th style={{width:272, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">상품명</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_name_en||null} activeSortCol={sortBy==="product_name_en"} activeSortDir={sortDir} localValues={productNameVals} onSort={dir=>applySort("product_name_en",dir)} onApply={vals=>setColFilters(p=>({...p,product_name_en:vals}))}/>
@@ -4359,7 +4359,7 @@ function ProductSourcingPage({ navigate }) {
                         <RangeFilter label="가격 범위 (USD)" activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} onSort={dir=>applySort("price_usd",dir)} activeRange={colFilters.price_range||null} onApplyRange={range=>setColFilters(p=>({...p,price_range:range}))}/>
                       </div>
                     </th>
-                    <th style={{width:135, position:"sticky", top:0, zIndex:30}}>
+                    <th style={{width:101, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">원산지</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.origin||null} activeSortCol={sortBy==="origin"} activeSortDir={sortDir} localValues={originVals} onSort={dir=>applySort("origin",dir)} onApply={vals=>setColFilters(p=>({...p,origin:vals}))}/>
