@@ -12,10 +12,11 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:password@loc
 
 engine = create_async_engine(
     DATABASE_URL,
-    # A Render Free instance has 0.1 CPU and 512 MB RAM. A possible 30 asyncpg
-    # connections wastes memory without increasing useful throughput there.
-    pool_size=int(os.getenv("DB_POOL_SIZE", "3")),
-    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "2")),
+    # Render Postgres Basic-1gb allows ~197 connections, so a 5-connection
+    # cap (the old default, sized for Render Free's 0.1 CPU) queued requests
+    # under concurrent traffic instead of using the paid plan's headroom.
+    pool_size=int(os.getenv("DB_POOL_SIZE", "15")),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "10")),
     pool_timeout=10,
     pool_pre_ping=True,
     pool_recycle=300,
