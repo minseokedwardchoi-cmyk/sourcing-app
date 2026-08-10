@@ -4235,27 +4235,6 @@ function ProductSourcingPage({ navigate }) {
 
   const productTypeRecommendations = useProductTypeRecommendations(allRows);
 
-  // 히어로/툴바 영역은 페이지와 함께 스크롤되어 사라지고, 그 아래 테이블 영역이
-  // 남은 뷰포트 높이를 모두 차지하며 자체적으로 스크롤되어 테이블 헤더가 항상 보이도록 높이를 계산.
-  const stickyHeaderRef = useRef(null);
-  const paginationRef = useRef(null);
-  const [tableMaxHeight, setTableMaxHeight] = useState(null);
-  useLayoutEffect(() => {
-    const headerEl = stickyHeaderRef.current;
-    if (!headerEl) return;
-    const update = () => {
-      const headerHeight = headerEl.offsetHeight;
-      const paginationHeight = paginationRef.current ? paginationRef.current.offsetHeight : 0;
-      setTableMaxHeight(Math.max(200, window.innerHeight - headerHeight - paginationHeight - 16));
-    };
-    update();
-    window.addEventListener("resize", update);
-    const ro = new ResizeObserver(update);
-    ro.observe(headerEl);
-    if (paginationRef.current) ro.observe(paginationRef.current);
-    return () => { window.removeEventListener("resize", update); ro.disconnect(); };
-  }, [loading]);
-
   // 제품 그룹별 유통사 커버리지(아마존/월마트/샘스클럽/이온몰 중 몇 곳에 있는지).
   // 페이지네이션/필터와 무관하게 전체 allRows 기준으로 계산해야 정확하다.
   const productCoverageMap = useMemo(() => {
@@ -4303,28 +4282,29 @@ function ProductSourcingPage({ navigate }) {
         {error && <div className="error-box">오류: {error}</div>}
 
         <div className="card">
-          <div className="sticky-panel-header" ref={stickyHeaderRef}>
-            <div className="toolbar">
-              <div className="search-wrap">
-                <span className="search-icon">🔍</span>
-                <input placeholder="품목명, 브랜드, 상품명 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
-              </div>
-              <span className="count-label">{allRows ? `총 ${meta.total.toLocaleString()}건 중 표시` : ""}</span>
-              <button className="icon-btn" disabled={exporting} onClick={downloadOriginalFormat} title="원본 엑셀(유형별카드) 형식으로 사진 포함 다운로드">
-                {exporting ? "생성 중..." : "⬇ 원본 형식 다운로드"}
-              </button>
+          <div className="toolbar">
+            <div className="search-wrap">
+              <span className="search-icon">🔍</span>
+              <input placeholder="품목명, 브랜드, 상품명 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
             </div>
-            {exportError && <div className="error-box">다운로드 오류: {exportError}</div>}
+            <span className="count-label">{allRows ? `총 ${meta.total.toLocaleString()}건 중 표시` : ""}</span>
+            <button className="icon-btn" disabled={exporting} onClick={downloadOriginalFormat} title="원본 엑셀(유형별카드) 형식으로 사진 포함 다운로드">
+              {exporting ? "생성 중..." : "⬇ 원본 형식 다운로드"}
+            </button>
           </div>
+          {exportError && <div className="error-box">다운로드 오류: {exportError}</div>}
 
           {loading ? (
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
-            <div className="table-wrap" style={{overflow:"auto", maxHeight: tableMaxHeight ? `${tableMaxHeight}px` : undefined}}>
+            <div className="table-wrap">
               {/* width를 명시하지 않으면 전역 `table{width:100%}` 규칙 때문에 넓은 화면에서
                   테이블이 컨테이너 폭까지 늘어나고, 각 열 폭이 비율대로 함께 커지면서
                   셀 안에 불필요한 여백이 생긴다. width를 각 열 폭의 합과 동일하게 고정해
-                  화면이 넓어도 늘어나지 않게 한다(부족한 화면에서는 overflowX:auto로 스크롤). */}
+                  화면이 넓어도 늘어나지 않게 한다(부족한 화면에서는 overflowX:auto로 스크롤).
+                  세로는 페이지 전체 스크롤에 맡기고(overflow-x만), thead의 position:sticky가
+                  뷰포트 상단에 붙어 헤더가 계속 보이도록 한다 — 별도 높이 제한 박스를 두면
+                  한 화면에 보이는 행 수가 줄어들어 답답해지므로 쓰지 않는다. */}
               <table style={{width:1194}}>
                 <thead>
                   <tr>
@@ -4409,9 +4389,7 @@ function ProductSourcingPage({ navigate }) {
             </div>
           )}
 
-          <div ref={paginationRef}>
-            <Pagination meta={meta} page={page} setPage={setPage}/>
-          </div>
+          <Pagination meta={meta} page={page} setPage={setPage}/>
         </div>
       </div>
     </div>
