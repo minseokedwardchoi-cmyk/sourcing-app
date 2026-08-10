@@ -3680,9 +3680,11 @@ function importerVerdictLines(row) {
 }
 
 // 병행수입 판정 근거(factory별 수입업체 목록)를 호버 툴팁 텍스트로 만든다.
-// "수입이력 없음"은 배지에 △로 축약 표시되므로, 툴팁에 원래 의미를 풀어서 보여준다.
+// O/X를 제외한 값(수입이력 없음/브랜드불명확/확인불가 등)은 배지에 △로 축약 표시되므로,
+// 툴팁에 원래 의미를 풀어서 보여준다.
 function parallelImportTitle(row) {
-  const prefix = row.parallel_import === "수입이력 없음" ? "수입이력 없음 — " : "";
+  const v = String(row.parallel_import || "").trim();
+  const prefix = v && v !== "O" && v !== "X" ? `${v} — ` : "";
   const lines = importerVerdictLines(row);
   if (lines.length === 0) return `${prefix}병행수입 가능여부`;
   return `${prefix}병행수입 가능여부 — 판정 근거\n${lines.join("\n")}`;
@@ -3935,7 +3937,7 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
         <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
         <td><ClampCell>{row.origin || "-"}</ClampCell></td>
         <td style={{whiteSpace:"nowrap"}}>{formatUnitDisplay(row.unit) || "-"}</td>
-        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{parallelImportDisplay(row.parallel_import) || "정보없음"}</span></td>
+        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{parallelImportDisplay(row.parallel_import)}</span></td>
         <td><ProductSourcingRiskCell row={row}/></td>
         <td onClick={e=>e.stopPropagation()}><HsCodeCell row={row}/></td>
         <td style={{whiteSpace:"nowrap"}}><EstimatedCostCell row={row}/></td>
@@ -3982,10 +3984,12 @@ function parallelImportLabel(value) {
   return "미확인";
 }
 
-// 메인 테이블용: O/X/기타 상세 사유는 원문 그대로 보여주되, "수입이력 없음"만
-// O/X처럼 짧은 기호(△ = 리스크 확인된 바 없는 중간 상태)로 축약해 배지·열 폭을 줄인다.
+// 메인 테이블용: O/X는 그대로, 그 외 모든 값(수입이력 없음/브랜드불명확/확인불가/정보없음 등
+// 길이가 제각각인 사유 문구)은 O/X와 같은 폭의 짧은 기호(△ = 확정되지 않은 중간 상태)로
+// 통일해 배지·열 폭을 좁게 유지한다. 상세 사유는 배지 호버 툴팁(parallelImportTitle)에서 확인.
 function parallelImportDisplay(value) {
-  return value === "수입이력 없음" ? "△" : value;
+  const v = String(value || "").trim();
+  return v === "O" || v === "X" ? v : "△";
 }
 
 function buildRecommendationCandidate(rows) {
@@ -4296,16 +4300,16 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1418}}>
+              <table style={{minWidth:1355}}>
                 <thead>
                   <tr>
-                    <th style={{width:130}}>
+                    <th style={{width:117}}>
                       <div className="th-inner">
                         <span className="th-label">품목명</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_type||null} activeSortCol={sortBy==="product_type"} activeSortDir={sortDir} localValues={productTypeVals} onSort={dir=>applySort("product_type",dir)} onApply={vals=>setColFilters(p=>({...p,product_type:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:128}}>
+                    <th style={{width:122}}>
                       <div className="th-inner">
                         <span className="th-label">브랜드</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
@@ -4336,8 +4340,8 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.origin||null} activeSortCol={sortBy==="origin"} activeSortDir={sortDir} localValues={originVals} onSort={dir=>applySort("origin",dir)} onApply={vals=>setColFilters(p=>({...p,origin:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:95}}>단량</th>
-                    <th style={{width:90}}>
+                    <th style={{width:81}}>단량</th>
+                    <th style={{width:45}}>
                       <div className="th-inner">
                         <span className="th-label">병행수입</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
