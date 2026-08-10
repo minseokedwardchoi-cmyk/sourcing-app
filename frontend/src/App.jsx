@@ -3835,7 +3835,7 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
           {isProductFirst && <RetailerCoverageBadges coverage={coverage}/>}
           <ClampCell title={row.product_name_en || ""}>
             {row.url
-              ? <a className="link-cell" href={row.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>{row.product_name_en || "-"}</a>
+              ? <a className="link-cell" href={row.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{whiteSpace:"normal", overflow:"visible", textOverflow:"clip", display:"inline", maxWidth:"none"}}>{row.product_name_en || "-"}</a>
               : (row.product_name_en || "-")
             }
           </ClampCell>
@@ -3941,28 +3941,6 @@ function useProductTypeRecommendations(allRows) {
   }, [allRows]);
 }
 
-function RecommendationNameCell({ rep }) {
-  const [expanded, setExpanded] = useState(false);
-  const name = rep.product_name_en || "";
-  const needsClamp = name.length > 40;
-  const halfLen = Math.ceil(name.length / 2);
-  const shown = expanded || !needsClamp ? name : name.slice(0, halfLen).trimEnd() + "…";
-  return (
-    <span>
-      <b>{rep.brand_kr || rep.brand_en || "-"}</b>
-      {name ? ` — ${shown}` : ""}
-      {needsClamp && (
-        <button
-          onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
-          style={{ marginLeft: 6, fontSize: 11, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}
-        >
-          {expanded ? "접기" : "더보기"}
-        </button>
-      )}
-    </span>
-  );
-}
-
 function ProductTypeRecommendationCard({ productType, candidates }) {
   const list = candidates || [];
   return (
@@ -3992,8 +3970,11 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
                 <tbody>
                   {list.map((c, i) => (
                     <tr key={i}>
-                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", maxWidth: 420, whiteSpace: "normal", wordBreak: "break-word" }}>
-                        <RecommendationNameCell rep={c.rep} />
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", maxWidth: 210, whiteSpace: "normal", wordBreak: "break-word" }}>
+                        <ClampCell title={`${c.rep.brand_kr || c.rep.brand_en || "-"}${c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}`}>
+                          <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
+                          {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
+                        </ClampCell>
                       </td>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
                         <RetailerCoverageBadges coverage={c.coverage} /> {c.coverage.size}/4곳
