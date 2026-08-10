@@ -18,6 +18,7 @@ import {
   getProductSourcingExportUrl,
   fetchQuickCheck,
 } from "./api.js";
+import { RECOMMENDATION_EXCLUDED_PAIRS } from "./productSourcingRecommendationExclusions.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
 
 // 지도 데이터(countries-50m, ~756KB)를 JS 번들에서 분리해 런타임에 정적 애셋으로 로드한다.
@@ -3996,6 +3997,57 @@ function buildRecommendationCandidate(rows) {
 
 // 품목(product_type)별 추천 후보 리스트를 계산. 현재 필터/페이지와 무관하게 전체 allRows
 // 기준으로 계산해야 "이 품목 전체에서" 자격을 만족하는 제품을 정확히 골라낼 수 있다.
+// 추천 요약(품목별 카드)에서만 적용하는 오분류 데이터 필터. 메인 테이블 데이터는 건드리지 않는다.
+// 1) 구조적 규칙: 상품명/브랜드에 "이 상품 자체가 애초에 어떤 식품 품목에도 맞을 수 없는" 신호
+//    (비식품 생활용품/문구/화장품/도서, 반려동물 사료, 유아 이유식)가 보이면 품목과 무관하게 항상 제외.
+//    크롤링 매칭이 범용 단어(예: "roll", "whole", "french") 하나만 보고 엮은 경우를 잡아낸다.
+// 2) RECOMMENDATION_EXCLUDED_PAIRS: 위 규칙으로도 못 거르는 개별 오분류(같은 식품이지만 하위
+//    카테고리가 다른 경우 등)를 (품목, product_group_key) 단위로 하드코딩 제외.
+const RECOMMENDATION_NON_FOOD_KEYWORDS_EN = [
+  "toilet roll", "toilet tissue", "toilet paper", "bath tissue",
+  "lint roller", "carpet cleaning tape",
+  "fabric softener",
+  "petroleum jelly", "vaseline",
+  "highlighter", "rollerball pen", "paint marker", "gel pen",
+  "embroidery needle", "twist comb",
+  "(paperback)",
+  "gummy mold", "gummy bear mold",
+  "composition book",
+  "butcher's twine", "butchers twine",
+  "fishing rod", "reel combo",
+  "gift card", "gift basket",
+  "teether",
+  "sauce dish", "divided sauce plate",
+  "watering pot",
+  "scented spray",
+  "shower gel",
+];
+const RECOMMENDATION_NON_FOOD_KEYWORDS_KR = [
+  "화장지", "린트롤러", "카펫클리닝테이프", "섬유유연제", "바세린",
+  "형광펜", "롤러볼", "페인트마카", "자수바늘", "트위스트빗",
+  "젤리몰드", "정육용끈", "낚싯대", "릴콤보",
+  "상품권", "기프트카드", "기프트바스켓", "치아발육기",
+  "소스접시", "워터링팟", "향수", "샤워젤",
+];
+const RECOMMENDATION_PET_FOOD_KEYWORDS_EN = [
+  "sheba", "fancy feast", "temptations", "smart heart",
+  "waggin' train", "waggin train", "spot farms", "delizios", "prodiet",
+];
+const RECOMMENDATION_BABY_FOOD_KEYWORDS_EN = ["cerelac", "wakodo", "babyfood", "baby food"];
+const RECOMMENDATION_BABY_FOOD_KEYWORDS_KR = ["이유식", "유아식", "니코니코", "하타케노미카타"];
+
+function isStructurallyIneligibleForRecommendation(row) {
+  const krText = [row.brand_kr, row.product_name_en].filter(Boolean).join(" ");
+  const enText = [row.brand_en, row.product_name_en].filter(Boolean).join(" ").toLowerCase();
+  return (
+    RECOMMENDATION_NON_FOOD_KEYWORDS_EN.some(k => enText.includes(k)) ||
+    RECOMMENDATION_NON_FOOD_KEYWORDS_KR.some(k => krText.includes(k)) ||
+    RECOMMENDATION_PET_FOOD_KEYWORDS_EN.some(k => enText.includes(k)) ||
+    RECOMMENDATION_BABY_FOOD_KEYWORDS_EN.some(k => enText.includes(k)) ||
+    RECOMMENDATION_BABY_FOOD_KEYWORDS_KR.some(k => krText.includes(k))
+  );
+}
+
 function useProductTypeRecommendations(allRows) {
   return useMemo(() => {
     const map = new Map();
@@ -4003,6 +4055,8 @@ function useProductTypeRecommendations(allRows) {
     const byType = new Map();
     for (const r of allRows) {
       if (!r.product_group_key) continue;
+      if (RECOMMENDATION_EXCLUDED_PAIRS.has(`${r.product_type}||${r.product_group_key}`)) continue;
+      if (isStructurallyIneligibleForRecommendation(r)) continue;
       if (!byType.has(r.product_type)) byType.set(r.product_type, new Map());
       const groups = byType.get(r.product_type);
       if (!groups.has(r.product_group_key)) groups.set(r.product_group_key, []);
