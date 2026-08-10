@@ -3977,17 +3977,10 @@ function parallelImportScore(value) {
   return 0; // X, 확인필요, 정보없음 등
 }
 
-function parallelImportLabel(value) {
-  const v = String(value || "").trim();
-  if (v === "O") return "가능";
-  if (v === "수입이력 없음") return "△";
-  if (v === "X") return "불가";
-  return "미확인";
-}
-
-// 메인 테이블용: O/X와 "수입이력 없음"(△)만 짧은 기호로 축약하고, 그 외 사유 문구
+// O/X와 "수입이력 없음"(△)만 짧은 기호로 축약하고, 그 외 사유 문구
 // (브랜드불명확/확인불가 등)는 원문을 그대로 둔다 — 좁은 열 폭 때문에 배지가 잘려도
-// 괜찮고, 전체 문구는 행을 펼치면(5년내 이슈 상세 영역) 확인할 수 있다.
+// 괜찮고, 전체 문구는 메인 테이블에서 행을 펼치면(5년내 이슈 상세 영역) 확인할 수 있다.
+// 추천 요약 카드도 동일한 표시 규칙을 공유한다.
 function parallelImportDisplay(value) {
   return value === "수입이력 없음" ? "△" : value;
 }
@@ -4089,7 +4082,7 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
                         <RetailerCoverageBadges coverage={c.coverage} /> {c.coverage.size}/4곳
                       </td>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
-                        <span className={`badge ${statusBadgeClass(c.rep.parallel_import)}`} title={parallelImportTitle(c.rep)}>{parallelImportLabel(c.rep.parallel_import)}</span>
+                        <span className={`badge ${statusBadgeClass(c.rep.parallel_import)}`} title={parallelImportTitle(c.rep)}>{parallelImportDisplay(c.rep.parallel_import) || "정보없음"}</span>
                       </td>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
                         <ProductSourcingRiskCell row={c.rep} />
@@ -4300,7 +4293,7 @@ function ProductSourcingPage({ navigate }) {
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
           ) : (
             <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:1355}}>
+              <table style={{minWidth:1339}}>
                 <thead>
                   <tr>
                     <th style={{width:117}}>
@@ -4340,7 +4333,7 @@ function ProductSourcingPage({ navigate }) {
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.origin||null} activeSortCol={sortBy==="origin"} activeSortDir={sortDir} localValues={originVals} onSort={dir=>applySort("origin",dir)} onApply={vals=>setColFilters(p=>({...p,origin:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:81}}>단량</th>
+                    <th style={{width:65}}>단량</th>
                     <th style={{width:45, padding:"6px 4px"}}>
                       <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
                         <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>병행<br/>수입</span>
