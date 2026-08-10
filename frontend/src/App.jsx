@@ -16,6 +16,7 @@ import {
   fetchProductSourcingAll,
   updateProductSourcingHsCode,
   getProductSourcingExportUrl,
+  fetchQuickCheck,
 } from "./api.js";
 import { getKoreanName, resolveKoreanName } from "./countryGeo.js";
 
@@ -758,6 +759,13 @@ function MainDashboard({ navigate }) {
     [searchActive, data]
   );
   const [showCompCards, setShowCompCards] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  useEffect(()=>{
+    fetchQuickCheck()
+      .then(r=>setLastUpdated(r.latest_process_date))
+      .catch(()=>{});
+  },[]);
 
   function cellKey(colKey, i) { return `${colKey}:${i}`; }
 
@@ -967,7 +975,9 @@ function MainDashboard({ navigate }) {
                 📗 상세 가이드
               </a>
             </div>
-            <span style={{fontSize:12,color:"#6b7280"}}>업데이트 일자: 2026.08.10</span>
+            <span style={{fontSize:12,color:"#6b7280"}}>
+              업데이트 일자: {lastUpdated ? lastUpdated.replaceAll("-", ".") : "-"}
+            </span>
           </div>
 
           {/* 경쟁사 카드 */}

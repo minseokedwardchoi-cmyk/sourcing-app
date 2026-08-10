@@ -247,6 +247,11 @@ export function fetchStats() {
   return request("/api/stats");
 }
 
+/** 수입이력 최신 반영일 등 간단 상태 체크 */
+export function fetchQuickCheck() {
+  return request("/api/quick-check");
+}
+
 /** Excel 업로드 (파일을 그대로 서버에 전송, 서버에서 파싱/적재) */
 export async function uploadExcel(file) {
   const form = new FormData();
