@@ -4049,6 +4049,7 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
               <table style={{ tableLayout: "auto", width: "auto", minWidth: 0, borderCollapse: "collapse", fontSize: 12.5, background: "#fff" }}>
                 <thead>
                   <tr>
+                    <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>이미지</th>
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>브랜드-상품명</th>
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>유통사</th>
                     <th style={{ textAlign: "left", padding: "5px 8px", color: "#6b7280", fontSize: 11, fontWeight: 600, borderBottom: "1px solid #d6e4ff", whiteSpace: "nowrap" }}>병행수입</th>
@@ -4060,10 +4061,24 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
                 <tbody>
                   {list.map((c, i) => (
                     <tr key={i}>
+                      <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9" }}>
+                        {c.rep.image_url
+                          ? <img src={c.rep.image_url} alt="" style={{width:32,height:32,objectFit:"contain",borderRadius:6,border:"1px solid #f1f3f5"}} onError={e=>{e.target.style.display="none";}}/>
+                          : <div style={{width:32,height:32,borderRadius:6,background:"#f3f4f6"}}/>
+                        }
+                      </td>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", maxWidth: 210, whiteSpace: "normal", wordBreak: "break-word" }}>
                         <ClampCell title={`${c.rep.brand_kr || c.rep.brand_en || "-"}${c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}`}>
-                          <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
-                          {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
+                          {c.rep.url
+                            ? <a className="link-cell" href={c.rep.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}>
+                                <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
+                                {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
+                              </a>
+                            : <>
+                                <b>{c.rep.brand_kr || c.rep.brand_en || "-"}</b>
+                                {c.rep.product_name_en ? ` — ${c.rep.product_name_en}` : ""}
+                              </>
+                          }
                         </ClampCell>
                       </td>
                       <td style={{ padding: "5px 8px", borderBottom: "1px solid #eef2f9", whiteSpace: "nowrap" }}>
