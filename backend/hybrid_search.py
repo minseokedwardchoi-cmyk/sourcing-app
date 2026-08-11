@@ -51,21 +51,23 @@ _DYNAMIC_INTENT_CACHE_MAX_SIZE = 256
 _EMBEDDING_HARD_TIMEOUT_SECONDS = 3.0
 
 # ─── 검색어 없는 "그냥 둘러보기" 응답 캐시 ────────────────────────────────────
-# 검색어가 없을 때(hybrid_enabled은 항상 False) 이 함수는 매번 sku_history_mv를
-# market_status_mv와 통째로 조인하고 COUNT(*) OVER()로 전체 건수를 세는 무거운
-# 쿼리를 실행한다. 첫 화면 방문·필터 없는 리스트 열람이 압도적으로 이 경로를
-# 타는데, 같은 정렬/페이지/필터 조합이면 결과가 항상 같으므로 응답 전체를
-# 캐싱해 반복 계산을 없앤다. 업로드/크롤링 이후 refresh_mvs()가 clear_browse_cache()를
-# 호출하는 시점에만 무효화한다(다른 캐시들과 동일한 패턴).
+# 검색어가 없을 때(hybrid_enabled은 항상 False) 이 함수는 매번 sku_history_mv에서
+# COUNT(*) OVER()로 전체 건수를 세는 무거운 쿼리를 실행한다. 첫 화면 방문·필터
+# 없는 리스트 열람이 압도적으로 이 경로를 타는데, 같은 정렬/페이지/필터 조합이면
+# 결과가 항상 같으므로 응답 전체를 캐싱해 반복 계산을 없앤다. 업로드/크롤링 이후
+# refresh_mvs()가 clear_browse_cache()를 호출하는 시점에만 무효화한다(다른
+# 캐시들과 동일한 패턴).
 _BROWSE_CACHE_MAX = 300
 _browse_response_cache: "OrderedDict[tuple, HybridSearchResponse]" = OrderedDict()
 
 # ─── 전체 건수(total) 캐시 — 페이지/정렬과 무관, 필터 조합당 1개 ──────────────
 # COUNT(*) OVER()로 total_count를 데이터와 한 쿼리에 묶어 계산하면, base_result
-# (filtered_source LEFT JOIN market_status_mv) 전체를 강제로 구체화해야 해서
-# sku_history_mv 전체 규모(수십만 행)를 매번 훑는다. 실측상 이 쿼리는 캐시가
-# 없는 조합(= 1페이지가 아닌 모든 페이지, 크롤링 직후의 1페이지도 포함)에서
-# 60초 넘게 걸려 사실상 응답 불가였다.
+# 전체를 강제로 구체화해야 해서 sku_history_mv 전체 규모(수십만 행)를 매번 훑는다.
+# 실측상 이 쿼리는 캐시가 없는 조합(= 1페이지가 아닌 모든 페이지, 크롤링 직후의
+# 1페이지도 포함)에서 60초 넘게 걸려 사실상 응답 불가였다. (예전엔 market_status_mv
+# 런타임 JOIN도 이 위에 더해져 있었는데, 그 JOIN이 정렬 인덱스를 아예 못 쓰게 만드는
+# 별도 문제였어서 sku_history_mv 쪽에 market_status를 미리 계산해두는 걸로 없앴다 —
+# 위 시간은 그 JOIN을 없앤 이후에도 여전히 남는, COUNT(*) OVER() 자체의 비용이다.)
 # total_count는 페이지/정렬이 달라져도 같은 필터 조합이면 동일하므로, 한 번
 # 계산되면(=_browse_response_cache에 그 필터의 아무 페이지든 한 번 히트하면)
 # 이후 다른 페이지 요청은 이 값을 재사용해 COUNT(*) OVER() 없는 가벼운
@@ -161,9 +163,9 @@ def _column_filters(filters: dict[str, Optional[list[str]]], params: dict) -> st
 
 
 def _market_status_in_clause(market_status: Optional[list[str]], params: dict) -> Optional[str]:
-    """market_status_mv 조인 후 걸어야 하는 필터라 _column_filters()로는 처리 못 함.
-    호출부 두 군데(base_result 바깥 WHERE, count_sql의 ms 조인)가 컬럼 접두사만
-    다르게 써야 해서, bind param 등록만 여기서 하고 IN절 텍스트는 호출부가 조립한다.
+    """market_status는 컬럼명이 같아도 쓰이는 위치마다 필요한 접두어가 달라
+    (base_result 바깥 WHERE는 접두어 없음, count_sql은 fs.) _column_filters()로는
+    처리 못 함. bind param 등록만 여기서 하고 IN절 텍스트는 호출부가 조립한다.
     """
     if not market_status:
         return None
@@ -176,6 +178,12 @@ def _source_sql(date_from: Optional[str], date_to: Optional[str], params: dict) 
     if date_from or date_to:
         params["date_from"] = date.fromisoformat(date_from) if date_from else date(1900, 1, 1)
         params["date_to"] = date.fromisoformat(date_to) if date_to else date(9999, 12, 31)
+        # market_status/cr4_pct는 여기서 계산하지 않고 NULL로 둔다 — sku_history_mv에서는
+        # 이 값을 MV 리프레시 시점(=매일 새벽 1회)에 미리 구해 컬럼으로 갖고 있지만,
+        # 이 날짜 필터 분기는 요청마다 즉석 재집계하는 이미 무거운 경로라 여기서까지
+        # market_status_mv를 다시 조인하면 그 무거운 JOIN을 되살리는 셈이 된다. 게다가
+        # market_status는 원래 "전체 기간" 기준 판정이라 특정 기간으로 좁혀 다시 계산하는
+        # 것 자체가 의미상 맞지 않는다(제품 자체의 병행수입 가능여부이지, 기간별 값이 아님).
         return """
             (
                 SELECT
@@ -190,7 +198,9 @@ def _source_sql(date_from: Optional[str], date_to: Optional[str], params: dict) 
                     COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
                           = EXTRACT(YEAR FROM CURRENT_DATE) - 2 THEN 1 END)::int AS count_year2,
                     COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
-                          = EXTRACT(YEAR FROM CURRENT_DATE) - 3 THEN 1 END)::int AS count_year3
+                          = EXTRACT(YEAR FROM CURRENT_DATE) - 3 THEN 1 END)::int AS count_year3,
+                    NULL::text    AS market_status,
+                    NULL::numeric AS cr4_pct
                 FROM import_history
                 WHERE COALESCE(import_date, process_date)
                       BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
@@ -412,13 +422,13 @@ async def search_hybrid(
     col_filter_conds = _column_filters(filters, params)
     competitor_cond = _competitor_condition(competitor)
     source_sql = _source_sql(date_from, date_to, params)
-    # market_status는 원본 테이블에 없는 계산 컬럼(그룹별 CR4 판정)이라 filtered_source
-    # 단계에서 걸러낼 수 없다 — market_status_mv 조인 결과를 base_result CTE로 한 번 더
-    # 평평하게 만든 뒤, 그 바깥 SELECT에서 걸러야 컬럼명이 하나뿐이라 ambiguous 에러도
-    # 없고 필터도 걸 수 있다.
+    # market_status는 이제 source_rows(sku_history_mv 또는 날짜필터 서브쿼리) 자체의
+    # 컬럼이라 별도 조인 없이 걸러진다. base_result 바깥 SELECT에서 거를 땐 컬럼명이
+    # 하나뿐이라 그냥 market_status로, count_sql 안에서 filtered_source에 직접 거를
+    # 땐 fs.market_status로 접두어를 붙인다(둘 다 같은 컬럼, alias만 다름).
     ms_in = _market_status_in_clause(market_status_filter, params)
     market_status_cond = f"AND market_status IN ({ms_in})" if ms_in else ""
-    market_status_cond_ms = f"AND ms.market_status IN ({ms_in})" if ms_in else ""
+    market_status_cond_ms = f"AND fs.market_status IN ({ms_in})" if ms_in else ""
 
     direct_search_cond = ""
     if query:
@@ -576,7 +586,7 @@ async def search_hybrid(
                     d.match_type, d.semantic_score, d.relevance_score,
                     d.mc_intent_bonus, d.category_intent_bonus, d.best_keyword_bonus,
                     d.mc_mismatch_penalty, d.category_mismatch_penalty,
-                    ms.market_status, ms.cr4_pct
+                    s.market_status, s.cr4_pct
                 FROM filtered_source s
                 JOIN thresholded d
                   ON s.category IS NOT DISTINCT FROM d.category
@@ -587,13 +597,6 @@ async def search_hybrid(
                  AND s.manufacturer IS NOT DISTINCT FROM d.manufacturer
                  AND s.factory IS NOT DISTINCT FROM d.factory
                  AND s.country IS NOT DISTINCT FROM d.country
-                LEFT JOIN market_status_mv ms
-                  ON s.category IS NOT DISTINCT FROM ms.category
-                 AND s.mc IS NOT DISTINCT FROM ms.mc
-                 AND s.sku_name = ms.sku_name
-                 AND s.import_type IS NOT DISTINCT FROM ms.import_type
-                 AND s.factory IS NOT DISTINCT FROM ms.factory
-                 AND s.country IS NOT DISTINCT FROM ms.country
             )
             SELECT *, COUNT(*) OVER() AS total_count
             FROM base_result
@@ -609,24 +612,22 @@ async def search_hybrid(
         # including plain browsing with no search term) and query
         # filtered_source directly, exactly like the pre-hybrid endpoint did.
         #
-        # NOTE: a prior attempt paginated filtered_source (LIMIT 50) *before*
-        # joining market_status_mv, on the theory that joining only 50 rows
-        # instead of the whole table would be cheaper. In production this
-        # made things far worse (requests that used to return in ~10-30s
-        # started timing out completely) - joining a tiny derived/uninexed
-        # row set against market_status_mv via the NULL-safe
-        # IS NOT DISTINCT FROM conditions apparently pushed Postgres into a
-        # much worse plan than joining the two materialized views directly.
-        # Reverted to joining before pagination.
+        # HISTORICAL NOTE: this used to LEFT JOIN market_status_mv here at query
+        # time to attach market_status/cr4_pct. That runtime JOIN was the actual
+        # bottleneck (confirmed via EXPLAIN): it made Postgres re-sort the whole
+        # base_result instead of using the sort-column index, so any page not
+        # already cached took 60s+ in production. market_status is now precomputed
+        # into sku_history_mv itself at MV-refresh time (see _SKU_HISTORY_MV_SQL in
+        # main.py), so filtered_source already carries it as a plain column and no
+        # join is needed here at all. (A prior attempt to fix the old JOIN by
+        # pushing LIMIT 50 before it made things worse instead of better — that
+        # problem doesn't apply here since there's no JOIN left to reorder.)
         #
-        # total_count (COUNT(*) OVER()) forces Postgres to fully materialize
-        # base_result before it can apply ORDER BY/LIMIT, which on the full
-        # (unfiltered) sku_history_mv LEFT JOIN market_status_mv measured
-        # 60s+ in production for every page except the one pre-warmed at
-        # startup. Since total_count only depends on the filter combo (not
-        # page/sort), reuse it from _total_count_cache once any page for
-        # that combo has been computed, and skip the window function
-        # entirely on the cheap path below.
+        # total_count (COUNT(*) OVER()) still forces Postgres to fully materialize
+        # base_result before it can apply ORDER BY/LIMIT. Since total_count only
+        # depends on the filter combo (not page/sort), reuse it from
+        # _total_count_cache once any page for that combo has been computed, and
+        # skip the window function entirely on the cheap path below.
         count_key = _total_count_cache_key(
             query, competitor, date_from, date_to, filters, market_status_filter,
         )
@@ -658,15 +659,8 @@ async def search_hybrid(
                     NULL::float AS best_keyword_bonus,
                     NULL::float AS mc_mismatch_penalty,
                     NULL::float AS category_mismatch_penalty,
-                    ms.market_status, ms.cr4_pct
+                    fs.market_status, fs.cr4_pct
                 FROM filtered_source fs
-                LEFT JOIN market_status_mv ms
-                  ON fs.category IS NOT DISTINCT FROM ms.category
-                 AND fs.mc IS NOT DISTINCT FROM ms.mc
-                 AND fs.sku_name = ms.sku_name
-                 AND fs.import_type IS NOT DISTINCT FROM ms.import_type
-                 AND fs.factory IS NOT DISTINCT FROM ms.factory
-                 AND fs.country IS NOT DISTINCT FROM ms.country
             )
             SELECT {count_select}
             FROM base_result
@@ -737,13 +731,21 @@ async def search_hybrid(
                 SELECT COUNT(*) FROM (
                     SELECT t.category, t.mc, t.sku_name, t.import_type, t.importer, t.manufacturer, t.factory, t.country
                     FROM thresholded t
-                    LEFT JOIN market_status_mv ms
-                      ON t.category IS NOT DISTINCT FROM ms.category
-                     AND t.mc IS NOT DISTINCT FROM ms.mc
-                     AND t.sku_name = ms.sku_name
-                     AND t.import_type IS NOT DISTINCT FROM ms.import_type
-                     AND t.factory IS NOT DISTINCT FROM ms.factory
-                     AND t.country IS NOT DISTINCT FROM ms.country
+                    -- market_status는 (category,mc,sku_name,import_type,factory,country) 단위라
+                    -- filtered_source(importer 단위, 더 촘촘한 grain)에 그 6컬럼만으로 바로 조인하면
+                    -- 같은 6컬럼을 공유하는 여러 importer 행에 부채꼴로 퍼져 COUNT가 부풀려진다.
+                    -- DISTINCT로 6컬럼 grain으로 먼저 압축한 뒤 조인해야 market_status_mv 조인과
+                    -- 동일한 카디널리티(1:0 또는 1:1)를 유지한다.
+                    LEFT JOIN (
+                        SELECT DISTINCT category, mc, sku_name, import_type, factory, country, market_status
+                        FROM filtered_source
+                    ) fs
+                      ON t.category IS NOT DISTINCT FROM fs.category
+                     AND t.mc IS NOT DISTINCT FROM fs.mc
+                     AND t.sku_name = fs.sku_name
+                     AND t.import_type IS NOT DISTINCT FROM fs.import_type
+                     AND t.factory IS NOT DISTINCT FROM fs.factory
+                     AND t.country IS NOT DISTINCT FROM fs.country
                     WHERE 1=1 {market_status_cond_ms}
                 ) AS counted
             """
@@ -763,13 +765,6 @@ async def search_hybrid(
                       {direct_search_cond}
                 )
                 SELECT COUNT(*) FROM filtered_source fs
-                LEFT JOIN market_status_mv ms
-                  ON fs.category IS NOT DISTINCT FROM ms.category
-                 AND fs.mc IS NOT DISTINCT FROM ms.mc
-                 AND fs.sku_name = ms.sku_name
-                 AND fs.import_type IS NOT DISTINCT FROM ms.import_type
-                 AND fs.factory IS NOT DISTINCT FROM ms.factory
-                 AND fs.country IS NOT DISTINCT FROM ms.country
                 WHERE 1=1 {market_status_cond_ms}
             """
             count_result = await db.execute(text(count_sql), params)

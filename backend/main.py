@@ -336,7 +336,8 @@ async def _startup_bg():
                 await conn.execute(text(col_sql))
             except Exception:
                 pass
-        if not await _matview_has_column(conn, "sku_history_mv", "earliest_import"):
+        if not await _matview_has_column(conn, "sku_history_mv", "earliest_import") \
+                or not await _matview_has_column(conn, "sku_history_mv", "market_status"):
             await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_factory_mv"))
             await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_history_mv"))
 
@@ -415,22 +416,51 @@ async def _startup_bg():
 
 _SKU_HISTORY_MV_SQL = """
     CREATE MATERIALIZED VIEW sku_history_mv AS
+    WITH grouped AS (
+        SELECT
+            category, mc, sku_name, import_type, importer,
+            COUNT(*)                                AS import_count,
+            manufacturer, factory, country,
+            MIN(email)                              AS email,
+            MAX(COALESCE(import_date, process_date)) AS latest_import,
+            MIN(COALESCE(import_date, process_date)) AS earliest_import,
+            EXTRACT(YEAR FROM CURRENT_DATE)::int    AS base_year,
+            COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
+                  THEN 1 END)::int                  AS count_year1,
+            COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
+                  THEN 1 END)::int                  AS count_year2,
+            COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
+                  THEN 1 END)::int                  AS count_year3
+        FROM import_history
+        GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+    ),
+    -- 병행수입 가능여부(O/X) — Postgres는 COUNT(DISTINCT ...) OVER(...)를 지원하지
+    -- 않아(윈도우 함수에서 DISTINCT 미지원) 별도 GROUP BY로 계산 후 JOIN한다. 이
+    -- JOIN은 여기, MV를 만들 때(=매일 새벽 크롤링 후 REFRESH 시점) 딱 한 번만
+    -- 실행된다 — 예전처럼 조회 쿼리마다 market_status_mv를 런타임 LEFT JOIN하던
+    -- 방식은 그 JOIN 때문에 정렬(import_count 등) 인덱스를 못 타고 매번 결과 전체를
+    -- 재정렬해야 해서 캐시 안 된 페이지가 60초+ 걸리는 원인이었다(EXPLAIN으로 확인).
+    -- 여기서 미리 계산해 컬럼으로 박아두면 조회 쿼리에서 그 JOIN이 통째로 사라진다.
+    market AS (
+        SELECT
+            category, mc, sku_name, import_type, factory, country,
+            CASE WHEN COUNT(DISTINCT importer) >= 2 THEN 'O' ELSE 'X' END AS market_status
+        FROM import_history
+        WHERE importer IS NOT NULL
+        GROUP BY category, mc, sku_name, import_type, factory, country
+    )
     SELECT
-        category, mc, sku_name, import_type, importer,
-        COUNT(*)                                AS import_count,
-        manufacturer, factory, country,
-        MIN(email)                              AS email,
-        MAX(COALESCE(import_date, process_date)) AS latest_import,
-        MIN(COALESCE(import_date, process_date)) AS earliest_import,
-        EXTRACT(YEAR FROM CURRENT_DATE)::int    AS base_year,
-        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 1
-              THEN 1 END)::int                  AS count_year1,
-        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
-              THEN 1 END)::int                  AS count_year2,
-        COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
-              THEN 1 END)::int                  AS count_year3
-    FROM import_history
-    GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
+        g.*,
+        m.market_status,
+        NULL::numeric AS cr4_pct
+    FROM grouped g
+    LEFT JOIN market m
+      ON g.category IS NOT DISTINCT FROM m.category
+     AND g.mc IS NOT DISTINCT FROM m.mc
+     AND g.sku_name = m.sku_name
+     AND g.import_type IS NOT DISTINCT FROM m.import_type
+     AND g.factory IS NOT DISTINCT FROM m.factory
+     AND g.country IS NOT DISTINCT FROM m.country
 """
 
 # 병행수입 가능여부 — "구분+MC+제품명+OEM/수입+해외제조업소+제조국"이 같으면 같은 제품으로
