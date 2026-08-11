@@ -274,6 +274,26 @@ _MV_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_sfmv_count      ON sku_factory_mv (import_count DESC)",
 ]
 
+
+async def _matview_has_column(conn, view_name: str, column_name: str) -> bool:
+    """구버전 MV 정의 감지용 컬럼 존재 확인.
+
+    information_schema.columns는 materialized view의 컬럼을 반환하지 않는다
+    (relkind='m'은 그 뷰가 relkind IN ('r','v','f','p')만 다루는 information_schema
+    정의에서 빠짐 — 표준 SQL에 materialized view 개념이 없어서). 이 프로젝트에서
+    이 정보로 "구버전 뷰라 DROP 후 재생성해야 하는지" 판단하던 기존 체크가 전부
+    항상 빈 결과를 받아 실질적으로 죽어있었다(예: market_status_mv를 CR4→O/X로
+    바꾼 마이그레이션이 배포됐는데도 적용되지 않았던 사고). pg_catalog를 직접 봐야
+    materialized view에서도 정확히 동작한다.
+    """
+    row = (await conn.execute(text("""
+        SELECT 1 FROM pg_attribute a
+        JOIN pg_class c ON a.attrelid = c.oid
+        WHERE c.relname = :view_name AND a.attname = :column_name AND NOT a.attisdropped
+    """), {"view_name": view_name, "column_name": column_name})).fetchone()
+    return row is not None
+
+
 async def _startup_bg():
     """MV 생성 + 인덱스 생성을 백그라운드에서 실행 (startup 락 충돌 방지)"""
     import asyncio
@@ -316,11 +336,7 @@ async def _startup_bg():
                 await conn.execute(text(col_sql))
             except Exception:
                 pass
-        col_check = await conn.execute(text("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'sku_history_mv' AND column_name = 'earliest_import'
-        """))
-        if col_check.fetchone() is None:
+        if not await _matview_has_column(conn, "sku_history_mv", "earliest_import"):
             await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_factory_mv"))
             await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_history_mv"))
 
@@ -344,11 +360,7 @@ async def _startup_bg():
         # market_status_mv를 CR4 과점도 판정(독점/과점/진입가능)에서 병행수입 가능여부
         # 판정(O/X)으로 교체 — 예전 정의는 total_365d 컬럼이 있었고 새 정의엔 없으므로,
         # 그 컬럼 존재 여부로 구버전 뷰를 감지해 DROP 후 새로 만든다.
-        ms_col_check = await conn.execute(text("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'market_status_mv' AND column_name = 'total_365d'
-        """))
-        if ms_col_check.fetchone() is not None:
+        if await _matview_has_column(conn, "market_status_mv", "total_365d"):
             await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS market_status_mv"))
         await conn.execute(text(
             _MARKET_STATUS_MV_SQL.replace("CREATE MATERIALIZED VIEW",
