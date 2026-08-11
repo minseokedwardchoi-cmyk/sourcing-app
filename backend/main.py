@@ -2428,10 +2428,11 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
         f"WHEN retailer = '{r}' THEN {i}" for i, r in enumerate(_RETAILER_DISPLAY_ORDER)
     )
     # 품목유형 내 정렬:
-    #   brand_group_key/product_group_key가 채워진 품목(현재는 올리브유 파일럿만)은
+    #   brand_group_key/product_group_key가 채워진 품목(2026-08-12 기준 전체 83개
+    #   품목유형, 7,397행 전부 — 원래 올리브유 파일럿으로 시작했지만 전체로 확장됨)은
     #     (1) 브랜드 그룹(브랜드 내 최초 등장 id 기준) → (2) 브랜드 안에서 동일 제품 그룹
     #     (제품 내 최초 등장 id 기준) → (3) 유통사 우선순위 → (4) 유통사 내 순위.
-    #   아직 그룹핑 안 된 품목은 기존 로직 그대로: (1) 리스크 3항목 중 "통과" 개수
+    #   그룹핑 안 된 행이 남아있다면(brand_group_key IS NULL) 기존 로직 그대로: (1) 리스크 3항목 중 "통과" 개수
     #     많은 순 → (2) 병행수입(O > 수입이력 없음 > X > 그 외) → (3) 유통사 우선순위
     #     → (4) 유통사 내 순위.
     # 정렬 키(품목유형 최초 id, 브랜드그룹 최초 id, 제품그룹 최초 id)를 행마다

@@ -4205,7 +4205,7 @@ function ProductSourcingPage({ navigate }) {
   const meta = { total: filteredSorted.length, page, page_size: PRODUCT_SOURCING_PAGE_SIZE, total_pages: totalPages };
 
   // 브랜드 블록 배경 밴딩(병합 없이 반복 표시) + 제품 그룹 색상 바 계산.
-  // brand_group_key/product_group_key가 없는 행(아직 그룹핑 안 된 82개 품목)은
+  // brand_group_key/product_group_key가 없는 행(그룹핑이 아직 안 된 품목이 남아있을 경우)은
   // id 기준으로 유니크 키를 만들어 사실상 그룹 없음으로 처리한다.
   const pageRowsWithGroups = useMemo(() => {
     const entries = pageRows.map(row => ({
