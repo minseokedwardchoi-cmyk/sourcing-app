@@ -171,6 +171,25 @@ async def _refresh_column_values_cache():
     _column_values_cache = new_cache
 
 
+async def _warm_default_browse_cache():
+    """검색어 없는 기본 리스트(1페이지) 응답 + 전체 건수를 미리 계산해 캐시를
+    데워둔다. clear_hybrid_browse_cache()가 호출되는 시점(서버 기동, 매일 새벽
+    크롤링/업로드 이후)마다 다시 불러야, 그 직후 첫 방문자가 콜드 캐시로
+    COUNT(*) OVER() 무거운 조인/카운트 쿼리(최악의 경우 60초+)를 직접 맞지
+    않는다. total_count는 필터 조합당 한 번만 계산되면 다른 페이지 요청도
+    재사용하므로, 이 한 번의 예열이 1페이지 이후 페이지 이동까지 같이 빨라지게 한다."""
+    try:
+        async with AsyncSessionLocal() as warm_db:
+            await search_hybrid(
+                warm_db, search=None, competitor="전체",
+                sort_by="import_count", sort_dir="desc",
+                page=1, page_size=50, date_from=None, date_to=None,
+                filters={k: None for k in ("category", "mc", "import_type", "importer", "country", "factory", "email", "sku_name")},
+            )
+    except Exception:
+        pass
+
+
 async def refresh_mvs(db: AsyncSession = None):
     """Materialized view refresh — CONCURRENTLY는 트랜잭션 밖에서 실행해야 함"""
     # CONCURRENTLY는 autocommit 커넥션 필요 (트랜잭션 블록 내 실행 불가)
@@ -184,6 +203,9 @@ async def refresh_mvs(db: AsyncSession = None):
     clear_ranking_caches()
     # 검색어 없는 리스트 응답 캐시도 동일한 시점에만 무효화.
     clear_hybrid_browse_cache()
+    # 무효화 직후 바로 재예열 — 이 refresh_mvs()를 트리거한 크롤링/업로드가 끝난
+    # 뒤 처음 페이지를 여는 사용자가 콜드 캐시를 직접 맞지 않도록 한다.
+    await _warm_default_browse_cache()
 
 
 _refresh_mvs_lock = None  # lazily created on the running event loop (see _refresh_mvs_safe)
@@ -366,19 +388,8 @@ async def _startup_bg():
                 await conn.execute(text(sql))
         except Exception:
             pass
+    # refresh_mvs() 안에서 캐시 예열까지 같이 처리된다 (_warm_default_browse_cache).
     await _refresh_mvs_safe()
-    # 첫 방문자가 콜드 캐시로 무거운 조인/카운트 쿼리를 직접 맞지 않도록,
-    # 검색어 없는 기본 리스트(1페이지) 응답을 미리 계산해 캐시를 데워둔다.
-    try:
-        async with AsyncSessionLocal() as warm_db:
-            await search_hybrid(
-                warm_db, search=None, competitor="전체",
-                sort_by="import_count", sort_dir="desc",
-                page=1, page_size=50, date_from=None, date_to=None,
-                filters={k: None for k in ("category", "mc", "import_type", "importer", "country", "factory", "email", "sku_name")},
-            )
-    except Exception:
-        pass
     print("STARTUP BG COMPLETE")
 
 _SKU_HISTORY_MV_SQL = """

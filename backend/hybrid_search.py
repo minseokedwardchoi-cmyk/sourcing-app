@@ -60,9 +60,39 @@ _EMBEDDING_HARD_TIMEOUT_SECONDS = 3.0
 _BROWSE_CACHE_MAX = 300
 _browse_response_cache: "OrderedDict[tuple, HybridSearchResponse]" = OrderedDict()
 
+# ─── 전체 건수(total) 캐시 — 페이지/정렬과 무관, 필터 조합당 1개 ──────────────
+# COUNT(*) OVER()로 total_count를 데이터와 한 쿼리에 묶어 계산하면, base_result
+# (filtered_source LEFT JOIN market_status_mv) 전체를 강제로 구체화해야 해서
+# sku_history_mv 전체 규모(수십만 행)를 매번 훑는다. 실측상 이 쿼리는 캐시가
+# 없는 조합(= 1페이지가 아닌 모든 페이지, 크롤링 직후의 1페이지도 포함)에서
+# 60초 넘게 걸려 사실상 응답 불가였다.
+# total_count는 페이지/정렬이 달라져도 같은 필터 조합이면 동일하므로, 한 번
+# 계산되면(=_browse_response_cache에 그 필터의 아무 페이지든 한 번 히트하면)
+# 이후 다른 페이지 요청은 이 값을 재사용해 COUNT(*) OVER() 없는 가벼운
+# LIMIT/OFFSET 쿼리만 실행한다.
+_TOTAL_COUNT_CACHE_MAX = 500
+_total_count_cache: "OrderedDict[tuple, int]" = OrderedDict()
+
 
 def clear_browse_cache() -> None:
     _browse_response_cache.clear()
+    _total_count_cache.clear()
+
+
+def _total_count_cache_key(
+    query: str,
+    competitor: Optional[str],
+    date_from: Optional[str],
+    date_to: Optional[str],
+    filters: dict[str, Optional[list[str]]],
+    market_status_filter: Optional[list[str]],
+) -> tuple:
+    filters_key = tuple(sorted(
+        (col, tuple(sorted(values)) if values else None)
+        for col, values in filters.items()
+    ))
+    ms_key = tuple(sorted(market_status_filter)) if market_status_filter else None
+    return (query, competitor, date_from, date_to, filters_key, ms_key)
 
 
 def _browse_cache_key(
@@ -472,6 +502,9 @@ async def search_hybrid(
         popularity_union = ""
         popularity_union_count = ""
 
+    count_key = None
+    cached_total = None
+
     if use_semantic:
         # Semantic candidates live in a separate vector table keyed by
         # (sku_name, mc, category), so they need a join back onto
@@ -585,6 +618,20 @@ async def search_hybrid(
         # IS NOT DISTINCT FROM conditions apparently pushed Postgres into a
         # much worse plan than joining the two materialized views directly.
         # Reverted to joining before pagination.
+        #
+        # total_count (COUNT(*) OVER()) forces Postgres to fully materialize
+        # base_result before it can apply ORDER BY/LIMIT, which on the full
+        # (unfiltered) sku_history_mv LEFT JOIN market_status_mv measured
+        # 60s+ in production for every page except the one pre-warmed at
+        # startup. Since total_count only depends on the filter combo (not
+        # page/sort), reuse it from _total_count_cache once any page for
+        # that combo has been computed, and skip the window function
+        # entirely on the cheap path below.
+        count_key = _total_count_cache_key(
+            query, competitor, date_from, date_to, filters, market_status_filter,
+        )
+        cached_total = _total_count_cache.get(count_key)
+        count_select = "*" if cached_total is not None else "*, COUNT(*) OVER() AS total_count"
         data_sql = f"""
             WITH source_rows AS (
                 SELECT * FROM {source_sql}
@@ -621,7 +668,7 @@ async def search_hybrid(
                  AND fs.factory IS NOT DISTINCT FROM ms.factory
                  AND fs.country IS NOT DISTINCT FROM ms.country
             )
-            SELECT *, COUNT(*) OVER() AS total_count
+            SELECT {count_select}
             FROM base_result
             WHERE 1=1 {market_status_cond}
             ORDER BY {sort_expr} {sort_dir_sql} NULLS LAST, latest_import DESC
@@ -636,7 +683,9 @@ async def search_hybrid(
             r for r in recomputed_rows
             if _passes_relevance_threshold(r, effective_similarity_threshold)
         ]
-        if rows:
+        if not use_semantic and cached_total is not None:
+            total = cached_total
+        elif rows:
             total = rows[0]["total_count"]
         elif page == 1:
             total = 0
@@ -725,6 +774,12 @@ async def search_hybrid(
             """
             count_result = await db.execute(text(count_sql), params)
             total = count_result.scalar() or 0
+
+        if count_key is not None and cached_total is None and not use_semantic:
+            _total_count_cache[count_key] = total
+            _total_count_cache.move_to_end(count_key)
+            while len(_total_count_cache) > _TOTAL_COUNT_CACHE_MAX:
+                _total_count_cache.popitem(last=False)
     except Exception as exc:
         if use_semantic:
             await db.rollback()
