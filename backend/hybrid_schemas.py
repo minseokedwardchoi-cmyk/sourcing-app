@@ -24,8 +24,8 @@ class HybridSkuHistoryRow(BaseModel):
     count_year1: int = 0
     count_year2: int = 0
     count_year3: int = 0
-    market_status: Optional[str] = Field(None, description="시장 과점도: 독점/과점/진입가능 (해당 그룹 마지막 거래일 기준 최근 365일 CR4)")
-    cr4_pct: Optional[float] = Field(None, description="동일 제품(구분+MC+제품명+OEM/수입+해외제조업소+제조국) 그룹 내 상위 4개 수입업체 합산 점유율(%)")
+    market_status: Optional[str] = Field(None, description="병행수입 가능여부: O(수입업체 2곳 이상)/X(1곳뿐)")
+    cr4_pct: Optional[float] = Field(None, description="더 이상 계산하지 않음 — 항상 null (하위 호환용으로 필드만 유지)")
     match_type: str = Field("exact", description="exact, semantic, or popular taxonomy rescue")
     semantic_score: Optional[float] = None
     relevance_score: Optional[float] = None
@@ -56,10 +56,10 @@ class SearchSummaryTopProduct(BaseModel):
     import_count: int
     distinct_importer_count: int
     market_status: Optional[str] = Field(
-        None, description="시장 과점도: 독점/과점/진입가능 (해당 그룹 내 수입량 최대 factory/country 조합 기준)"
+        None, description="병행수입 가능여부: O(수입업체 2곳 이상)/X(1곳뿐) (해당 그룹 내 수입량 최대 factory/country 조합 기준)"
     )
     cr4_pct: Optional[float] = Field(
-        None, description="상위 4개 수입업체 합산 점유율(%) (해당 그룹 내 수입량 최대 factory/country 조합 기준)"
+        None, description="더 이상 계산하지 않음 — 항상 null (하위 호환용으로 필드만 유지)"
     )
 
 

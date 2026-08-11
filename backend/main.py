@@ -341,6 +341,15 @@ async def _startup_bg():
             FROM import_history
             GROUP BY sku_name, factory, manufacturer, country, mc
         """))
+        # market_status_mv를 CR4 과점도 판정(독점/과점/진입가능)에서 병행수입 가능여부
+        # 판정(O/X)으로 교체 — 예전 정의는 total_365d 컬럼이 있었고 새 정의엔 없으므로,
+        # 그 컬럼 존재 여부로 구버전 뷰를 감지해 DROP 후 새로 만든다.
+        ms_col_check = await conn.execute(text("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'market_status_mv' AND column_name = 'total_365d'
+        """))
+        if ms_col_check.fetchone() is not None:
+            await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS market_status_mv"))
         await conn.execute(text(
             _MARKET_STATUS_MV_SQL.replace("CREATE MATERIALIZED VIEW",
                                            "CREATE MATERIALIZED VIEW IF NOT EXISTS")
@@ -412,75 +421,23 @@ _SKU_HISTORY_MV_SQL = """
     GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
 """
 
-# 시장 과점도(CR4) — "구분+MC+제품명+OEM/수입+해외제조업소+제조국"이 같으면 같은 제품으로
-# 묶어, 그 그룹을 나눠 갖는 국내 수입업체들의 수입횟수 점유율로 판정한다. 수입업체 1곳뿐이면
-# 독점, 상위 4개사 합산 점유율(CR4)이 60% 이상이면 과점, 그 미만이면 진입가능으로 분류한다.
+# 병행수입 가능여부 — "구분+MC+제품명+OEM/수입+해외제조업소+제조국"이 같으면 같은 제품으로
+# 묶어, 그 그룹을 수입한 적 있는 국내 수입업체 수(전체 기간, distinct)로 판정한다.
+# 수입업체가 2곳 이상이면 O(병행수입 가능 이력 있음), 1곳뿐이면 X.
+# product_sourcing_item.parallel_import와 같은 O/X 기준을 import_history 기반으로도 적용한 것.
 #
-# 집계 기간은 CURRENT_DATE 기준 최근 365일이 아니라, 그룹별 "마지막 거래일 기준" 최근
-# 365일이다 — 오늘 날짜를 기준으로 고정하면 마지막 수입이 1년보다 오래된 그룹은 집계 대상
-# 거래가 0건이 되어 market_status가 NULL(화면에 "-")로 빠지는데, 이 제품이 과점인지
-# 아닌지는 원래 "가장 최근에 거래되던 시점" 기준으로 봐야 의미가 있다. 그룹별 anchor_date
-# (그 그룹의 MAX 거래일)를 윈도우 함수로 구해 자기 자신을 기준으로 최근 1년을 잡으므로,
-# 거래 이력이 하나라도 있는 그룹은 전부 판정이 나온다.
-#
-# count_year1/2/3처럼 refresh_mvs() 호출 시점(=업로드 시점)의 스냅샷이며, 매 요청마다
-# 재계산하지 않고 sku_history_mv/factory-view 조회 결과에 그룹 키로 LEFT JOIN해서 붙인다.
+# cr4_pct는 더 이상 계산하지 않지만(예전 CR4 과점도 판정 폐기), 스키마/프론트가 참조하던
+# 컬럼이라 항상 NULL로 남겨 하위 호환을 유지한다.
 _MARKET_STATUS_MV_SQL = """
     CREATE MATERIALIZED VIEW market_status_mv AS
-    WITH dated AS (
-        SELECT
-            category, mc, sku_name, import_type, factory, country, importer,
-            COALESCE(import_date, process_date) AS txn_date
-        FROM import_history
-        WHERE importer IS NOT NULL
-    ),
-    anchored AS (
-        SELECT *,
-            MAX(txn_date) OVER (
-                PARTITION BY category, mc, sku_name, import_type, factory, country
-            ) AS anchor_date
-        FROM dated
-    ),
-    windowed AS (
-        SELECT category, mc, sku_name, import_type, factory, country, importer
-        FROM anchored
-        WHERE txn_date > anchor_date - INTERVAL '365 days'
-    ),
-    importer_365d AS (
-        SELECT
-            category, mc, sku_name, import_type, factory, country, importer,
-            COUNT(*)::int AS count_365d
-        FROM windowed
-        GROUP BY category, mc, sku_name, import_type, factory, country, importer
-    ),
-    ranked AS (
-        SELECT *,
-            ROW_NUMBER() OVER (
-                PARTITION BY category, mc, sku_name, import_type, factory, country
-                ORDER BY count_365d DESC
-            ) AS importer_rank
-        FROM importer_365d
-    ),
-    group_agg AS (
-        SELECT
-            category, mc, sku_name, import_type, factory, country,
-            COUNT(*)::int                                          AS importer_count,
-            SUM(count_365d)::int                                   AS total_365d,
-            SUM(count_365d) FILTER (WHERE importer_rank <= 4)::int AS top4_365d
-        FROM ranked
-        GROUP BY category, mc, sku_name, import_type, factory, country
-    )
     SELECT
         category, mc, sku_name, import_type, factory, country,
-        importer_count,
-        total_365d,
-        ROUND((top4_365d::numeric / NULLIF(total_365d, 0)) * 100, 1) AS cr4_pct,
-        CASE
-            WHEN importer_count <= 1 THEN '독점'
-            WHEN (top4_365d::numeric / NULLIF(total_365d, 0)) >= 0.6 THEN '과점'
-            ELSE '진입가능'
-        END AS market_status
-    FROM group_agg
+        COUNT(DISTINCT importer)::int AS importer_count,
+        NULL::numeric                 AS cr4_pct,
+        CASE WHEN COUNT(DISTINCT importer) >= 2 THEN 'O' ELSE 'X' END AS market_status
+    FROM import_history
+    WHERE importer IS NOT NULL
+    GROUP BY category, mc, sku_name, import_type, factory, country
 """
 
 @app.on_event("startup")

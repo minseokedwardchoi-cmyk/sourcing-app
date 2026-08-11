@@ -576,16 +576,15 @@ function GradeBadge({ grade }) {
   return <span className="badge b-gray">{value}</span>;
 }
 
-// 시장 과점도 배지 — 동일 제품(구분+MC+제품명+OEM/수입+해외제조업소+제조국)을 나눠 갖는
-// 국내 수입업체들의 CR4(상위 4개사 합산 점유율) 기준 판정. 집계 구간은 그룹의 마지막
-// 거래일 기준 최근 365일(main.py의 market_status_mv 참고).
-// 독점(수입업체 1곳) / 과점(CR4 60%↑) / 진입가능(CR4 60%↓)
-const MARKET_STATUS_VALUES = ["독점", "과점", "진입가능"];
+// 병행수입 가능여부 배지 — 동일 제품(구분+MC+제품명+OEM/수입+해외제조업소+제조국)을
+// 수입한 적 있는 국내 수입업체 수(전체 기간) 기준 판정(main.py의 market_status_mv 참고).
+// O(수입업체 2곳 이상) / X(1곳뿐)
+const MARKET_STATUS_VALUES = ["O", "X"];
 
-function MarketStatusBadge({ status, cr4 }) {
+function MarketStatusBadge({ status }) {
   if (!status) return <span style={{color:"#9ca3af",fontSize:12}}>-</span>;
-  const cls = status === "독점" ? "b-red" : status === "과점" ? "b-orange" : "b-green";
-  const title = cr4 != null ? `상위 4개사 점유율(CR4) ${cr4}%` : status;
+  const cls = status === "O" ? "b-green" : "b-red";
+  const title = status === "O" ? "수입업체 2곳 이상" : "수입업체 1곳";
   return <span className={`badge ${cls}`} title={title}>{status}</span>;
 }
 
@@ -718,7 +717,7 @@ const ALL_COLS = [
   { key:"importer",     label:"수입업체",       w:118, filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:230, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:105, filterKey:"country", clickable:"country" },
-  { key:"market_status",label:"시장구조",       w:82,  isMarketStatus:true, filterKey:"market_status" },
+  { key:"market_status",label:"병행수입",       w:82,  isMarketStatus:true, filterKey:"market_status" },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
   { key:"count_year3",  label:"",               w:78,  isYearCount:3                      },
   { key:"count_year2",  label:"",               w:78,  isYearCount:2                      },
@@ -1059,7 +1058,7 @@ function MainDashboard({ navigate }) {
 
           {/* AI 요약: 지금 테이블에 뜬 검색 결과(같은 similarity_threshold로 걸러진 matched
               집합)를 그대로 재집계한 것이므로, 유사도 기준을 조여 결과가 좁아지면 이 요약도
-              같이 바뀐다. market_status/cr4_pct는 (manufacturer, sku_name) 그룹 안에서 수입량이
+              같이 바뀐다. market_status는 (manufacturer, sku_name) 그룹 안에서 수입량이
               가장 큰 factory/country 조합 기준 대표값(search_summary.py 참고). */}
           {searchActive && (summaryLoading || summary) && (
             <div className="ai-summary-card" style={{margin:"12px 14px 0", padding:"14px 16px", background:"#f4f8ff", border:"1px solid #d6e4ff", borderRadius:10}}>
@@ -1077,14 +1076,14 @@ function MainDashboard({ navigate }) {
                     로, {summary.top_products[0].import_count.toLocaleString()}건 수입되었습니다.
                     {" "}
                     {summary.top_products[0].market_status && (
-                      <>상위 4개 수입업체가 최근 1년 수입량의 {summary.top_products[0].cr4_pct}%를 차지해 <b>{summary.top_products[0].market_status}</b> 상태입니다.</>
+                      <>병행수입 가능여부는 <b>{summary.top_products[0].market_status}</b>입니다.</>
                     )}
                   </div>
                   <ol style={{fontSize:12.5,color:"#374151",paddingLeft:18,margin:0,display:"flex",flexDirection:"column",gap:4}}>
                     {summary.top_products.map((p,i)=>(
                       <li key={`${p.manufacturer}-${p.sku_name}-${i}`}>
                         <b>{p.manufacturer}</b> — {p.sku_name}{p.country?` (${p.country})`:""}: {p.import_count.toLocaleString()}건
-                        {p.market_status && <>{" "}· <MarketStatusBadge status={p.market_status} cr4={p.cr4_pct}/></>}
+                        {p.market_status && <>{" "}· <MarketStatusBadge status={p.market_status}/></>}
                       </li>
                     ))}
                   </ol>
@@ -1225,7 +1224,7 @@ function MainDashboard({ navigate }) {
                             : c.key==="importer"
                             ? renderTrunc("importer", row[c.key], 6, i)
                             : c.isMarketStatus
-                            ? <MarketStatusBadge status={row.market_status} cr4={row.cr4_pct}/>
+                            ? <MarketStatusBadge status={row.market_status}/>
                             : row[c.key]||"-"}
                         </td>
                       ))}
@@ -3478,7 +3477,7 @@ function FactoryViewDashboard({ navigate }) {
                                 );
                               })()
                             : c.isMarketStatus
-                            ? <MarketStatusBadge status={row.market_status} cr4={row.cr4_pct}/>
+                            ? <MarketStatusBadge status={row.market_status}/>
                             : row[c.key]||"-"}
                         </td>
                       ))}
