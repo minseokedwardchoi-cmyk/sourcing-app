@@ -54,9 +54,11 @@ jobs:
 
       - name: x11vnc + noVNC(웹 뷰어) 시작
         run: |
-          VNC_PASS=$(openssl rand -hex 8)
-          echo "VNC_PASS=${VNC_PASS}" >> "$GITHUB_ENV"
-          x11vnc -display :99 -forever -shared -passwd "${VNC_PASS}" -rfbport 5900 -bg -o /tmp/x11vnc.log
+          # 비밀번호 없이 연다 — GitHub 로그/브라우저 주소창 둘 다 "password=" 뒤 값을
+          # 자동으로 가려버려서(마스킹) 실측으로 값 자체를 사람이 못 꺼내는 문제가 있었음.
+          # 어차피 URL 자체가 매번 랜덤(trycloudflare.com 서브도메인)이고 세션도
+          # 20~30분짜리 1회용이라, 이 스파이크 테스트에 한해 비밀번호 없이 진행한다.
+          x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -bg -o /tmp/x11vnc.log
           websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
           sleep 2
 
@@ -84,22 +86,20 @@ jobs:
             echo "## 🖥️ VNC 접속 정보 (테스트 끝나면 자동 만료)"
             echo ""
             echo "아래 링크로 접속해서, 브라우저에 월마트 검색 결과가 뜨는지 / PerimeterX 캡차가"
-            echo "뜬다면 직접 눌러서 통과되는지 확인해주세요."
+            echo "뜬다면 직접 눌러서 통과되는지 확인해주세요. 비밀번호 없이 바로 연결됩니다."
             echo ""
-            echo "**접속 링크 (비밀번호 자동입력):**"
+            echo "**접속 링크:**"
             echo '```'
-            echo "${TUNNEL_URL}/vnc.html?autoconnect=true&password=${VNC_PASS}"
+            echo "${TUNNEL_URL}/vnc.html?autoconnect=true"
             echo '```'
-            echo ""
-            echo "비밀번호만 따로: \`${VNC_PASS}\`"
             echo ""
             echo "이 세션은 워크플로가 끝나면(최대 ${{ github.event.inputs.idle_minutes || '10' }}분 대기 후) 자동으로 닫힙니다."
           } >> "$GITHUB_STEP_SUMMARY"
           echo ""
           echo "=================================================================="
-          echo "  VNC 접속 링크 (아래 줄 전체를 복사해서 브라우저에 붙여넣으세요)"
+          echo "  VNC 접속 링크 (비밀번호 없이 바로 연결됨, 전체 복사해서 브라우저에 붙여넣기)"
           echo "=================================================================="
-          echo "${TUNNEL_URL}/vnc.html?autoconnect=true&password=${VNC_PASS}"
+          echo "${TUNNEL_URL}/vnc.html?autoconnect=true"
           echo "=================================================================="
           echo ""
 
@@ -107,5 +107,5 @@ jobs:
         working-directory: scripts/crawl-walmart-samsclub
         env:
           SPIKE_IDLE_MINUTES: ${{ github.event.inputs.idle_minutes || '10' }}
-          VNC_CONNECT_URL: ${{ env.TUNNEL_URL }}/vnc.html?autoconnect=true&password=${{ env.VNC_PASS }}
+          VNC_CONNECT_URL: ${{ env.TUNNEL_URL }}/vnc.html?autoconnect=true
         run: node vnc-spike.js
