@@ -1,4 +1,4 @@
-name: 아마존/이온몰 순위 자동 크롤링 (월 1회)
+name: 아마존/이온몰 순위 크롤링
 
 # 83개 상품유형(scripts/crawl-product-sourcing/type-query-map.csv)별로 아마존/이온몰
 # 베스트셀러 순위를 크롤링해서 백엔드 이력 테이블(product_sourcing_crawl_run /
@@ -6,13 +6,16 @@ name: 아마존/이온몰 순위 자동 크롤링 (월 1회)
 # (수작업 검증 데이터 포함)은 이 워크플로가 전혀 건드리지 않는다 — 프론트 "크롤링 히스토리"
 # 버튼에서만 조회 가능.
 #
+# 자체 cron 스케줄 없음 — 대시보드 "최신화" 버튼으로 월마트/샘스클럽(crawl_walmart_samsclub.yml,
+# VNC로 사람이 캡차 처리) 워크플로가 먼저 실행되고, 그게 끝나면 workflow_run 트리거로 이 워크플로가
+# 자동으로 이어서 실행되는 체인의 2번째 단계로 설계됨(월마트/샘스클럽 B1 구현 시 workflow_run 추가
+# 예정). 그 전까지는 workflow_dispatch로만 수동 실행 가능.
+#
 # r.jina.ai 리더 프록시 방식이라 Playwright/브라우저가 필요 없어 GitHub Actions에서도
 # 동작할 것으로 예상되지만, 실제 러너에서 r.jina.ai 아웃바운드가 되는지는 아직 실측 전이다
 # — 처음엔 반드시 workflow_dispatch로 소량(limit=5, only=올리브유) 먼저 확인할 것.
 
 on:
-  schedule:
-    - cron: '0 19 1 * *'   # 매달 1일 KST 04:00 (UTC 전날 19:00)
   workflow_dispatch:
     inputs:
       site:

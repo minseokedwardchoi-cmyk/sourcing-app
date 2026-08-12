@@ -28,8 +28,11 @@ BACKEND_URL=https://sourcing-backend-ucp5.onrender.com node upload.js --results=
 
 ## GitHub Actions
 
-`.github/workflows/crawl_product_sourcing_monthly.yml` — 매달 1일 자동 실행 + `workflow_dispatch`로
-수동/소량 테스트 가능 (`limit`, `site`, `only` 입력값 지원).
+`.github/workflows/crawl_amazon_aeon.yml` — `workflow_dispatch`로 수동/소량 테스트 가능
+(`limit`, `site`, `only` 입력값 지원). 자체 cron은 없음 — 대시보드 "최신화" 버튼으로
+`crawl_walmart_samsclub.yml`(월마트/샘스클럽, VNC 반자동)이 먼저 실행되고 완료되면
+`workflow_run` 트리거로 이 워크플로가 자동으로 이어서 실행되는 체인의 2번째 단계로
+쓰일 예정(월마트/샘스클럽 B1 구현 시 연결).
 
 ## 파일 구조
 ```
