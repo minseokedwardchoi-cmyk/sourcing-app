@@ -3933,10 +3933,10 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
           </ClampCell>
         </td>
         <td style={{whiteSpace:"nowrap"}}>{row.price_usd != null ? `$${row.price_usd.toFixed(2)}` : "-"}</td>
-        <td><ClampCell>{row.origin || "-"}</ClampCell></td>
         <td style={{whiteSpace:"nowrap"}}>{formatUnitDisplay(row.unit) || "-"}</td>
-        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{parallelImportDisplay(row.parallel_import) || "정보없음"}</span></td>
+        <td><ClampCell>{row.origin || "-"}</ClampCell></td>
         <td><ProductSourcingRiskCell row={row}/></td>
+        <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{parallelImportDisplay(row.parallel_import) || "정보없음"}</span></td>
         <td onClick={e=>e.stopPropagation()}><HsCodeCell row={row}/></td>
         <td style={{whiteSpace:"nowrap"}}><EstimatedCostCell row={row}/></td>
       </tr>
@@ -4353,23 +4353,23 @@ function ProductSourcingPage({ navigate }) {
                         <RangeFilter label="가격 범위 (USD)" activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} onSort={dir=>applySort("price_usd",dir)} activeRange={colFilters.price_range||null} onApplyRange={range=>setColFilters(p=>({...p,price_range:range}))}/>
                       </div>
                     </th>
+                    <th style={{width:65, position:"sticky", top:0, zIndex:30}}>단량</th>
                     <th style={{width:101, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">원산지</span>
                         <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.origin||null} activeSortCol={sortBy==="origin"} activeSortDir={sortDir} localValues={originVals} onSort={dir=>applySort("origin",dir)} onApply={vals=>setColFilters(p=>({...p,origin:vals}))}/>
                       </div>
                     </th>
-                    <th style={{width:65, position:"sticky", top:0, zIndex:30}}>단량</th>
-                    <th style={{width:45, padding:"6px 4px", position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
-                        <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>병행<br/>수입</span>
-                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
-                      </div>
-                    </th>
                     <th style={{width:90, position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">리스크</span>
                         <RiskFilter activeKeys={colFilters.risk_keys||null} onApply={keys=>setColFilters(p=>({...p,risk_keys:keys}))}/>
+                      </div>
+                    </th>
+                    <th style={{width:45, padding:"6px 4px", position:"sticky", top:0, zIndex:30}}>
+                      <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
+                        <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>병행<br/>수입</span>
+                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
                       </div>
                     </th>
                     <th style={{width:100, position:"sticky", top:0, zIndex:30}} title="HS코드 (품목분류) — 지정하면 아래 추정원가가 자동 계산됩니다">HS코드</th>
