@@ -16,6 +16,8 @@ import {
   fetchProductSourcingAll,
   updateProductSourcingHsCode,
   getProductSourcingExportUrl,
+  fetchProductSourcingCrawlRuns,
+  fetchProductSourcingCrawlRun,
   fetchQuickCheck,
 } from "./api.js";
 import { RECOMMENDATION_EXCLUDED_PAIRS } from "./productSourcingRecommendationExclusions.js";
@@ -4105,6 +4107,9 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
           highlight
         />
       ))}
+      <tr aria-hidden="true">
+        <td colSpan={12} style={{ padding: 0, border: "none", borderBottom: "3px solid #94a3b8" }} />
+      </tr>
     </>
   );
 }
@@ -4123,6 +4128,7 @@ function ProductSourcingPage({ navigate }) {
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   async function downloadOriginalFormat() {
     setExporting(true);
@@ -4290,8 +4296,12 @@ function ProductSourcingPage({ navigate }) {
             <button className="icon-btn" disabled={exporting} onClick={downloadOriginalFormat} title="원본 엑셀(유형별카드) 형식으로 사진 포함 다운로드">
               {exporting ? "생성 중..." : "⬇ 원본 형식 다운로드"}
             </button>
+            <button className="icon-btn" onClick={() => setShowHistory(true)} title="아마존/이온몰 자동 크롤링 과거 회차 조회 (이 표의 데이터와는 별개)">
+              🕘 크롤링 히스토리
+            </button>
           </div>
           {exportError && <div className="error-box">다운로드 오류: {exportError}</div>}
+          {showHistory && <ProductSourcingHistoryModal onClose={() => setShowHistory(false)} />}
 
           {loading ? (
             <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
@@ -4394,6 +4404,110 @@ function ProductSourcingPage({ navigate }) {
           )}
 
           <Pagination meta={meta} page={page} setPage={setPage}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 아마존/이온몰 자동 크롤링(월 1회 GitHub Actions) 과거 회차 조회 모달.
+// product_sourcing_item(위 표의 실제 데이터, 수작업 검증 데이터 포함)과는 완전히 별개인
+// product_sourcing_crawl_run/crawl_snapshot_item 이력 테이블만 읽는다 — 여기서 보는 값은
+// 참고용 스냅샷일 뿐, 이 모달에서 무엇을 하든 메인 표 데이터는 바뀌지 않는다.
+function ProductSourcingHistoryModal({ onClose }) {
+  const [runs, setRuns] = useState(null);
+  const [runsError, setRunsError] = useState(null);
+  const [selectedRunId, setSelectedRunId] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(null);
+
+  useEffect(() => {
+    fetchProductSourcingCrawlRuns()
+      .then(r => {
+        const list = r.runs || [];
+        setRuns(list);
+        if (list.length) setSelectedRunId(list[0].run_id);
+      })
+      .catch(e => setRunsError(e.message));
+  }, []);
+
+  useEffect(() => {
+    if (selectedRunId == null) return;
+    setDetailLoading(true);
+    setDetailError(null);
+    fetchProductSourcingCrawlRun(selectedRunId)
+      .then(setDetail)
+      .catch(e => setDetailError(e.message))
+      .finally(() => setDetailLoading(false));
+  }, [selectedRunId]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{maxWidth:"min(1200px, 95vw)"}} onClick={e=>e.stopPropagation()}>
+        <div className="modal-header">
+          <span className="modal-title">크롤링 히스토리 (아마존/이온몰, 자동 수집 — 참고용)</span>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          {runsError && <div className="error-box">회차 목록 조회 오류: {runsError}</div>}
+          {runs && runs.length === 0 && (
+            <div style={{fontSize:13, color:"#9ca3af", padding:"12px 0"}}>아직 자동 크롤링 회차가 없습니다.</div>
+          )}
+          {runs && runs.length > 0 && (
+            <>
+              <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:12}}>
+                <span style={{fontSize:13, color:"#6b7280"}}>회차 선택</span>
+                <select
+                  value={selectedRunId ?? ""}
+                  onChange={e => setSelectedRunId(Number(e.target.value))}
+                  style={{fontSize:13, padding:"4px 8px"}}
+                >
+                  {runs.map(run => (
+                    <option key={run.run_id} value={run.run_id}>
+                      {new Date(run.run_at).toLocaleString("ko-KR")} · {run.site_scope || "-"} · {run.row_count ?? "?"}건
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {detailLoading && <div style={{fontSize:13, color:"#9ca3af"}}>불러오는 중...</div>}
+              {detailError && <div className="error-box">회차 조회 오류: {detailError}</div>}
+              {detail && (
+                <>
+                  {detail.note && <div style={{fontSize:12, color:"#9ca3af", marginBottom:8}}>{detail.note}</div>}
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%", fontSize:13}}>
+                      <thead>
+                        <tr>
+                          <th>대분류</th><th>품목유형</th><th>유통사</th><th>순위</th>
+                          <th>브랜드</th><th>상품명(영문)</th><th>가격(USD)</th>
+                          <th>평점</th><th>리뷰수</th><th>링크</th><th>이미지</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.rows.map(row => (
+                          <tr key={row.id}>
+                            <td>{row.category || "-"}</td>
+                            <td>{row.product_type}</td>
+                            <td>{row.retailer}{row.source_site ? ` (${row.source_site})` : ""}</td>
+                            <td>{row.rank}</td>
+                            <td>{row.brand || "-"}</td>
+                            <td style={{maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}} title={row.product_name_en || ""}>{row.product_name_en || "-"}</td>
+                            <td>{row.price_usd != null ? `$${Number(row.price_usd).toFixed(2)}` : "-"}</td>
+                            <td>{row.rating ?? "-"}</td>
+                            <td>{row.review_count ?? "-"}</td>
+                            <td>{row.url ? <a href={row.url} target="_blank" rel="noreferrer">열기</a> : "-"}</td>
+                            <td>{row.image_url ? <img src={row.image_url} alt="" style={{width:32, height:32, objectFit:"cover"}}/> : "-"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </div>
       </div>
     </div>

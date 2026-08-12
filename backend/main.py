@@ -36,7 +36,10 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from database import get_db, engine, Base, AsyncSessionLocal
-from models import ImportHistory, ProductSourcingItem, CrawlRunStatus
+from models import (
+    ImportHistory, ProductSourcingItem, CrawlRunStatus,
+    ProductSourcingCrawlRun, ProductSourcingCrawlSnapshotItem,
+)
 from schemas import (
     SkuHistoryResponse, SkuHistoryRow, PaginationMeta,
     SkuFactoriesResponse, SkuInfo, FactoryRow,
@@ -49,6 +52,9 @@ from schemas import (
     ProductSourcingUploadResponse, ProductSourcingFlatRow, ProductSourcingAllResponse,
     TariffUploadResponse, HsCodeUpdateRequest, HsCodeUpdateResponse, HsCodeUploadResponse,
     CostCoverageRow, CostCoverageResponse,
+    ProductSourcingCrawlSnapshotUploadRequest, ProductSourcingCrawlSnapshotUploadResponse,
+    ProductSourcingCrawlRunListResponse, ProductSourcingCrawlRunSummary,
+    ProductSourcingCrawlRunDetailResponse, ProductSourcingCrawlSnapshotRow,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
@@ -2165,6 +2171,103 @@ async def recompute_product_sourcing_costs(db: AsyncSession = Depends(get_db)):
 async def get_product_sourcing_types(db: AsyncSession = Depends(get_db)):
     r = await db.execute(text("SELECT DISTINCT product_type FROM product_sourcing_item ORDER BY product_type"))
     return ProductSourcingTypesResponse(types=[row[0] for row in r.fetchall()])
+
+
+# ─── 3-4-1. 아마존/이온몰 자동 크롤링 이력 (product_sourcing_item과는 완전히 별개 테이블) ──
+# 매달 GitHub Actions(scripts/crawl-product-sourcing)가 크롤링한 결과를 여기 쌓기만 한다.
+# product_sourcing_item(메인페이지 실제 데이터, 수작업 검증 데이터 포함)은 이 경로로는
+# 절대 건드리지 않는다 — "크롤링 히스토리" 버튼에서 과거 회차를 조회하는 용도.
+
+@app.post("/api/product-sourcing/crawl-snapshot", response_model=ProductSourcingCrawlSnapshotUploadResponse)
+async def upload_product_sourcing_crawl_snapshot(
+    payload: ProductSourcingCrawlSnapshotUploadRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        run = ProductSourcingCrawlRun(
+            run_at=datetime.utcnow(),
+            site_scope=payload.site_scope,
+            row_count=payload.row_count if payload.row_count is not None else len(payload.rows),
+            note=payload.note,
+        )
+        db.add(run)
+        await db.flush()  # run.id 확보
+
+        for row in payload.rows:
+            db.add(ProductSourcingCrawlSnapshotItem(
+                run_id=run.id,
+                category=row.category,
+                product_type=row.product_type,
+                query_used=row.query_used,
+                retailer=row.retailer,
+                source_site=row.source_site,
+                rank=row.rank,
+                brand=row.brand,
+                product_name_en=row.product_name_en,
+                price_usd=row.price_usd,
+                rating=row.rating,
+                review_count=row.review_count,
+                url=row.url,
+                image_url=row.image_url,
+            ))
+
+        await db.commit()
+        return ProductSourcingCrawlSnapshotUploadResponse(run_id=run.id, inserted=len(payload.rows))
+
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+@app.get("/api/product-sourcing/crawl-runs", response_model=ProductSourcingCrawlRunListResponse)
+async def list_product_sourcing_crawl_runs(db: AsyncSession = Depends(get_db)):
+    r = await db.execute(
+        select(ProductSourcingCrawlRun).order_by(ProductSourcingCrawlRun.run_at.desc())
+    )
+    runs = r.scalars().all()
+    return ProductSourcingCrawlRunListResponse(runs=[
+        ProductSourcingCrawlRunSummary(
+            run_id=run.id, run_at=run.run_at, site_scope=run.site_scope,
+            row_count=run.row_count, note=run.note,
+        )
+        for run in runs
+    ])
+
+
+@app.get("/api/product-sourcing/crawl-runs/{run_id}", response_model=ProductSourcingCrawlRunDetailResponse)
+async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends(get_db)):
+    run = (await db.execute(
+        select(ProductSourcingCrawlRun).where(ProductSourcingCrawlRun.id == run_id)
+    )).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="해당 크롤링 회차를 찾을 수 없습니다.")
+
+    r = await db.execute(
+        select(ProductSourcingCrawlSnapshotItem)
+        .where(ProductSourcingCrawlSnapshotItem.run_id == run_id)
+        .order_by(
+            ProductSourcingCrawlSnapshotItem.product_type,
+            ProductSourcingCrawlSnapshotItem.retailer,
+            ProductSourcingCrawlSnapshotItem.source_site,
+            ProductSourcingCrawlSnapshotItem.rank,
+        )
+    )
+    items = r.scalars().all()
+    return ProductSourcingCrawlRunDetailResponse(
+        run_id=run.id, run_at=run.run_at, site_scope=run.site_scope, note=run.note,
+        rows=[
+            ProductSourcingCrawlSnapshotRow(
+                id=item.id, category=item.category, product_type=item.product_type,
+                query_used=item.query_used, retailer=item.retailer, source_site=item.source_site,
+                rank=item.rank, brand=item.brand, product_name_en=item.product_name_en,
+                price_usd=item.price_usd, rating=item.rating, review_count=item.review_count,
+                url=item.url, image_url=item.image_url,
+            )
+            for item in items
+        ],
+    )
 
 
 def _resolve_image_url(request: Request, row_id: int, image_url: str | None, has_image_data: bool) -> str | None:

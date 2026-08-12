@@ -375,6 +375,16 @@ export function fetchProductSourcingAll() {
   return request("/api/product-sourcing/all");
 }
 
+/** 아마존/이온몰 자동 크롤링 이력: 과거 회차 목록 (product_sourcing_item과는 별개) */
+export function fetchProductSourcingCrawlRuns() {
+  return request("/api/product-sourcing/crawl-runs");
+}
+
+/** 아마존/이온몰 자동 크롤링 이력: 특정 회차의 전체 행 */
+export function fetchProductSourcingCrawlRun(runId) {
+  return request(`/api/product-sourcing/crawl-runs/${runId}`);
+}
+
 /** 품목유형 단위 HS코드 지정/수정 (같은 품목유형의 전체 행에 일괄 적용) */
 export async function updateProductSourcingHsCode(productType, hsCode) {
   const res = await fetch(`${BASE_URL}/api/product-sourcing/hs-code`, {

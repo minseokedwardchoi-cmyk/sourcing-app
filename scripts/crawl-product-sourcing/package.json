@@ -1,0 +1,12 @@
+{
+  "name": "crawl-product-sourcing",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "아마존/이온몰 83개 상품유형 베스트셀러 순위를 매달 크롤링해서 백엔드 이력 테이블에 업로드하는 스크립트. r.jina.ai 리더 프록시 방식(D:\\AI 프로젝트\\유통사크롤러\\amazon-aeon-enrich에서 검증됨)을 그대로 재사용함.",
+  "scripts": {
+    "crawl": "node crawl.js",
+    "upload": "node upload.js"
+  },
+  "dependencies": {}
+}

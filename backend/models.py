@@ -189,6 +189,52 @@ class ProductSourcingExportCache(Base):
     row_count    = Column(Integer,     nullable=True)
 
 
+class ProductSourcingCrawlRun(Base):
+    """
+    아마존/이온몰(추후 월마트/샘스클럽) 자동 크롤링 1회차 기록.
+    product_sourcing_item(메인페이지 실제 데이터, 수작업 검증 데이터 포함)은 이 크롤링으로
+    전혀 건드리지 않는다 — 순수 이력(history) 보관용. 프론트 "크롤링 히스토리" 버튼에서 조회.
+    """
+    __tablename__ = "product_sourcing_crawl_run"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    run_at     = Column(DateTime, nullable=False, comment="크롤링 회차 업로드 시각")
+    site_scope = Column(String(50), nullable=True, comment="이번 회차에 포함된 유통사 (예: amazon,aeon)")
+    row_count  = Column(Integer, nullable=True, comment="이번 회차 총 상품 행 수")
+    note       = Column(Text, nullable=True, comment="자유 메모 (성공/실패 건수 등)")
+
+
+class ProductSourcingCrawlSnapshotItem(Base):
+    """
+    ProductSourcingCrawlRun 1회차에 속하는 상품 1건 (유형×유통사×순위).
+    컬럼은 크롤링으로 채울 수 있는 필드만 — 원산지/병행수입/HS코드 등 수작업 검증 필드는 없음.
+    """
+    __tablename__ = "product_sourcing_crawl_snapshot_item"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    run_id           = Column(Integer, nullable=False, comment="product_sourcing_crawl_run.id")
+
+    category         = Column(String(100), nullable=True, comment="대분류")
+    product_type     = Column(String(300), nullable=False, comment="품목 유형")
+    query_used       = Column(String(200), nullable=True, comment="크롤링에 사용한 카테고리 검색어")
+    retailer         = Column(String(20),  nullable=False, comment="유통사 (amazon/aeon)")
+    source_site      = Column(String(20),  nullable=True, comment="이온몰 국가 구분 (aeon-jp/aeon-my), 아마존은 null")
+    rank             = Column(Integer,     nullable=False, comment="유통사(국가 구분 포함) 내 순위")
+
+    brand            = Column(String(200), nullable=True)
+    product_name_en  = Column(String(500), nullable=True)
+    price_usd        = Column(Numeric,     nullable=True)
+    rating           = Column(Numeric,     nullable=True)
+    review_count     = Column(Integer,     nullable=True)
+    url              = Column(Text,        nullable=True)
+    image_url        = Column(Text,        nullable=True)
+
+    __table_args__ = (
+        Index("ix_pscsi_run_id", "run_id"),
+        Index("ix_pscsi_product_type", "product_type"),
+    )
+
+
 class TariffRate(Base):
     """
     HS코드(품목번호)별 관세율표 — 관세청_품목번호별 관세율표(data.go.kr) 원본을 그대로 적재.

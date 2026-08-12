@@ -4,7 +4,7 @@ schemas.py — API 요청/응답 스키마 (Pydantic v2)
 from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import Optional, Any
-from datetime import date
+from datetime import date, datetime
 
 
 # ─── 공통 페이지네이션 ────────────────────────────────────────────────────────
@@ -299,6 +299,58 @@ class ProductSourcingFlatRow(BaseModel):
 
 class ProductSourcingAllResponse(BaseModel):
     rows: list[ProductSourcingFlatRow] = Field(default_factory=list)
+
+
+class ProductSourcingCrawlSnapshotRowIn(BaseModel):
+    category:         Optional[str]   = Field(None, description="대분류")
+    product_type:     str
+    query_used:       Optional[str]   = Field(None, description="크롤링에 사용한 카테고리 검색어")
+    retailer:         str             = Field(..., description="amazon/aeon")
+    source_site:      Optional[str]   = Field(None, description="이온몰 국가 구분 (aeon-jp/aeon-my)")
+    rank:             int
+    brand:            Optional[str]   = Field(None)
+    product_name_en:  Optional[str]   = Field(None)
+    price_usd:        Optional[float] = Field(None)
+    rating:           Optional[float] = Field(None)
+    review_count:     Optional[int]   = Field(None)
+    url:              Optional[str]   = Field(None)
+    image_url:        Optional[str]   = Field(None)
+
+
+class ProductSourcingCrawlSnapshotUploadRequest(BaseModel):
+    site_scope: Optional[str] = Field(None, description="이번 회차에 포함된 유통사 (예: amazon,aeon)")
+    row_count:  Optional[int] = Field(None)
+    note:       Optional[str] = Field(None)
+    rows:       list[ProductSourcingCrawlSnapshotRowIn] = Field(default_factory=list)
+
+
+class ProductSourcingCrawlSnapshotUploadResponse(BaseModel):
+    run_id:    int
+    inserted:  int
+
+
+class ProductSourcingCrawlRunSummary(BaseModel):
+    run_id:     int
+    run_at:     datetime
+    site_scope: Optional[str] = Field(None)
+    row_count:  Optional[int] = Field(None)
+    note:       Optional[str] = Field(None)
+
+
+class ProductSourcingCrawlRunListResponse(BaseModel):
+    runs: list[ProductSourcingCrawlRunSummary] = Field(default_factory=list)
+
+
+class ProductSourcingCrawlSnapshotRow(ProductSourcingCrawlSnapshotRowIn):
+    id: int
+
+
+class ProductSourcingCrawlRunDetailResponse(BaseModel):
+    run_id:     int
+    run_at:     datetime
+    site_scope: Optional[str] = Field(None)
+    note:       Optional[str] = Field(None)
+    rows:       list[ProductSourcingCrawlSnapshotRow] = Field(default_factory=list)
 
 
 class TariffUploadResponse(BaseModel):
