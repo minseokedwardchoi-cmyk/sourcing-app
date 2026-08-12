@@ -78,7 +78,7 @@ jobs:
             exit 1
           fi
 
-      - name: 접속 링크를 Job Summary에 출력
+      - name: 접속 링크 출력 (Job Summary는 잡 완료 전까지 안 뜨는 것으로 확인돼 로그에도 남김)
         run: |
           {
             echo "## 🖥️ VNC 접속 정보 (테스트 끝나면 자동 만료)"
@@ -95,10 +95,17 @@ jobs:
             echo ""
             echo "이 세션은 워크플로가 끝나면(최대 ${{ github.event.inputs.idle_minutes || '10' }}분 대기 후) 자동으로 닫힙니다."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "TUNNEL_URL=${TUNNEL_URL}"
+          echo ""
+          echo "=================================================================="
+          echo "  VNC 접속 링크 (아래 줄 전체를 복사해서 브라우저에 붙여넣으세요)"
+          echo "=================================================================="
+          echo "${TUNNEL_URL}/vnc.html?autoconnect=true&password=${VNC_PASS}"
+          echo "=================================================================="
+          echo ""
 
       - name: 월마트 검색 페이지 열고 대기 (사람이 VNC로 확인하는 동안)
         working-directory: scripts/crawl-walmart-samsclub
         env:
           SPIKE_IDLE_MINUTES: ${{ github.event.inputs.idle_minutes || '10' }}
+          VNC_CONNECT_URL: ${{ env.TUNNEL_URL }}/vnc.html?autoconnect=true&password=${{ env.VNC_PASS }}
         run: node vnc-spike.js
