@@ -35,4 +35,10 @@ def normalize_brand_key(name: str | None) -> str:
     s = _WS_RE.sub(" ", s).strip()
 
     words = [w for w in s.split(" ") if w and w not in _SUFFIX_WORDS]
-    return " ".join(words)
+    # 언더스코어로 join하는 이유: product_sourcing_item.brand_group_key가 이
+    # 표기(예: "trident_seafoods")를 쓰고 있어서, 오염되지 않은 브랜드명이면
+    # 우연이 아니라 형식적으로도 같은 키가 나오게 맞춘 것. brand_group_key는
+    # 단순 정규화가 아니라(예: "Silicone Gummy" → "silicone_gummy_mold") 지저분한
+    # 원본에서 실제 브랜드를 추출한 결과라 이 함수로 재현은 안 되고, 이건 그
+    # 생성 스크립트를 못 찾은 상태에서 최선의 근사치일 뿐이다.
+    return "_".join(words)

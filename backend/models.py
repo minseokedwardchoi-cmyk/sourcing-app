@@ -273,7 +273,7 @@ class BrandVerification(Base):
 
     id                    = Column(Integer, primary_key=True, autoincrement=True)
 
-    brand_key             = Column(String(200), nullable=False, unique=True, comment="정규화된 브랜드명 (조회 키, brand_key_normalize.normalize_brand_key 결과)")
+    brand_key             = Column(String(200), nullable=False, unique=True, comment="정규화된 브랜드명 (조회 키). 기존 데이터 백필분은 product_sourcing_item.brand_group_key를 그대로 씀(brand_en이 아마존/이온몰에서 오염돼 있어 이게 더 신뢰도 높음) — 신규 브랜드는 brand_key_normalize.normalize_brand_key 결과")
     brand_display         = Column(String(200), nullable=True,  comment="검증에 사용한 브랜드 원문 표기 (참고용)")
 
     recall_status         = Column(String(20),  nullable=True,  comment="리콜 이력 판정 (통과/탈락)")

@@ -1,16 +1,26 @@
 name: 브랜드 검증 (Gemini)
 
-# 아마존/이온몰 크롤링(crawl_amazon_aeon.yml)이 끝나면 이어서 자동 실행되어,
-# 그 회차의 크롤링 이력(product_sourcing_crawl_snapshot_item)에 새로 나타난 브랜드를
-# Gemini API(google_search 그라운딩)로 리콜/품질·표시/법적·평판 조사해서 백엔드의
-# brand_verification 캐시에 upsert한다 (backend/verify_brands_gemini.py 참고).
+# 크롤링 체인의 마지막 단계: crawl_walmart_samsclub.yml(사람이 VNC로 캡차 처리) →
+# workflow_run → crawl_amazon_aeon.yml(아마존/이온몰 자동) → workflow_run → 이 워크플로.
+# 즉 4개 유통사 크롤링이 다 끝나면 이어서 자동 실행되어, 크롤링 이력
+# (product_sourcing_crawl_snapshot_item)에 새로 나타난 브랜드를 Gemini API(google_search
+# 그라운딩)로 리콜/품질·표시/법적·평판 조사해서 백엔드의 brand_verification 캐시에
+# upsert한다 (backend/verify_brands_gemini.py 참고).
+#
+# ⚠️ 월마트/샘스클럽과 아마존/이온몰은 같은 업로드 엔드포인트를 쓰지만 서로 다른 회차
+# (run_id)로 각각 올라간다. 이 워크플로가 트리거되는 시점(아마존/이온몰 완료 직후)
+# 기준 "가장 최근 회차"는 항상 아마존/이온몰 쪽이라, "최신 회차만" 보면 같은 체인에서
+# 방금 끝난 월마트/샘스클럽 회차를 매번 놓친다. 그래서 workflow_run으로 자동
+# 트리거됐을 때는 항상 --all-runs로 돌린다(이미 캐시된 브랜드는 스킵되니 매번 전체를
+# 다시 훑어도 비용 문제 없음). workflow_dispatch(수동 실행)일 때만 all_runs 입력값을
+# 따른다.
 #
 # product_sourcing_item(메인페이지, 수작업 검증 데이터 포함)은 이 워크플로가 전혀
 # 건드리지 않는다 — 브랜드 단위 캐시만 채운다. 다른 크롤링 워크플로와 동일하게
 # DATABASE_URL로 Postgres에 직접 붙지 않고 백엔드 HTTP API만 호출한다.
 #
-# 한 회차에 신규 브랜드가 많으면(특히 최초 --all-runs 소급 실행) 한 번의 스크립트
-# 호출(limit개)로 다 못 끝낼 수 있어, crawl_manufacturer_emails.yml과 같은 방식으로
+# 한 회차에 신규 브랜드가 많으면(특히 --all-runs 소급 실행) 한 번의 스크립트 호출
+# (limit개)로 다 못 끝낼 수 있어, crawl_manufacturer_emails.yml과 같은 방식으로
 # "더 볼 대상이 없다"는 로그가 나올 때까지 배치를 반복한다.
 
 on:
@@ -64,8 +74,14 @@ jobs:
           LIMIT="${{ github.event.inputs.limit || '20' }}"
           MAX_BATCHES="${{ github.event.inputs.max_batches || '15' }}"
           RUN_ID="${{ github.event.inputs.run_id }}"
-          ALL_RUNS="${{ github.event.inputs.all_runs }}"
           DRY_RUN="${{ github.event.inputs.dry_run }}"
+
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # 크롤링 체인 자동 실행 — 월마트/샘스클럽 회차를 놓치지 않도록 항상 전체 회차 대상
+            ALL_RUNS="true"
+          else
+            ALL_RUNS="${{ github.event.inputs.all_runs }}"
+          fi
 
           ARGS="--limit=${LIMIT}"
           if [ -n "$RUN_ID" ]; then
