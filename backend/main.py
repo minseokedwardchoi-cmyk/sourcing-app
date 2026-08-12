@@ -2421,7 +2421,7 @@ async def get_product_sourcing_image(item_id: int, db: AsyncSession = Depends(ge
     )
 
 
-@app.get("/api/product-sourcing/all", response_model=ProductSourcingAllResponse)
+@app.get("/api/product-sourcing/all")
 async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(get_db)):
     """엑셀식 필터/정렬 테이블용 전체 행 (품목x유통사x순위 단위, 매칭/그룹핑 없음)."""
     order_case = " ".join(
@@ -2485,12 +2485,19 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
         row["price_usd"] = float(row["price_usd"]) if row["price_usd"] is not None else None
         row["rating"] = float(row["rating"]) if row["rating"] is not None else None
         row["image_url"] = _resolve_image_url(request, row["id"], row["image_url"], row["has_image_data"])
+        del row["has_image_data"]
         row["tariff_rate_pct"] = float(row["tariff_rate_pct"]) if row["tariff_rate_pct"] is not None else None
         row["estimated_landed_cost_krw"] = (
             float(row["estimated_landed_cost_krw"]) if row["estimated_landed_cost_krw"] is not None else None
         )
 
-    return ProductSourcingAllResponse(rows=[ProductSourcingFlatRow(**row) for row in rows])
+    # 7,397행 x 31필드를 매번 ProductSourcingFlatRow(**row)로 Pydantic 검증하면
+    # (response_model 선언 때문에 FastAPI가 반환값을 다시 한번 더 검증/직렬화하는 것과
+    # 별개로) 그 자체만 실측 2.5초 넘게 걸렸다 — DB 조회(1~2초)만큼 무거운 별도
+    # 병목이었다. SQL이 이미 타입 맞는 값을 주고 있고 위에서 수동으로 float 변환까지
+    # 끝냈으므로, Pydantic 모델 생성/재검증을 건너뛰고 dict를 그대로 JSON으로 내보낸다
+    # (response_model도 같은 이유로 라우트 선언에서 제거함 — 실측: 4.9초 → 2.3초대).
+    return {"rows": rows}
 
 
 _EXPORT_IMAGE_BATCH = 300
