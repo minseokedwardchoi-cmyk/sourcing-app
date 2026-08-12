@@ -4139,19 +4139,249 @@ function ProductTypeRecommendationCard({ productType, candidates }) {
 
 const PRODUCT_SOURCING_PAGE_SIZE = 50;
 
-function ProductSourcingPage({ navigate }) {
-  const [allRows, setAllRows] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
+// 품목별 유통사 표(검색/필터/정렬/페이지네이션/브랜드·제품 그룹 밴딩/추천카드) 렌더링 전체를
+// 공유 컴포넌트로 뽑아둔 것 — 메인페이지(ProductSourcingPage, product_sourcing_item 실측+
+// 검증 데이터)와 크롤링 히스토리 페이지(ProductSourcingHistoryPage, 크롤링 스냅샷만 있고
+// 원산지/병행수입/리콜 등 수작업 검증 컬럼은 없음) 둘 다 "동일한 표 구성"으로 보여주기 위해
+// 동일 코드를 재사용한다. showRecommendations=false면 추천카드 계산 자체를 건너뛴다(검증
+// 컬럼이 없는 히스토리 데이터에서는 추천 조건 자체가 항상 불만족이라 의미 없음).
+function ProductSourcingDataTable({
+  rows: allRows, loading, error, toolbarExtra, belowToolbar,
+  showRecommendations = true, searchPlaceholder = "품목명, 브랜드, 상품명 검색...",
+}) {
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState({}); // { product_type, retailer_label, brand_kr }
   const [sortBy, setSortBy] = useState(null);        // "product_type" | "rank" | "price_usd" | "brand_kr" | "rating"
   const [sortDir, setSortDir] = useState("asc");
   const [page, setPage] = useState(1);
+
+  const productTypeVals   = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_type))].sort() : [], [allRows]);
+  const retailerVals      = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.retailer_label||r.retailer))] : [], [allRows]);
+  const brandVals         = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.brand_kr).filter(Boolean))].sort() : [], [allRows]);
+  const productNameVals   = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_name_en).filter(Boolean))].sort() : [], [allRows]);
+  const originVals        = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.origin).filter(Boolean))].sort() : [], [allRows]);
+  const parallelImportVals= useMemo(() => allRows ? [...new Set(allRows.map(r=>r.parallel_import).filter(Boolean))].sort() : [], [allRows]);
+
+  const filteredSorted = useMemo(() => {
+    if (!allRows) return [];
+    const q = search.trim().toLowerCase();
+    let rows = allRows.filter(r => {
+      if (q) {
+        const hay = `${r.product_type} ${r.brand_kr||""} ${r.brand_en||""} ${r.product_name_en||""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (colFilters.product_type?.length && !colFilters.product_type.includes(r.product_type)) return false;
+      if (colFilters.retailer_label?.length && !colFilters.retailer_label.includes(r.retailer_label||r.retailer)) return false;
+      if (colFilters.brand_kr?.length && !colFilters.brand_kr.includes(r.brand_kr)) return false;
+      if (colFilters.product_name_en?.length && !colFilters.product_name_en.includes(r.product_name_en)) return false;
+      if (colFilters.origin?.length && !colFilters.origin.includes(r.origin)) return false;
+      if (colFilters.parallel_import?.length && !colFilters.parallel_import.includes(r.parallel_import)) return false;
+      if (colFilters.price_range) {
+        const { min, max } = colFilters.price_range;
+        if (min != null && (r.price_usd == null || r.price_usd < min)) return false;
+        if (max != null && (r.price_usd == null || r.price_usd > max)) return false;
+      }
+      if (colFilters.risk_keys?.length) {
+        for (const k of colFilters.risk_keys) {
+          if (String(r[k] || "").trim() !== "통과") return false;
+        }
+      }
+      return true;
+    });
+    if (sortBy) {
+      const dir = sortDir === "asc" ? 1 : -1;
+      rows = [...rows].sort((a,b) => {
+        let av = a[sortBy], bv = b[sortBy];
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        if (typeof av === "number" && typeof bv === "number") return (av-bv)*dir;
+        return String(av).localeCompare(String(bv), "ko") * dir;
+      });
+    }
+    return rows;
+  }, [allRows, search, colFilters, sortBy, sortDir]);
+
+  useEffect(() => { setPage(1); }, [search, colFilters]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / PRODUCT_SOURCING_PAGE_SIZE));
+  const pageRows = filteredSorted.slice((page-1)*PRODUCT_SOURCING_PAGE_SIZE, page*PRODUCT_SOURCING_PAGE_SIZE);
+  const meta = { total: filteredSorted.length, page, page_size: PRODUCT_SOURCING_PAGE_SIZE, total_pages: totalPages };
+
+  // 브랜드 블록 배경 밴딩(병합 없이 반복 표시) + 제품 그룹 색상 바 계산.
+  // brand_group_key/product_group_key가 없는 행(그룹핑이 아직 안 된 품목이 남아있을 경우,
+  // 또는 크롤링 히스토리처럼 애초에 그룹핑이 없는 데이터)은 id 기준으로 유니크 키를 만들어
+  // 사실상 그룹 없음으로 처리한다.
+  const pageRowsWithGroups = useMemo(() => {
+    const entries = pageRows.map(row => ({
+      row,
+      brandKey: row.brand_group_key || `__u_b_${row.id}`,
+      productKey: row.product_group_key || `__u_p_${row.id}`,
+    }));
+    let bandIndex = 0;
+    let productIndexGlobal = -1;
+    entries.forEach((e, i) => {
+      e.isBrandFirst = i === 0 || entries[i-1].brandKey !== e.brandKey;
+      if (e.isBrandFirst) {
+        if (i > 0) bandIndex = (bandIndex + 1) % 2;
+      }
+      e.bandIndex = bandIndex;
+      e.isProductFirst = e.isBrandFirst || entries[i-1].productKey !== e.productKey;
+      // 브랜드 경계에서 리셋하지 않고 페이지 전체에서 계속 증가시켜야
+      // 서로 다른 브랜드의 인접 제품끼리도 색이 겹치지 않는다(위아래 구분 보장).
+      if (e.isProductFirst) productIndexGlobal++;
+      e.accentIndex = productIndexGlobal;
+      // 품목(product_type)이 바뀌는 첫 행 위에 추천 요약 카드를 띄운다.
+      e.isTypeFirst = i === 0 || entries[i-1].row.product_type !== e.row.product_type;
+    });
+    return entries;
+  }, [pageRows]);
+
+  const productTypeRecommendationsAll = useProductTypeRecommendations(showRecommendations ? allRows : null);
+  const productTypeRecommendations = showRecommendations ? productTypeRecommendationsAll : new Map();
+
+  // 제품 그룹별 유통사 커버리지(아마존/월마트/샘스클럽/이온몰 중 몇 곳에 있는지).
+  // 페이지네이션/필터와 무관하게 전체 allRows 기준으로 계산해야 정확하다.
+  const productCoverageMap = useMemo(() => {
+    const map = new Map();
+    if (!allRows) return map;
+    for (const r of allRows) {
+      if (!r.product_group_key) continue;
+      if (!map.has(r.product_group_key)) map.set(r.product_group_key, new Set());
+      map.get(r.product_group_key).add(r.retailer);
+    }
+    return map;
+  }, [allRows]);
+
+  function applySort(col, dir) {
+    setSortBy(prev => (prev === col && sortDir === dir) ? null : col);
+    setSortDir(dir);
+  }
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="search-wrap">
+          <span className="search-icon">🔍</span>
+          <input placeholder={searchPlaceholder} value={search} onChange={e=>setSearch(e.target.value)}/>
+        </div>
+        <span className="count-label">{allRows ? `총 ${meta.total.toLocaleString()}건 중 표시` : ""}</span>
+        {toolbarExtra}
+      </div>
+      {belowToolbar}
+      {error && <div className="error-box">오류: {error}</div>}
+
+      {loading ? (
+        <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
+      ) : (
+        <div>
+          {/* width를 명시하지 않으면 전역 `table{width:100%}` 규칙 때문에 넓은 화면에서
+              테이블이 컨테이너 폭까지 늘어나고, 각 열 폭이 비율대로 함께 커지면서
+              셀 안에 불필요한 여백이 생긴다. width를 각 열 폭의 합과 동일하게 고정해
+              화면이 넓어도 늘어나지 않게 한다.
+              이 래퍼에는 overflow-x:auto를 주지 않는다 — CSS 스펙상 overflow-x가
+              visible이 아니면 overflow-y가 자동으로 auto가 되어 이 div가 별도의
+              스크롤 컨테이너가 되고, thead의 position:sticky는 실제 브라우저
+              뷰포트가 아니라 그 컨테이너 기준으로 계산된다. 이 컨테이너는 내부적으로
+              스크롤되지 않으므로(페이지 전체가 스크롤됨) 결과적으로 헤더가 스크롤을
+              따라 움직이지 않는 것처럼 보인다 — 그래서 세로 sticky가 페이지 스크롤을
+              따라가려면 이 래퍼가 overflow를 갖지 않아야 한다(가로 스크롤이 필요한
+              좁은 화면에서는 테이블 폭 때문에 .page/.card 자체가 가로로 스크롤된다). */}
+          <table style={{width:1194}}>
+            <thead>
+              <tr>
+                <th style={{width:105, position:"sticky", top:0, zIndex:30}}>
+                  <div className="th-inner">
+                    <span className="th-label">품목명</span>
+                    <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_type||null} activeSortCol={sortBy==="product_type"} activeSortDir={sortDir} localValues={productTypeVals} onSort={dir=>applySort("product_type",dir)} onApply={vals=>setColFilters(p=>({...p,product_type:vals}))}/>
+                  </div>
+                </th>
+                <th style={{width:122, position:"sticky", top:0, zIndex:30}}>
+                  <div className="th-inner">
+                    <span className="th-label">브랜드</span>
+                    <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
+                  </div>
+                </th>
+                <th style={{width:75, padding:"6px 8px", position:"sticky", top:0, zIndex:30}}>
+                  <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
+                    <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>유통사<br/>순위</span>
+                    <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.retailer_label||null} activeSortCol={sortBy==="rank"} activeSortDir={sortDir} localValues={retailerVals} onSort={dir=>applySort("rank",dir)} onApply={vals=>setColFilters(p=>({...p,retailer_label:vals}))}/>
+                  </div>
+                </th>
+                <th style={{width:50, position:"sticky", top:0, zIndex:30}}>이미지</th>
+                <th style={{width:272, position:"sticky", top:0, zIndex:30}}>
+                  <div className="th-inner">
+                    <span className="th-label">상품명</span>
+                    <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_name_en||null} activeSortCol={sortBy==="product_name_en"} activeSortDir={sortDir} localValues={productNameVals} onSort={dir=>applySort("product_name_en",dir)} onApply={vals=>setColFilters(p=>({...p,product_name_en:vals}))}/>
+                  </div>
+                </th>
+                <th style={{width:65, position:"sticky", top:0, zIndex:30}}>
+                  <div className="th-inner">
+                    <span className="th-label">가격</span>
+                    <RangeFilter label="가격 범위 (USD)" activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} onSort={dir=>applySort("price_usd",dir)} activeRange={colFilters.price_range||null} onApplyRange={range=>setColFilters(p=>({...p,price_range:range}))}/>
+                  </div>
+                </th>
+                <th style={{width:65, position:"sticky", top:0, zIndex:30}}>단량</th>
+                <th style={{width:101, position:"sticky", top:0, zIndex:30}}>
+                  <div className="th-inner">
+                    <span className="th-label">원산지</span>
+                    <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.origin||null} activeSortCol={sortBy==="origin"} activeSortDir={sortDir} localValues={originVals} onSort={dir=>applySort("origin",dir)} onApply={vals=>setColFilters(p=>({...p,origin:vals}))}/>
+                  </div>
+                </th>
+                <th style={{width:90, position:"sticky", top:0, zIndex:30}}>
+                  <div className="th-inner">
+                    <span className="th-label">리스크</span>
+                    <RiskFilter activeKeys={colFilters.risk_keys||null} onApply={keys=>setColFilters(p=>({...p,risk_keys:keys}))}/>
+                  </div>
+                </th>
+                <th style={{width:45, padding:"6px 4px", position:"sticky", top:0, zIndex:30}}>
+                  <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
+                    <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>병행<br/>수입</span>
+                    <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
+                  </div>
+                </th>
+                <th style={{width:100, position:"sticky", top:0, zIndex:30}} title="HS코드 (품목분류) — 지정하면 아래 추정원가가 자동 계산됩니다">HS코드</th>
+                <th style={{width:104, position:"sticky", top:0, zIndex:30}} title="관세율 자동조회 기반 추정 착지원가 (가정치 기반 추정값, 실측 아님)">추정원가</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRowsWithGroups.length === 0
+                ? <tr><td colSpan={12} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
+                : pageRowsWithGroups.map((e, i) => (
+                    <React.Fragment key={`${e.row.product_type}-${e.row.retailer}-${e.row.rank}-${i}`}>
+                      {e.isTypeFirst && showRecommendations && (
+                        <ProductTypeRecommendationCard
+                          productType={e.row.product_type}
+                          candidates={productTypeRecommendations.get(e.row.product_type)}
+                        />
+                      )}
+                      <ProductSourcingTableRow
+                        row={e.row}
+                        isBrandFirst={e.isBrandFirst}
+                        bandIndex={e.bandIndex}
+                        isProductFirst={e.isProductFirst}
+                        accentIndex={e.accentIndex}
+                        coverage={e.row.product_group_key ? productCoverageMap.get(e.row.product_group_key) : null}
+                      />
+                    </React.Fragment>
+                  ))
+              }
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Pagination meta={meta} page={page} setPage={setPage}/>
+    </>
+  );
+}
+
+function ProductSourcingPage({ navigate }) {
+  const [allRows, setAllRows] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState(null);
-  const [showHistory, setShowHistory] = useState(false);
 
   // 월마트/샘스클럽 "최신화" 버튼 — VNC 반자동 크롤링 세션 상태. product_sourcing_item(위 표의
   // 실제 데이터)과는 무관하고, 크롤링 히스토리에만 결과가 쌓인다. 세션이 pending/vnc_ready인
@@ -4228,106 +4458,7 @@ function ProductSourcingPage({ navigate }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const productTypeVals   = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_type))].sort() : [], [allRows]);
-  const retailerVals      = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.retailer_label||r.retailer))] : [], [allRows]);
-  const brandVals         = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.brand_kr).filter(Boolean))].sort() : [], [allRows]);
-  const productNameVals   = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.product_name_en).filter(Boolean))].sort() : [], [allRows]);
-  const originVals        = useMemo(() => allRows ? [...new Set(allRows.map(r=>r.origin).filter(Boolean))].sort() : [], [allRows]);
-  const parallelImportVals= useMemo(() => allRows ? [...new Set(allRows.map(r=>r.parallel_import).filter(Boolean))].sort() : [], [allRows]);
-
-  const filteredSorted = useMemo(() => {
-    if (!allRows) return [];
-    const q = search.trim().toLowerCase();
-    let rows = allRows.filter(r => {
-      if (q) {
-        const hay = `${r.product_type} ${r.brand_kr||""} ${r.brand_en||""} ${r.product_name_en||""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (colFilters.product_type?.length && !colFilters.product_type.includes(r.product_type)) return false;
-      if (colFilters.retailer_label?.length && !colFilters.retailer_label.includes(r.retailer_label||r.retailer)) return false;
-      if (colFilters.brand_kr?.length && !colFilters.brand_kr.includes(r.brand_kr)) return false;
-      if (colFilters.product_name_en?.length && !colFilters.product_name_en.includes(r.product_name_en)) return false;
-      if (colFilters.origin?.length && !colFilters.origin.includes(r.origin)) return false;
-      if (colFilters.parallel_import?.length && !colFilters.parallel_import.includes(r.parallel_import)) return false;
-      if (colFilters.price_range) {
-        const { min, max } = colFilters.price_range;
-        if (min != null && (r.price_usd == null || r.price_usd < min)) return false;
-        if (max != null && (r.price_usd == null || r.price_usd > max)) return false;
-      }
-      if (colFilters.risk_keys?.length) {
-        for (const k of colFilters.risk_keys) {
-          if (String(r[k] || "").trim() !== "통과") return false;
-        }
-      }
-      return true;
-    });
-    if (sortBy) {
-      const dir = sortDir === "asc" ? 1 : -1;
-      rows = [...rows].sort((a,b) => {
-        let av = a[sortBy], bv = b[sortBy];
-        if (av == null && bv == null) return 0;
-        if (av == null) return 1;
-        if (bv == null) return -1;
-        if (typeof av === "number" && typeof bv === "number") return (av-bv)*dir;
-        return String(av).localeCompare(String(bv), "ko") * dir;
-      });
-    }
-    return rows;
-  }, [allRows, search, colFilters, sortBy, sortDir]);
-
-  useEffect(() => { setPage(1); }, [search, colFilters]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / PRODUCT_SOURCING_PAGE_SIZE));
-  const pageRows = filteredSorted.slice((page-1)*PRODUCT_SOURCING_PAGE_SIZE, page*PRODUCT_SOURCING_PAGE_SIZE);
-  const meta = { total: filteredSorted.length, page, page_size: PRODUCT_SOURCING_PAGE_SIZE, total_pages: totalPages };
-
-  // 브랜드 블록 배경 밴딩(병합 없이 반복 표시) + 제품 그룹 색상 바 계산.
-  // brand_group_key/product_group_key가 없는 행(그룹핑이 아직 안 된 품목이 남아있을 경우)은
-  // id 기준으로 유니크 키를 만들어 사실상 그룹 없음으로 처리한다.
-  const pageRowsWithGroups = useMemo(() => {
-    const entries = pageRows.map(row => ({
-      row,
-      brandKey: row.brand_group_key || `__u_b_${row.id}`,
-      productKey: row.product_group_key || `__u_p_${row.id}`,
-    }));
-    let bandIndex = 0;
-    let productIndexGlobal = -1;
-    entries.forEach((e, i) => {
-      e.isBrandFirst = i === 0 || entries[i-1].brandKey !== e.brandKey;
-      if (e.isBrandFirst) {
-        if (i > 0) bandIndex = (bandIndex + 1) % 2;
-      }
-      e.bandIndex = bandIndex;
-      e.isProductFirst = e.isBrandFirst || entries[i-1].productKey !== e.productKey;
-      // 브랜드 경계에서 리셋하지 않고 페이지 전체에서 계속 증가시켜야
-      // 서로 다른 브랜드의 인접 제품끼리도 색이 겹치지 않는다(위아래 구분 보장).
-      if (e.isProductFirst) productIndexGlobal++;
-      e.accentIndex = productIndexGlobal;
-      // 품목(product_type)이 바뀌는 첫 행 위에 추천 요약 카드를 띄운다.
-      e.isTypeFirst = i === 0 || entries[i-1].row.product_type !== e.row.product_type;
-    });
-    return entries;
-  }, [pageRows]);
-
-  const productTypeRecommendations = useProductTypeRecommendations(allRows);
-
-  // 제품 그룹별 유통사 커버리지(아마존/월마트/샘스클럽/이온몰 중 몇 곳에 있는지).
-  // 페이지네이션/필터와 무관하게 전체 allRows 기준으로 계산해야 정확하다.
-  const productCoverageMap = useMemo(() => {
-    const map = new Map();
-    if (!allRows) return map;
-    for (const r of allRows) {
-      if (!r.product_group_key) continue;
-      if (!map.has(r.product_group_key)) map.set(r.product_group_key, new Set());
-      map.get(r.product_group_key).add(r.retailer);
-    }
-    return map;
-  }, [allRows]);
-
-  function applySort(col, dir) {
-    setSortBy(prev => (prev === col && sortDir === dir) ? null : col);
-    setSortDir(dir);
-  }
+  const productTypeCount = useMemo(() => allRows ? new Set(allRows.map(r=>r.product_type)).size : 0, [allRows]);
 
   return (
     <div className="app">
@@ -4339,9 +4470,9 @@ function ProductSourcingPage({ navigate }) {
           {allRows && (
             <div className="hero-kpi">
               {[
-                { label: "품목 수",     val: productTypeVals.length, unit: "개" },
-                { label: "전체 상품",   val: allRows.length,         unit: "건" },
-                { label: "유통사",      val: 4,                      unit: "곳" },
+                { label: "품목 수",     val: productTypeCount, unit: "개" },
+                { label: "전체 상품",   val: allRows.length,   unit: "건" },
+                { label: "유통사",      val: 4,                unit: "곳" },
               ].map(({ label, val, unit }) => (
                 <div key={label} className="hero-kpi-item">
                   <div className="hero-kpi-label">{label}</div>
@@ -4355,174 +4486,126 @@ function ProductSourcingPage({ navigate }) {
       <div className="page" style={{maxWidth:1520}}>
         <button className="back-btn" onClick={()=>navigate("main")}>→ 수입/OEM SKU 이력 대시보드 보기</button>
 
-        {error && <div className="error-box">오류: {error}</div>}
-
         <div className="card">
-          <div className="toolbar">
-            <div className="search-wrap">
-              <span className="search-icon">🔍</span>
-              <input placeholder="품목명, 브랜드, 상품명 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
-            </div>
-            <span className="count-label">{allRows ? `총 ${meta.total.toLocaleString()}건 중 표시` : ""}</span>
-            <button className="icon-btn" disabled={exporting} onClick={downloadOriginalFormat} title="원본 엑셀(유형별카드) 형식으로 사진 포함 다운로드">
-              {exporting ? "생성 중..." : "⬇ 원본 형식 다운로드"}
-            </button>
-            <button className="icon-btn" onClick={() => setShowHistory(true)} title="아마존/이온몰 자동 크롤링 과거 회차 조회 (이 표의 데이터와는 별개)">
-              🕘 크롤링 히스토리
-            </button>
-            <button
-              className="icon-btn"
-              disabled={waTriggering || waSession?.status === "pending" || waSession?.status === "vnc_ready"}
-              onClick={handleTriggerWalmartSamsclub}
-              title="월마트/샘스클럽부터 시작해서 끝나면 아마존/이온몰까지 자동으로 이어서 크롤링 (결과는 크롤링 히스토리에만 쌓임)"
-            >
-              {waTriggering ? "시작하는 중..." : "🔄 최신화"}
-            </button>
-          </div>
-          {exportError && <div className="error-box">다운로드 오류: {exportError}</div>}
-          {waError && <div className="error-box">최신화 시작 오류: {waError}</div>}
-          {waSession?.status === "pending" && (
-            <div className="error-box" style={{background:"#eff6ff", borderColor:"#bfdbfe", color:"#1e40af"}}>
-              🔄 월마트/샘스클럽 크롤링을 준비하고 있어요 (VNC 화면 여는 중, 1~2분 정도 걸려요)...
-            </div>
-          )}
-          {waSession?.status === "vnc_ready" && (
-            <div className="error-box" style={{background:"#fffbeb", borderColor:"#fde68a", color:"#92400e"}}>
-              🖥️ <strong>지금 접속해서 캡차를 풀어주세요</strong> — 뜨는 화면에서 월마트/샘스클럽
-              베스트셀러가 보이는지, 로봇 확인 화면이 뜨면 직접 눌러서 통과시켜주세요.{" "}
-              <a href={waSession.vnc_url} target="_blank" rel="noreferrer" style={{fontWeight:600}}>접속하기 →</a>
-            </div>
-          )}
-          {waSession?.status === "finished" && (
-            <div className="error-box" style={{background:"#f0fdf4", borderColor:"#bbf7d0", color:"#166534"}}>
-              ✅ 최신화 완료 — "크롤링 히스토리" 버튼에서 결과를 확인하세요.
-              <button className="icon-btn" style={{marginLeft:8, padding:"2px 8px"}} onClick={() => setWaSession(null)}>닫기</button>
-            </div>
-          )}
-          {waSession?.status === "failed" && (
-            <div className="error-box">
-              ❌ 최신화 실패: {waSession.note || "원인 미상"}
-              <button className="icon-btn" style={{marginLeft:8, padding:"2px 8px"}} onClick={() => setWaSession(null)}>닫기</button>
-            </div>
-          )}
-          {showHistory && <ProductSourcingHistoryModal onClose={() => setShowHistory(false)} />}
-
-          {loading ? (
-            <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>불러오는 중...</div>
-          ) : (
-            <div>
-              {/* width를 명시하지 않으면 전역 `table{width:100%}` 규칙 때문에 넓은 화면에서
-                  테이블이 컨테이너 폭까지 늘어나고, 각 열 폭이 비율대로 함께 커지면서
-                  셀 안에 불필요한 여백이 생긴다. width를 각 열 폭의 합과 동일하게 고정해
-                  화면이 넓어도 늘어나지 않게 한다.
-                  이 래퍼에는 overflow-x:auto를 주지 않는다 — CSS 스펙상 overflow-x가
-                  visible이 아니면 overflow-y가 자동으로 auto가 되어 이 div가 별도의
-                  스크롤 컨테이너가 되고, thead의 position:sticky는 실제 브라우저
-                  뷰포트가 아니라 그 컨테이너 기준으로 계산된다. 이 컨테이너는 내부적으로
-                  스크롤되지 않으므로(페이지 전체가 스크롤됨) 결과적으로 헤더가 스크롤을
-                  따라 움직이지 않는 것처럼 보인다 — 그래서 세로 sticky가 페이지 스크롤을
-                  따라가려면 이 래퍼가 overflow를 갖지 않아야 한다(가로 스크롤이 필요한
-                  좁은 화면에서는 테이블 폭 때문에 .page/.card 자체가 가로로 스크롤된다). */}
-              <table style={{width:1194}}>
-                <thead>
-                  <tr>
-                    <th style={{width:105, position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner">
-                        <span className="th-label">품목명</span>
-                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_type||null} activeSortCol={sortBy==="product_type"} activeSortDir={sortDir} localValues={productTypeVals} onSort={dir=>applySort("product_type",dir)} onApply={vals=>setColFilters(p=>({...p,product_type:vals}))}/>
-                      </div>
-                    </th>
-                    <th style={{width:122, position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner">
-                        <span className="th-label">브랜드</span>
-                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.brand_kr||null} activeSortCol={sortBy==="brand_kr"} activeSortDir={sortDir} localValues={brandVals} onSort={dir=>applySort("brand_kr",dir)} onApply={vals=>setColFilters(p=>({...p,brand_kr:vals}))}/>
-                      </div>
-                    </th>
-                    <th style={{width:75, padding:"6px 8px", position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
-                        <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>유통사<br/>순위</span>
-                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.retailer_label||null} activeSortCol={sortBy==="rank"} activeSortDir={sortDir} localValues={retailerVals} onSort={dir=>applySort("rank",dir)} onApply={vals=>setColFilters(p=>({...p,retailer_label:vals}))}/>
-                      </div>
-                    </th>
-                    <th style={{width:50, position:"sticky", top:0, zIndex:30}}>이미지</th>
-                    <th style={{width:272, position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner">
-                        <span className="th-label">상품명</span>
-                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.product_name_en||null} activeSortCol={sortBy==="product_name_en"} activeSortDir={sortDir} localValues={productNameVals} onSort={dir=>applySort("product_name_en",dir)} onApply={vals=>setColFilters(p=>({...p,product_name_en:vals}))}/>
-                      </div>
-                    </th>
-                    <th style={{width:65, position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner">
-                        <span className="th-label">가격</span>
-                        <RangeFilter label="가격 범위 (USD)" activeSortCol={sortBy==="price_usd"} activeSortDir={sortDir} onSort={dir=>applySort("price_usd",dir)} activeRange={colFilters.price_range||null} onApplyRange={range=>setColFilters(p=>({...p,price_range:range}))}/>
-                      </div>
-                    </th>
-                    <th style={{width:65, position:"sticky", top:0, zIndex:30}}>단량</th>
-                    <th style={{width:101, position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner">
-                        <span className="th-label">원산지</span>
-                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.origin||null} activeSortCol={sortBy==="origin"} activeSortDir={sortDir} localValues={originVals} onSort={dir=>applySort("origin",dir)} onApply={vals=>setColFilters(p=>({...p,origin:vals}))}/>
-                      </div>
-                    </th>
-                    <th style={{width:90, position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner">
-                        <span className="th-label">리스크</span>
-                        <RiskFilter activeKeys={colFilters.risk_keys||null} onApply={keys=>setColFilters(p=>({...p,risk_keys:keys}))}/>
-                      </div>
-                    </th>
-                    <th style={{width:45, padding:"6px 4px", position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner" style={{flexDirection:"column", alignItems:"flex-start", gap:2}}>
-                        <span className="th-label" style={{whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0}}>병행<br/>수입</span>
-                        <ColumnFilter colKey="_l" isNumeric={false} activeValues={colFilters.parallel_import||null} activeSortCol={sortBy==="parallel_import"} activeSortDir={sortDir} localValues={parallelImportVals} onSort={dir=>applySort("parallel_import",dir)} onApply={vals=>setColFilters(p=>({...p,parallel_import:vals}))}/>
-                      </div>
-                    </th>
-                    <th style={{width:100, position:"sticky", top:0, zIndex:30}} title="HS코드 (품목분류) — 지정하면 아래 추정원가가 자동 계산됩니다">HS코드</th>
-                    <th style={{width:104, position:"sticky", top:0, zIndex:30}} title="관세율 자동조회 기반 추정 착지원가 (가정치 기반 추정값, 실측 아님)">추정원가</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageRowsWithGroups.length === 0
-                    ? <tr><td colSpan={12} style={{textAlign:"center", padding:"24px", color:"#9ca3af"}}>결과 없음</td></tr>
-                    : pageRowsWithGroups.map((e, i) => (
-                        <React.Fragment key={`${e.row.product_type}-${e.row.retailer}-${e.row.rank}-${i}`}>
-                          {e.isTypeFirst && (
-                            <ProductTypeRecommendationCard
-                              productType={e.row.product_type}
-                              candidates={productTypeRecommendations.get(e.row.product_type)}
-                            />
-                          )}
-                          <ProductSourcingTableRow
-                            row={e.row}
-                            isBrandFirst={e.isBrandFirst}
-                            bandIndex={e.bandIndex}
-                            isProductFirst={e.isProductFirst}
-                            accentIndex={e.accentIndex}
-                            coverage={e.row.product_group_key ? productCoverageMap.get(e.row.product_group_key) : null}
-                          />
-                        </React.Fragment>
-                      ))
-                  }
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <Pagination meta={meta} page={page} setPage={setPage}/>
+          <ProductSourcingDataTable
+            rows={allRows}
+            loading={loading}
+            error={error}
+            toolbarExtra={
+              <>
+                <button className="icon-btn" disabled={exporting} onClick={downloadOriginalFormat} title="원본 엑셀(유형별카드) 형식으로 사진 포함 다운로드">
+                  {exporting ? "생성 중..." : "⬇ 원본 형식 다운로드"}
+                </button>
+                <button className="icon-btn" onClick={() => navigate("product-sourcing-history")} title="아마존/이온몰/월마트/샘스클럽 자동 크롤링 과거 회차 조회 (이 표의 데이터와는 별개)">
+                  🕘 크롤링 히스토리
+                </button>
+                <button
+                  className="icon-btn"
+                  disabled={waTriggering || waSession?.status === "pending" || waSession?.status === "vnc_ready"}
+                  onClick={handleTriggerWalmartSamsclub}
+                  title="월마트/샘스클럽부터 시작해서 끝나면 아마존/이온몰까지 자동으로 이어서 크롤링 (결과는 크롤링 히스토리에만 쌓임)"
+                >
+                  {waTriggering ? "시작하는 중..." : "🔄 최신화"}
+                </button>
+              </>
+            }
+            belowToolbar={
+              <>
+                {exportError && <div className="error-box">다운로드 오류: {exportError}</div>}
+                {waError && <div className="error-box">최신화 시작 오류: {waError}</div>}
+                {waSession?.status === "pending" && (
+                  <div className="error-box" style={{background:"#eff6ff", borderColor:"#bfdbfe", color:"#1e40af"}}>
+                    🔄 월마트/샘스클럽 크롤링을 준비하고 있어요 (VNC 화면 여는 중, 1~2분 정도 걸려요)...
+                  </div>
+                )}
+                {waSession?.status === "vnc_ready" && (
+                  <div className="error-box" style={{background:"#fffbeb", borderColor:"#fde68a", color:"#92400e"}}>
+                    🖥️ <strong>지금 접속해서 캡차를 풀어주세요</strong> — 뜨는 화면에서 월마트/샘스클럽
+                    베스트셀러가 보이는지, 로봇 확인 화면이 뜨면 직접 눌러서 통과시켜주세요.{" "}
+                    <a href={waSession.vnc_url} target="_blank" rel="noreferrer" style={{fontWeight:600}}>접속하기 →</a>
+                  </div>
+                )}
+                {waSession?.status === "finished" && (
+                  <div className="error-box" style={{background:"#f0fdf4", borderColor:"#bbf7d0", color:"#166534"}}>
+                    ✅ 최신화 완료 — "크롤링 히스토리" 버튼에서 결과를 확인하세요.
+                    <button className="icon-btn" style={{marginLeft:8, padding:"2px 8px"}} onClick={() => setWaSession(null)}>닫기</button>
+                  </div>
+                )}
+                {waSession?.status === "failed" && (
+                  <div className="error-box">
+                    ❌ 최신화 실패: {waSession.note || "원인 미상"}
+                    <button className="icon-btn" style={{marginLeft:8, padding:"2px 8px"}} onClick={() => setWaSession(null)}>닫기</button>
+                  </div>
+                )}
+              </>
+            }
+          />
         </div>
       </div>
     </div>
   );
 }
 
-// 아마존/이온몰 자동 크롤링(월 1회 GitHub Actions) 과거 회차 조회 모달.
-// product_sourcing_item(위 표의 실제 데이터, 수작업 검증 데이터 포함)과는 완전히 별개인
+const RETAILER_LABEL_MAP_HISTORY = { amazon: "아마존", walmart: "월마트", samsclub: "샘스클럽", aeon: "이온몰" };
+
+// 크롤링 스냅샷 1행(product_sourcing_crawl_snapshot_item, 크롤링 가능 필드만 있음)을
+// ProductSourcingDataTable이 기대하는 flat-row 모양(메인 표와 동일한 형태, product_sourcing_item
+// 기준)으로 매핑한다. 원산지/병행수입/리콜/품질/법적리스크/HS코드/관세 등 수작업 검증 필드는
+// 크롤링 데이터에 아예 없으므로 전부 null — 표에는 "-"로 표시되고, 리스크·병행수입 배지는
+// "정보없음"으로 뜬다(사용자 확인: 나중에 이 필드들도 채우는 방식을 별도로 구현할 예정).
+function mapCrawlSnapshotRowToFlatRow(row) {
+  let retailerLabel = RETAILER_LABEL_MAP_HISTORY[row.retailer] || row.retailer;
+  if (row.source_site === "aeon-jp") retailerLabel += " (일본)";
+  else if (row.source_site === "aeon-my") retailerLabel += " (말레이시아)";
+  return {
+    id: row.id,
+    product_type: row.product_type,
+    retailer: row.retailer,
+    retailer_label: retailerLabel,
+    ranking_method: null,
+    sample_note: null,
+    rank: row.rank,
+    brand_kr: null,
+    brand_en: row.brand,
+    product_name_en: row.product_name_en,
+    price_usd: row.price_usd,
+    origin: null,
+    unit: null,
+    key_criteria_label: null,
+    key_criteria_value: null,
+    parallel_import: null,
+    importers: null,
+    recall_status: null,
+    quality_label_status: null,
+    legal_risk_status: null,
+    five_year_issue: null,
+    notes: null,
+    rating: row.rating,
+    review_count: row.review_count,
+    url: row.url,
+    image_url: row.image_url,
+    brand_group_key: null,
+    product_group_key: null,
+    hs_code: null,
+    hs_code_confidence: null,
+    tariff_rate_pct: null,
+    tariff_basis: null,
+    estimated_landed_cost_krw: null,
+    landed_cost_is_per_kg: null,
+  };
+}
+
+// 아마존/이온몰/월마트/샘스클럽 자동 크롤링(GitHub Actions) 과거 회차 조회 페이지.
+// product_sourcing_item(메인 표, 수작업 검증 데이터 포함)과는 완전히 별개인
 // product_sourcing_crawl_run/crawl_snapshot_item 이력 테이블만 읽는다 — 여기서 보는 값은
-// 참고용 스냅샷일 뿐, 이 모달에서 무엇을 하든 메인 표 데이터는 바뀌지 않는다.
-function ProductSourcingHistoryModal({ onClose }) {
+// 참고용 스냅샷일 뿐, 이 페이지에서 무엇을 하든 메인 표 데이터는 바뀌지 않는다.
+// 표 구성은 메인페이지와 동일하게 ProductSourcingDataTable을 그대로 재사용한다.
+function ProductSourcingHistoryPage({ navigate }) {
   const [runs, setRuns] = useState(null);
   const [runsError, setRunsError] = useState(null);
   const [selectedRunId, setSelectedRunId] = useState(null);
-  const [detail, setDetail] = useState(null);
+  const [rows, setRows] = useState(null);
+  const [runNote, setRunNote] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(null);
 
@@ -4541,76 +4624,56 @@ function ProductSourcingHistoryModal({ onClose }) {
     setDetailLoading(true);
     setDetailError(null);
     fetchProductSourcingCrawlRun(selectedRunId)
-      .then(setDetail)
+      .then(d => {
+        setRows((d.rows || []).map(mapCrawlSnapshotRowToFlatRow));
+        setRunNote(d.note || null);
+      })
       .catch(e => setDetailError(e.message))
       .finally(() => setDetailLoading(false));
   }, [selectedRunId]);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" style={{maxWidth:"min(1200px, 95vw)"}} onClick={e=>e.stopPropagation()}>
-        <div className="modal-header">
-          <span className="modal-title">크롤링 히스토리 (아마존/이온몰, 자동 수집 — 참고용)</span>
-          <button className="modal-close" onClick={onClose}>✕</button>
+    <div className="app">
+      <style>{styles}</style>
+      <div className="hero">
+        <div className="hero-inner">
+          <div className="hero-title">크롤링 히스토리 (아마존·이온몰·월마트·샘스클럽 자동 수집)</div>
+          <div className="hero-desc">GitHub Actions로 자동 수집된 과거 크롤링 회차를 조회합니다. 참고용 스냅샷이며, 이 페이지에서 보는 값은 메인 "품목별 유통사 인기상품" 표에 반영되지 않습니다. 원산지·병행수입·리콜 등 수작업 검증 컬럼은 크롤링 데이터에 없어 빈 칸으로 표시됩니다.</div>
         </div>
-        <div className="modal-body">
-          {runsError && <div className="error-box">회차 목록 조회 오류: {runsError}</div>}
+      </div>
+      <div className="page" style={{maxWidth:1520}}>
+        <button className="back-btn" onClick={()=>navigate("product-sourcing")}>→ 품목별 유통사 인기상품 표로 돌아가기</button>
+
+        {runsError && <div className="error-box">회차 목록 조회 오류: {runsError}</div>}
+
+        <div className="card">
           {runs && runs.length === 0 && (
-            <div style={{fontSize:13, color:"#9ca3af", padding:"12px 0"}}>아직 자동 크롤링 회차가 없습니다.</div>
+            <div style={{fontSize:13, color:"#9ca3af", padding:"24px 16px"}}>아직 자동 크롤링 회차가 없습니다.</div>
           )}
           {runs && runs.length > 0 && (
-            <>
-              <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:12}}>
-                <span style={{fontSize:13, color:"#6b7280"}}>회차 선택</span>
-                <select
-                  value={selectedRunId ?? ""}
-                  onChange={e => setSelectedRunId(Number(e.target.value))}
-                  style={{fontSize:13, padding:"4px 8px"}}
-                >
-                  {runs.map(run => (
-                    <option key={run.run_id} value={run.run_id}>
-                      {new Date(run.run_at).toLocaleString("ko-KR")} · {run.site_scope || "-"} · {run.row_count ?? "?"}건
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {detailLoading && <div style={{fontSize:13, color:"#9ca3af"}}>불러오는 중...</div>}
-              {detailError && <div className="error-box">회차 조회 오류: {detailError}</div>}
-              {detail && (
+            <ProductSourcingDataTable
+              rows={rows}
+              loading={detailLoading}
+              error={detailError}
+              showRecommendations={false}
+              toolbarExtra={
                 <>
-                  {detail.note && <div style={{fontSize:12, color:"#9ca3af", marginBottom:8}}>{detail.note}</div>}
-                  <div style={{overflowX:"auto"}}>
-                    <table style={{width:"100%", fontSize:13}}>
-                      <thead>
-                        <tr>
-                          <th>대분류</th><th>품목유형</th><th>유통사</th><th>순위</th>
-                          <th>브랜드</th><th>상품명(영문)</th><th>가격(USD)</th>
-                          <th>평점</th><th>리뷰수</th><th>링크</th><th>이미지</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detail.rows.map(row => (
-                          <tr key={row.id}>
-                            <td>{row.category || "-"}</td>
-                            <td>{row.product_type}</td>
-                            <td>{row.retailer}{row.source_site ? ` (${row.source_site})` : ""}</td>
-                            <td>{row.rank}</td>
-                            <td>{row.brand || "-"}</td>
-                            <td style={{maxWidth:260, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}} title={row.product_name_en || ""}>{row.product_name_en || "-"}</td>
-                            <td>{row.price_usd != null ? `$${Number(row.price_usd).toFixed(2)}` : "-"}</td>
-                            <td>{row.rating ?? "-"}</td>
-                            <td>{row.review_count ?? "-"}</td>
-                            <td>{row.url ? <a href={row.url} target="_blank" rel="noreferrer">열기</a> : "-"}</td>
-                            <td>{row.image_url ? <img src={row.image_url} alt="" style={{width:32, height:32, objectFit:"cover"}}/> : "-"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <span style={{fontSize:13, color:"#6b7280"}}>회차</span>
+                  <select
+                    value={selectedRunId ?? ""}
+                    onChange={e => setSelectedRunId(Number(e.target.value))}
+                    style={{fontSize:13, padding:"6px 10px"}}
+                  >
+                    {runs.map(run => (
+                      <option key={run.run_id} value={run.run_id}>
+                        {new Date(run.run_at).toLocaleString("ko-KR")} · {run.site_scope || "-"} · {run.row_count ?? "?"}건
+                      </option>
+                    ))}
+                  </select>
+                  {runNote && <span style={{fontSize:12, color:"#9ca3af"}}>{runNote}</span>}
                 </>
-              )}
-            </>
+              }
+            />
           )}
         </div>
       </div>
@@ -4837,5 +4900,6 @@ export default function App() {
   if (page.name==="country-map") return <CountryMapPage navigate={navigate}/>;
   if (page.name==="factory-view") return <FactoryViewDashboard navigate={navigate}/>;
   if (page.name==="product-sourcing") return <ProductSourcingPage navigate={navigate}/>;
+  if (page.name==="product-sourcing-history") return <ProductSourcingHistoryPage navigate={navigate}/>;
   return <MainDashboard navigate={navigate}/>;
 }
