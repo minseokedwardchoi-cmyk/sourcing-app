@@ -5,7 +5,6 @@
   "type": "module",
   "description": "월마트/샘스클럽 — PerimeterX 봇차단 때문에 완전 자동화 불가. GitHub Actions + VNC로 사람이 캡차만 눌러주는 반자동 크롤링. B0 스파이크로 실현가능성 검증 완료(2026-08-12), B1(실제 크롤링 루프) 구현됨.",
   "scripts": {
-    "spike": "node vnc-spike.js",
     "crawl": "node crawl.js",
     "upload": "node upload.js"
   },

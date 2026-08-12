@@ -16,7 +16,9 @@ VNC로 직접 캡차를 눌러 통과시킬 수 있는 것까지 실측 확인�
    준비되면 백엔드 `session-callback`을 호출
 3. 프론트가 폴링 중이던 대시보드에 "지금 접속해서 캡차 풀어주세요" 배너 + 링크가 뜸
 4. `crawl.js`가 headed 브라우저 **하나를 계속 재사용**하면서 83개 유형 × (월마트/샘스클럽)을 순회 —
-   캡차가 뜰 때마다 `human-check.js`(최대 90초 대기)가 사람이 눌러줄 때까지 기다림
+   캡차가 뜰 때마다 `human-check.js`(최대 180초 대기)가 사람이 눌러줄 때까지 기다림. VNC로 마우스
+   "누르고 있기" 조작 시 타이밍이 매끄럽게 전달 안 돼서 PerimeterX가 여러 번 재시도를 요구하는
+   경우가 실측으로 확인됨(막힌 건 아니고 번거로운 정도 — 결국 통과됨) — 180초는 이걸 감안한 여유.
 5. 끝나면 `upload.js`가 결과를 백엔드 `POST /api/product-sourcing/crawl-snapshot`에 업로드(아마존/
    이온몰과 같은 엔드포인트 재사용, `product_sourcing_item`은 안 건드림) → `session-finished` 호출
 6. 이 워크플로가 끝나면 `crawl_amazon_aeon.yml`이 `workflow_run`으로 자동 이어서 실행됨
@@ -25,7 +27,6 @@ VNC로 직접 캡차를 눌러 통과시킬 수 있는 것까지 실측 확인�
 ```
 crawl.js               # 메인 크롤 루프 — 브라우저 하나 재사용, type-query-map.csv(crawl-product-sourcing과 공유) 순회
 upload.js               # results.jsonl → 백엔드 /api/product-sourcing/crawl-snapshot
-vnc-spike.js            # B0 전용 — 이제 안 쓰임(B1로 대체), 참고용으로만 남겨둠
 scrapers/walmart.js      # oliveoil-scraper에서 이식
 scrapers/samsclub.js     # oliveoil-scraper에서 이식 (실제 마크업 미검증 — selector 보강 필요할 수 있음)
 scrapers/human-check.js  # 캡차 뜨면 최대 90초 사람 대기 로직
