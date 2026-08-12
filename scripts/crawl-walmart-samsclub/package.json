@@ -1,0 +1,13 @@
+{
+  "name": "crawl-walmart-samsclub",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "월마트/샘스클럽 — PerimeterX 봇차단 때문에 완전 자동화 불가. GitHub Actions + VNC로 사람이 캡차만 눌러주는 반자동 크롤링. 지금은 B0(실현가능성 스파이크)만 있음 — 통과해야 B1(본 크롤링 로직)을 추가한다.",
+  "scripts": {
+    "spike": "node vnc-spike.js"
+  },
+  "dependencies": {
+    "playwright": "^1.47.0"
+  }
+}
