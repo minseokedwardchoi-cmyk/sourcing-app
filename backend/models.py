@@ -235,6 +235,42 @@ class ProductSourcingCrawlSnapshotItem(Base):
     )
 
 
+class BrandVerification(Base):
+    """
+    브랜드 단위 이슈검증(리콜/품질·표시/법적·평판) 캐시.
+
+    product_sourcing_item에 있는 리콜/품질표시/법적평판 판정은 원래 브랜드별로 사람이
+    웹서치(Claude+WebSearch)해서 채웠다(zip 전달 패키지 `brand_verify.csv` 참고). 이걸
+    Gemini API(웹검색 그라운딩)로 자동화하되, 검증은 상품 행이 아니라 **브랜드 1건당
+    1행**으로 여기 캐시해서 여러 유통사·품목유형에 걸쳐 재사용한다 — 같은 브랜드를
+    행마다 반복 조사하지 않기 위함.
+
+    product_sourcing_item(메인페이지)이나 크롤링 이력 테이블과는 조인 관계가 없다
+    (FK 없음) — brand_key 문자열로만 매칭. 메인 테이블 승격 로직이 생기면 그 로직이
+    brand_key로 이 캐시를 조회해서 recall_status 등을 채우면 된다.
+    """
+    __tablename__ = "brand_verification"
+
+    id                    = Column(Integer, primary_key=True, autoincrement=True)
+
+    brand_key             = Column(String(200), nullable=False, unique=True, comment="정규화된 브랜드명 (조회 키, brand_key_normalize.normalize_brand_key 결과)")
+    brand_display         = Column(String(200), nullable=True,  comment="검증에 사용한 브랜드 원문 표기 (참고용)")
+
+    recall_status         = Column(String(20),  nullable=True,  comment="리콜 이력 판정 (통과/탈락)")
+    quality_label_status  = Column(String(20),  nullable=True,  comment="품질·표시 판정 (통과/탈락)")
+    legal_risk_status     = Column(String(20),  nullable=True,  comment="법적·평판 리스크 판정 (통과/탈락)")
+    five_year_issue       = Column(String(20),  nullable=True,  comment="탈락 사유 중 가장 최근 건 5년이내 여부 (-/O/X)")
+    notes                 = Column(Text,        nullable=True,  comment="판정 근거 요약 (사건명·연도 등)")
+
+    sources                = Column(Text,        nullable=True,  comment="그라운딩에 사용된 출처 URL 목록 (JSON 배열, 스팟체크용)")
+    verification_model     = Column(String(50),  nullable=True,  comment="검증에 사용한 Gemini 모델명")
+    verified_at             = Column(DateTime,    nullable=True,  comment="검증(또는 기존 데이터 백필) 실행 시각")
+
+    __table_args__ = (
+        Index("ix_bv_brand_key", "brand_key"),
+    )
+
+
 class TariffRate(Base):
     """
     HS코드(품목번호)별 관세율표 — 관세청_품목번호별 관세율표(data.go.kr) 원본을 그대로 적재.

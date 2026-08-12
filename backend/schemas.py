@@ -353,6 +353,30 @@ class ProductSourcingCrawlRunDetailResponse(BaseModel):
     rows:       list[ProductSourcingCrawlSnapshotRow] = Field(default_factory=list)
 
 
+class BrandVerificationKeysResponse(BaseModel):
+    brand_keys: list[str] = Field(default_factory=list, description="brand_verification에 이미 존재하는 brand_key 전체 목록 (스킵 대상 판단용)")
+
+
+class BrandVerificationUpsertItem(BaseModel):
+    brand_key:             str             = Field(..., description="정규화된 브랜드 키 (brand_key_normalize.normalize_brand_key 결과)")
+    brand_display:         Optional[str]   = Field(None, description="검증에 사용한 브랜드 원문 표기")
+    recall_status:         str             = Field(..., description="통과 또는 탈락")
+    quality_label_status:  str             = Field(..., description="통과 또는 탈락")
+    legal_risk_status:     str             = Field(..., description="통과 또는 탈락")
+    five_year_issue:       str             = Field(..., description="O, X, 또는 -")
+    notes:                 Optional[str]   = Field(None)
+    sources:                Optional[list[dict]] = Field(None, description="그라운딩 출처 [{title,url}]")
+    verification_model:     Optional[str]  = Field(None)
+
+
+class BrandVerificationUpsertRequest(BaseModel):
+    items: list[BrandVerificationUpsertItem] = Field(default_factory=list)
+
+
+class BrandVerificationUpsertResponse(BaseModel):
+    upserted: int
+
+
 class TariffUploadResponse(BaseModel):
     inserted:      int = Field(..., description="적재된 관세율 행 수")
     hs_code_count: int = Field(..., description="적재된 고유 HS코드 개수")

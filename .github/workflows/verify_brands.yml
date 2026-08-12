@@ -1,0 +1,109 @@
+name: 브랜드 검증 (Gemini)
+
+# 아마존/이온몰 크롤링(crawl_amazon_aeon.yml)이 끝나면 이어서 자동 실행되어,
+# 그 회차의 크롤링 이력(product_sourcing_crawl_snapshot_item)에 새로 나타난 브랜드를
+# Gemini API(google_search 그라운딩)로 리콜/품질·표시/법적·평판 조사해서 백엔드의
+# brand_verification 캐시에 upsert한다 (backend/verify_brands_gemini.py 참고).
+#
+# product_sourcing_item(메인페이지, 수작업 검증 데이터 포함)은 이 워크플로가 전혀
+# 건드리지 않는다 — 브랜드 단위 캐시만 채운다. 다른 크롤링 워크플로와 동일하게
+# DATABASE_URL로 Postgres에 직접 붙지 않고 백엔드 HTTP API만 호출한다.
+#
+# 한 회차에 신규 브랜드가 많으면(특히 최초 --all-runs 소급 실행) 한 번의 스크립트
+# 호출(limit개)로 다 못 끝낼 수 있어, crawl_manufacturer_emails.yml과 같은 방식으로
+# "더 볼 대상이 없다"는 로그가 나올 때까지 배치를 반복한다.
+
+on:
+  workflow_run:
+    workflows: ["아마존/이온몰 순위 크롤링"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: '특정 크롤링 회차 ID (비우면 최신 회차)'
+        required: false
+        default: ''
+      all_runs:
+        description: '모든 회차를 통틀어 대상 브랜드 추출 (최초 1회 소급용)'
+        required: false
+        default: 'false'
+      limit:
+        description: '배치 1회당 검증할 브랜드 수'
+        required: false
+        default: '20'
+      max_batches:
+        description: '최대 배치 반복 횟수 (대상이 없어지면 그 전에 종료)'
+        required: false
+        default: '15'
+      dry_run:
+        description: '대상 브랜드만 출력하고 실제 검증은 하지 않음'
+        required: false
+        default: 'false'
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: pip install -r backend/requirements-brand-verify.txt
+
+      - name: 브랜드 검증 (대상이 없어질 때까지 배치 반복)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          LIMIT="${{ github.event.inputs.limit || '20' }}"
+          MAX_BATCHES="${{ github.event.inputs.max_batches || '15' }}"
+          RUN_ID="${{ github.event.inputs.run_id }}"
+          ALL_RUNS="${{ github.event.inputs.all_runs }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+
+          ARGS="--limit=${LIMIT}"
+          if [ -n "$RUN_ID" ]; then
+            ARGS="${ARGS} --run-id=${RUN_ID}"
+          fi
+          if [ "$ALL_RUNS" = "true" ]; then
+            ARGS="${ARGS} --all-runs"
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS="${ARGS} --dry-run"
+          fi
+
+          FAILURES=0
+          for i in $(seq 1 "$MAX_BATCHES"); do
+            echo "=== 배치 $i / $MAX_BATCHES (${ARGS}) ==="
+            set +e
+            out=$(python backend/verify_brands_gemini.py ${ARGS})
+            status=$?
+            set -e
+            echo "$out"
+
+            if [ "$status" -ne 0 ]; then
+              FAILURES=$((FAILURES + 1))
+              echo "배치 $i 실패 (누적 실패 ${FAILURES}회) — 다음 배치로 계속 진행"
+              if [ "$FAILURES" -ge 3 ]; then
+                echo "연속/누적 실패가 너무 많음 — 중단"
+                exit 1
+              fi
+              continue
+            fi
+
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "dry-run 모드 — 1회만 실행하고 종료"
+              break
+            fi
+
+            if echo "$out" | grep -q "미검증 0개"; then
+              echo "남은 미검증 브랜드 없음 — 종료"
+              break
+            fi
+          done

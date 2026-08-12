@@ -39,6 +39,7 @@ from database import get_db, engine, Base, AsyncSessionLocal
 from models import (
     ImportHistory, ProductSourcingItem, CrawlRunStatus,
     ProductSourcingCrawlRun, ProductSourcingCrawlSnapshotItem,
+    BrandVerification,
 )
 from schemas import (
     SkuHistoryResponse, SkuHistoryRow, PaginationMeta,
@@ -55,6 +56,7 @@ from schemas import (
     ProductSourcingCrawlSnapshotUploadRequest, ProductSourcingCrawlSnapshotUploadResponse,
     ProductSourcingCrawlRunListResponse, ProductSourcingCrawlRunSummary,
     ProductSourcingCrawlRunDetailResponse, ProductSourcingCrawlSnapshotRow,
+    BrandVerificationKeysResponse, BrandVerificationUpsertRequest, BrandVerificationUpsertResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
@@ -2268,6 +2270,65 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
             for item in items
         ],
     )
+
+
+# ─── 3-4-2. 브랜드 검증 캐시 (brand_verification) ──────────────────────────
+# 크롤링 이력에 새로 나타난 브랜드를 Gemini API(웹검색 그라운딩)로 자동 조사하는
+# verify_brands_gemini.py가 이 두 엔드포인트로만 DB를 건드린다 — 이 프로젝트의
+# 다른 GitHub Actions 워크플로들과 동일하게, CI 러너가 DATABASE_URL로 Postgres에
+# 직접 붙지 않고 백엔드 HTTP API를 경유하는 원칙을 그대로 따른다.
+# product_sourcing_item(메인페이지)은 이 경로로 전혀 건드리지 않는다 — 브랜드
+# 단위 캐시일 뿐이고, 메인 테이블 승격 로직이 생기면 그쪽에서 이 캐시를 조회해서
+# 반영하면 된다.
+
+@app.get("/api/brand-verification/keys", response_model=BrandVerificationKeysResponse)
+async def list_brand_verification_keys(db: AsyncSession = Depends(get_db)):
+    r = await db.execute(select(BrandVerification.brand_key))
+    return BrandVerificationKeysResponse(brand_keys=list(r.scalars().all()))
+
+
+@app.post("/api/brand-verification/upsert", response_model=BrandVerificationUpsertResponse)
+async def upsert_brand_verification(
+    payload: BrandVerificationUpsertRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        now = datetime.utcnow()
+        count = 0
+        for item in payload.items:
+            await db.execute(text("""
+                INSERT INTO brand_verification
+                    (brand_key, brand_display, recall_status, quality_label_status,
+                     legal_risk_status, five_year_issue, notes, sources, verification_model, verified_at)
+                VALUES
+                    (:brand_key, :brand_display, :recall, :quality, :legal, :five_year, :notes,
+                     :sources, :model, :verified_at)
+                ON CONFLICT (brand_key) DO UPDATE SET
+                    brand_display = EXCLUDED.brand_display,
+                    recall_status = EXCLUDED.recall_status,
+                    quality_label_status = EXCLUDED.quality_label_status,
+                    legal_risk_status = EXCLUDED.legal_risk_status,
+                    five_year_issue = EXCLUDED.five_year_issue,
+                    notes = EXCLUDED.notes,
+                    sources = EXCLUDED.sources,
+                    verification_model = EXCLUDED.verification_model,
+                    verified_at = EXCLUDED.verified_at
+            """), {
+                "brand_key": item.brand_key, "brand_display": item.brand_display,
+                "recall": item.recall_status, "quality": item.quality_label_status,
+                "legal": item.legal_risk_status, "five_year": item.five_year_issue,
+                "notes": item.notes,
+                "sources": json.dumps(item.sources, ensure_ascii=False) if item.sources is not None else None,
+                "model": item.verification_model, "verified_at": now,
+            })
+            count += 1
+        await db.commit()
+        return BrandVerificationUpsertResponse(upserted=count)
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
 def _resolve_image_url(request: Request, row_id: int, image_url: str | None, has_image_data: bool) -> str | None:
