@@ -353,6 +353,30 @@ class ProductSourcingCrawlRunDetailResponse(BaseModel):
     rows:       list[ProductSourcingCrawlSnapshotRow] = Field(default_factory=list)
 
 
+class ProductSourcingWalmartSamsclubTriggerResponse(BaseModel):
+    run_key: str
+
+
+class ProductSourcingWalmartSamsclubSessionCallbackRequest(BaseModel):
+    run_key: str
+    vnc_url: str
+
+
+class ProductSourcingWalmartSamsclubSessionFinishedRequest(BaseModel):
+    run_key: str
+    status:  str            = Field(..., description="finished/failed")
+    note:    Optional[str]  = Field(None)
+
+
+class ProductSourcingWalmartSamsclubSessionStatusResponse(BaseModel):
+    run_key:    Optional[str]      = Field(None)
+    status:     Optional[str]      = Field(None, description="pending/vnc_ready/finished/failed, 세션 없으면 null")
+    vnc_url:    Optional[str]      = Field(None)
+    note:       Optional[str]      = Field(None)
+    started_at: Optional[datetime] = Field(None)
+    updated_at: Optional[datetime] = Field(None)
+
+
 class BrandVerificationKeysResponse(BaseModel):
     brand_keys: list[str] = Field(default_factory=list, description="brand_verification에 이미 존재하는 brand_key 전체 목록 (스킵 대상 판단용)")
 

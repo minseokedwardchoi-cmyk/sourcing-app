@@ -235,6 +235,26 @@ class ProductSourcingCrawlSnapshotItem(Base):
     )
 
 
+class ProductSourcingCrawlSession(Base):
+    """
+    월마트/샘스클럽 "최신화" 버튼 세션 상태 (VNC 반자동 크롤링, Part B).
+    대시보드에서 버튼을 누르면 backend가 GitHub Actions 워크플로(crawl_walmart_samsclub.yml)를
+    트리거하고, 그 워크플로가 VNC 터널이 뜨는 순간 session-callback으로 이 테이블을 갱신한다.
+    프론트는 이 테이블을 폴링해서 "지금 접속해서 캡차 풀어주세요" 배너를 띄운다.
+    한 번에 세션 하나만 유효하다고 가정 — 항상 단일 행(id=1)만 유지(ProductSourcingExportCache와
+    같은 패턴, 갱신 시 UPDATE).
+    """
+    __tablename__ = "product_sourcing_crawl_session"
+
+    id         = Column(Integer, primary_key=True)
+    run_key    = Column(String(64),  nullable=False, comment="트리거마다 새로 발급하는 상관관계 키 (uuid)")
+    status     = Column(String(20),  nullable=False, comment="pending/vnc_ready/finished/failed")
+    vnc_url    = Column(Text,        nullable=True,  comment="noVNC 접속 링크 (finished/failed 되면 비움)")
+    note       = Column(Text,        nullable=True,  comment="완료/실패 메모")
+    started_at = Column(DateTime,    nullable=False)
+    updated_at = Column(DateTime,    nullable=False)
+
+
 class BrandVerification(Base):
     """
     브랜드 단위 이슈검증(리콜/품질·표시/법적·평판) 캐시.

@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from database import get_db, engine, Base, AsyncSessionLocal
 from models import (
     ImportHistory, ProductSourcingItem, CrawlRunStatus,
-    ProductSourcingCrawlRun, ProductSourcingCrawlSnapshotItem,
+    ProductSourcingCrawlRun, ProductSourcingCrawlSnapshotItem, ProductSourcingCrawlSession,
     BrandVerification,
 )
 from schemas import (
@@ -56,6 +56,8 @@ from schemas import (
     ProductSourcingCrawlSnapshotUploadRequest, ProductSourcingCrawlSnapshotUploadResponse,
     ProductSourcingCrawlRunListResponse, ProductSourcingCrawlRunSummary,
     ProductSourcingCrawlRunDetailResponse, ProductSourcingCrawlSnapshotRow,
+    ProductSourcingWalmartSamsclubTriggerResponse, ProductSourcingWalmartSamsclubSessionCallbackRequest,
+    ProductSourcingWalmartSamsclubSessionFinishedRequest, ProductSourcingWalmartSamsclubSessionStatusResponse,
     BrandVerificationKeysResponse, BrandVerificationUpsertRequest, BrandVerificationUpsertResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
@@ -2269,6 +2271,103 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
             )
             for item in items
         ],
+    )
+
+
+# ─── 3-4-2. 월마트/샘스클럽 "최신화" 버튼 (VNC 반자동 크롤링, Part B) ────────────────
+# PerimeterX 봇차단 때문에 완전 무인 자동화가 불가능해서, 대시보드 버튼으로 GitHub Actions를
+# 트리거하고 사람이 VNC로 캡차만 눌러주는 반자동 방식. 세션 상태는 product_sourcing_crawl_session
+# 단일 행에 저장(ProductSourcingExportCache와 같은 id=1 upsert 패턴).
+
+_GITHUB_REPO = os.getenv("GITHUB_REPO", "minseokedwardchoi-cmyk/sourcing-app")
+_GITHUB_WALMART_SAMSCLUB_WORKFLOW = "crawl_walmart_samsclub.yml"
+
+
+@app.post("/api/product-sourcing/walmart-samsclub/trigger", response_model=ProductSourcingWalmartSamsclubTriggerResponse)
+async def trigger_walmart_samsclub_crawl(db: AsyncSession = Depends(get_db)):
+    token = os.getenv("GITHUB_DISPATCH_TOKEN")
+    if not token:
+        raise HTTPException(status_code=500, detail="GITHUB_DISPATCH_TOKEN 환경변수가 설정되지 않았습니다.")
+
+    import uuid
+    run_key = uuid.uuid4().hex
+
+    import httpx
+    url = f"https://api.github.com/repos/{_GITHUB_REPO}/actions/workflows/{_GITHUB_WALMART_SAMSCLUB_WORKFLOW}/dispatches"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                },
+                json={"ref": "main", "inputs": {"run_key": run_key}},
+            )
+        if resp.status_code >= 300:
+            raise HTTPException(status_code=502, detail=f"GitHub Actions 트리거 실패: HTTP {resp.status_code} {resp.text[:300]}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"GitHub Actions 트리거 실패: {type(e).__name__}: {str(e)}")
+
+    now = datetime.utcnow()
+    existing = (await db.execute(select(ProductSourcingCrawlSession).where(ProductSourcingCrawlSession.id == 1))).scalar_one_or_none()
+    if existing:
+        existing.run_key = run_key
+        existing.status = "pending"
+        existing.vnc_url = None
+        existing.note = None
+        existing.started_at = now
+        existing.updated_at = now
+    else:
+        db.add(ProductSourcingCrawlSession(
+            id=1, run_key=run_key, status="pending", vnc_url=None, note=None,
+            started_at=now, updated_at=now,
+        ))
+    await db.commit()
+    return ProductSourcingWalmartSamsclubTriggerResponse(run_key=run_key)
+
+
+@app.post("/api/product-sourcing/walmart-samsclub/session-callback")
+async def walmart_samsclub_session_callback(
+    payload: ProductSourcingWalmartSamsclubSessionCallbackRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    session = (await db.execute(select(ProductSourcingCrawlSession).where(ProductSourcingCrawlSession.id == 1))).scalar_one_or_none()
+    if session is None or session.run_key != payload.run_key:
+        raise HTTPException(status_code=404, detail="현재 트리거된 세션과 run_key가 일치하지 않습니다.")
+    session.status = "vnc_ready"
+    session.vnc_url = payload.vnc_url
+    session.updated_at = datetime.utcnow()
+    await db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/product-sourcing/walmart-samsclub/session-finished")
+async def walmart_samsclub_session_finished(
+    payload: ProductSourcingWalmartSamsclubSessionFinishedRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    session = (await db.execute(select(ProductSourcingCrawlSession).where(ProductSourcingCrawlSession.id == 1))).scalar_one_or_none()
+    if session is None or session.run_key != payload.run_key:
+        raise HTTPException(status_code=404, detail="현재 트리거된 세션과 run_key가 일치하지 않습니다.")
+    session.status = payload.status
+    session.vnc_url = None
+    session.note = payload.note
+    session.updated_at = datetime.utcnow()
+    await db.commit()
+    return {"ok": True}
+
+
+@app.get("/api/product-sourcing/walmart-samsclub/session-status", response_model=ProductSourcingWalmartSamsclubSessionStatusResponse)
+async def get_walmart_samsclub_session_status(db: AsyncSession = Depends(get_db)):
+    session = (await db.execute(select(ProductSourcingCrawlSession).where(ProductSourcingCrawlSession.id == 1))).scalar_one_or_none()
+    if session is None:
+        return ProductSourcingWalmartSamsclubSessionStatusResponse()
+    return ProductSourcingWalmartSamsclubSessionStatusResponse(
+        run_key=session.run_key, status=session.status, vnc_url=session.vnc_url,
+        note=session.note, started_at=session.started_at, updated_at=session.updated_at,
     )
 
 
