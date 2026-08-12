@@ -3,7 +3,7 @@
  * 같은 화면에서 사람이 직접 버튼을 누를 때까지 기다린다.
  * checkFn()은 "아직도 봇 확인 화면인가?"를 true/false로 반환해야 한다.
  */
-export async function waitForHumanIfChallenged(page, checkFn, label, { interactive, maxWaitMs = 90000 } = {}) {
+export async function waitForHumanIfChallenged(page, checkFn, label, { interactive, maxWaitMs = 180000 } = {}) {
   let stillChallenged = await checkFn();
   if (!stillChallenged) return true;
 
