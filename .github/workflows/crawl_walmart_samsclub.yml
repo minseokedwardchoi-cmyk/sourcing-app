@@ -1,0 +1,163 @@
+name: 월마트/샘스클럽 크롤링
+
+# 대시보드 "최신화" 버튼(backend가 workflow_dispatch로 트리거, run_key 입력값으로 세션과
+# 상관관계를 맺음)으로 시작하는 반자동 크롤링. PerimeterX "Press & Hold" 봇차단 때문에
+# 완전 무인이 불가능해서, Xvfb+headed Chromium+x11vnc+noVNC+cloudflared로 화면을 VNC로
+# 공개하고 사람이 캡차만 직접 눌러준다 (B0 스파이크로 실현가능성 확인됨, 2026-08-12).
+#
+# 비밀번호 없이 VNC를 연다 — GitHub 로그/브라우저 주소창 둘 다 "password=" 뒤 값을 자동으로
+# 가려버려서 사람이 못 꺼내는 문제가 B0에서 실측 확인됐다. URL 자체가 매번 랜덤
+# (trycloudflare.com 서브도메인)이고 세션도 짧게 사는 1회용이라 이 정도 위험은 감수한다.
+#
+# 이 워크플로가 끝나면(성공/실패 무관) crawl_amazon_aeon.yml이 workflow_run으로 자동
+# 이어서 실행된다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_key:
+        description: '백엔드 세션 상관관계 키 (버튼 트리거 시 자동 전달됨 — 수동 테스트 시 비워두면 콜백 생략하고 로그의 링크를 직접 씀)'
+        required: false
+        default: ''
+      limit:
+        description: '유형당 상위 N개'
+        required: false
+        default: '40'
+      only:
+        description: '품목유형/대분류에 포함된 텍스트로 필터 (소량 테스트용, 비워두면 전체 83개)'
+        required: false
+        default: ''
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 화면 공유 도구 설치 (Xvfb, x11vnc, noVNC, cloudflared)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb x11vnc novnc websockify
+          curl -fsSL --output /tmp/cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i /tmp/cloudflared.deb
+
+      - name: Playwright + Chromium 설치
+        working-directory: scripts/crawl-walmart-samsclub
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Xvfb 가상 화면 시작
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          sleep 2
+
+      - name: x11vnc + noVNC(웹 뷰어) 시작
+        run: |
+          x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -bg -o /tmp/x11vnc.log
+          websockify --web=/usr/share/novnc/ 6080 localhost:5900 &
+          sleep 2
+
+      - name: cloudflared quick tunnel 시작 + URL 대기
+        run: |
+          cloudflared tunnel --url http://localhost:6080 > /tmp/cloudflared.log 2>&1 &
+          echo "cloudflared 시작, 터널 URL 대기 중..."
+          for i in $(seq 1 30); do
+            URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n1 || true)
+            if [ -n "$URL" ]; then
+              echo "TUNNEL_URL=${URL}" >> "$GITHUB_ENV"
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "$URL" ]; then
+            echo "터널 URL을 못 찾았습니다 — cloudflared 로그:"
+            cat /tmp/cloudflared.log
+            exit 1
+          fi
+
+      - name: 세션 준비 콜백 (백엔드에 VNC 링크 전달 + 로그에도 출력)
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          FULL_URL="${TUNNEL_URL}/vnc.html?autoconnect=true"
+          echo ""
+          echo "=================================================================="
+          echo "  VNC 접속 링크 (비밀번호 없이 바로 연결됨)"
+          echo "${FULL_URL}"
+          echo "=================================================================="
+          echo ""
+          RUN_KEY="${{ github.event.inputs.run_key || '' }}"
+          if [ -z "$RUN_KEY" ]; then
+            echo "run_key 없음(수동 테스트) — session-callback 생략, 위 링크를 직접 사용하세요."
+            exit 0
+          fi
+          URL="${BACKEND_URL:-https://sourcing-backend-ucp5.onrender.com}"
+          curl -sf -X POST "${URL}/api/product-sourcing/walmart-samsclub/session-callback" \
+            -H "Content-Type: application/json" \
+            -d "{\"run_key\":\"${RUN_KEY}\",\"vnc_url\":\"${FULL_URL}\"}" \
+            || echo "session-callback 호출 실패 — 무시하고 계속 진행 (로그의 링크는 여전히 유효함)"
+
+      - name: 크롤링 (results.jsonl에 누적, 브라우저 하나 재사용 — 사람이 VNC로 캡차 처리)
+        id: crawl_step
+        working-directory: scripts/crawl-walmart-samsclub
+        run: |
+          LIMIT="${{ github.event.inputs.limit || '40' }}"
+          ONLY="${{ github.event.inputs.only || '' }}"
+          ARGS="--site=all --limit=${LIMIT} --results=results.jsonl"
+          if [ -n "$ONLY" ]; then
+            ARGS="${ARGS} --only=${ONLY}"
+          fi
+          echo "실행: node crawl.js ${ARGS}"
+          node crawl.js ${ARGS}
+
+      - name: 결과 업로드 (results.jsonl → 백엔드 이력 테이블)
+        if: always()
+        id: upload_step
+        working-directory: scripts/crawl-walmart-samsclub
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          if [ ! -f results.jsonl ]; then
+            echo "results.jsonl 없음 — 업로드 스킵"
+            exit 1
+          fi
+          BACKEND_URL="${BACKEND_URL:-https://sourcing-backend-ucp5.onrender.com}" node upload.js --results=results.jsonl
+
+      - name: 세션 완료 콜백
+        if: always()
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          RUN_KEY="${{ github.event.inputs.run_key || '' }}"
+          if [ -z "$RUN_KEY" ]; then
+            echo "run_key 없음(수동 테스트) — session-finished 콜백 생략"
+            exit 0
+          fi
+          STATUS="finished"
+          if [ "${{ steps.crawl_step.outcome }}" != "success" ] || [ "${{ steps.upload_step.outcome }}" != "success" ]; then
+            STATUS="failed"
+          fi
+          NOTE="crawl=${{ steps.crawl_step.outcome }}, upload=${{ steps.upload_step.outcome }}"
+          URL="${BACKEND_URL:-https://sourcing-backend-ucp5.onrender.com}"
+          curl -sf -X POST "${URL}/api/product-sourcing/walmart-samsclub/session-finished" \
+            -H "Content-Type: application/json" \
+            -d "{\"run_key\":\"${RUN_KEY}\",\"status\":\"${STATUS}\",\"note\":\"${NOTE}\"}" \
+            || echo "session-finished 호출 실패 — 무시"
+
+      - name: 실패 시 디버그 아티팩트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walmart-samsclub-debug-output
+          path: scripts/crawl-walmart-samsclub/output/
+          if-no-files-found: ignore
+          retention-days: 14

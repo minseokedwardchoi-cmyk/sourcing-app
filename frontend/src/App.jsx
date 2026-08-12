@@ -18,6 +18,8 @@ import {
   getProductSourcingExportUrl,
   fetchProductSourcingCrawlRuns,
   fetchProductSourcingCrawlRun,
+  triggerProductSourcingWalmartSamsclub,
+  fetchProductSourcingWalmartSamsclubSessionStatus,
   fetchQuickCheck,
 } from "./api.js";
 import { RECOMMENDATION_EXCLUDED_PAIRS } from "./productSourcingRecommendationExclusions.js";
@@ -4130,6 +4132,54 @@ function ProductSourcingPage({ navigate }) {
   const [exportError, setExportError] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
 
+  // 월마트/샘스클럽 "최신화" 버튼 — VNC 반자동 크롤링 세션 상태. product_sourcing_item(위 표의
+  // 실제 데이터)과는 무관하고, 크롤링 히스토리에만 결과가 쌓인다. 세션이 pending/vnc_ready인
+  // 동안만 5초 간격으로 폴링(다른 사람이 이미 트리거한 세션도 페이지 로드 시 자동으로 보임).
+  const [waSession, setWaSession] = useState(null);
+  const [waTriggering, setWaTriggering] = useState(false);
+  const [waError, setWaError] = useState(null);
+  const waPollRef = useRef(null);
+
+  const stopWaPolling = useCallback(() => {
+    if (waPollRef.current) {
+      clearInterval(waPollRef.current);
+      waPollRef.current = null;
+    }
+  }, []);
+
+  const refreshWaSession = useCallback(async () => {
+    try {
+      const s = await fetchProductSourcingWalmartSamsclubSessionStatus();
+      const active = s.status === "pending" || s.status === "vnc_ready";
+      setWaSession(s.status ? s : null);
+      if (active && !waPollRef.current) {
+        waPollRef.current = setInterval(refreshWaSession, 5000);
+      } else if (!active) {
+        stopWaPolling();
+      }
+    } catch {
+      // 폴링 실패는 조용히 무시하고 다음 tick에 재시도
+    }
+  }, [stopWaPolling]);
+
+  useEffect(() => {
+    refreshWaSession();
+    return () => stopWaPolling();
+  }, [refreshWaSession, stopWaPolling]);
+
+  async function handleTriggerWalmartSamsclub() {
+    setWaTriggering(true);
+    setWaError(null);
+    try {
+      await triggerProductSourcingWalmartSamsclub();
+      await refreshWaSession();
+    } catch (e) {
+      setWaError(e.message);
+    } finally {
+      setWaTriggering(false);
+    }
+  }
+
   async function downloadOriginalFormat() {
     setExporting(true);
     setExportError(null);
@@ -4299,8 +4349,41 @@ function ProductSourcingPage({ navigate }) {
             <button className="icon-btn" onClick={() => setShowHistory(true)} title="아마존/이온몰 자동 크롤링 과거 회차 조회 (이 표의 데이터와는 별개)">
               🕘 크롤링 히스토리
             </button>
+            <button
+              className="icon-btn"
+              disabled={waTriggering || waSession?.status === "pending" || waSession?.status === "vnc_ready"}
+              onClick={handleTriggerWalmartSamsclub}
+              title="월마트/샘스클럽부터 시작해서 끝나면 아마존/이온몰까지 자동으로 이어서 크롤링 (결과는 크롤링 히스토리에만 쌓임)"
+            >
+              {waTriggering ? "시작하는 중..." : "🔄 최신화"}
+            </button>
           </div>
           {exportError && <div className="error-box">다운로드 오류: {exportError}</div>}
+          {waError && <div className="error-box">최신화 시작 오류: {waError}</div>}
+          {waSession?.status === "pending" && (
+            <div className="error-box" style={{background:"#eff6ff", borderColor:"#bfdbfe", color:"#1e40af"}}>
+              🔄 월마트/샘스클럽 크롤링을 준비하고 있어요 (VNC 화면 여는 중, 1~2분 정도 걸려요)...
+            </div>
+          )}
+          {waSession?.status === "vnc_ready" && (
+            <div className="error-box" style={{background:"#fffbeb", borderColor:"#fde68a", color:"#92400e"}}>
+              🖥️ <strong>지금 접속해서 캡차를 풀어주세요</strong> — 뜨는 화면에서 월마트/샘스클럽
+              베스트셀러가 보이는지, 로봇 확인 화면이 뜨면 직접 눌러서 통과시켜주세요.{" "}
+              <a href={waSession.vnc_url} target="_blank" rel="noreferrer" style={{fontWeight:600}}>접속하기 →</a>
+            </div>
+          )}
+          {waSession?.status === "finished" && (
+            <div className="error-box" style={{background:"#f0fdf4", borderColor:"#bbf7d0", color:"#166534"}}>
+              ✅ 최신화 완료 — "크롤링 히스토리" 버튼에서 결과를 확인하세요.
+              <button className="icon-btn" style={{marginLeft:8, padding:"2px 8px"}} onClick={() => setWaSession(null)}>닫기</button>
+            </div>
+          )}
+          {waSession?.status === "failed" && (
+            <div className="error-box">
+              ❌ 최신화 실패: {waSession.note || "원인 미상"}
+              <button className="icon-btn" style={{marginLeft:8, padding:"2px 8px"}} onClick={() => setWaSession(null)}>닫기</button>
+            </div>
+          )}
           {showHistory && <ProductSourcingHistoryModal onClose={() => setShowHistory(false)} />}
 
           {loading ? (

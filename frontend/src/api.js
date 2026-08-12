@@ -385,6 +385,24 @@ export function fetchProductSourcingCrawlRun(runId) {
   return request(`/api/product-sourcing/crawl-runs/${runId}`);
 }
 
+/** 월마트/샘스클럽 "최신화" 버튼: GitHub Actions(VNC 반자동 크롤링) 트리거 */
+export async function triggerProductSourcingWalmartSamsclub() {
+  const res = await fetch(`${BASE_URL}/api/product-sourcing/walmart-samsclub/trigger`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "월마트/샘스클럽 크롤링 시작 실패");
+  }
+  return res.json();
+}
+
+/** 월마트/샘스클럽 세션 상태 폴링 (VNC 링크 뜨는지 확인) */
+export function fetchProductSourcingWalmartSamsclubSessionStatus() {
+  return request("/api/product-sourcing/walmart-samsclub/session-status");
+}
+
 /** 품목유형 단위 HS코드 지정/수정 (같은 품목유형의 전체 행에 일괄 적용) */
 export async function updateProductSourcingHsCode(productType, hsCode) {
   const res = await fetch(`${BASE_URL}/api/product-sourcing/hs-code`, {

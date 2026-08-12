@@ -7,9 +7,11 @@ name: 아마존/이온몰 순위 크롤링
 # 버튼에서만 조회 가능.
 #
 # 자체 cron 스케줄 없음 — 대시보드 "최신화" 버튼으로 월마트/샘스클럽(crawl_walmart_samsclub.yml,
-# VNC로 사람이 캡차 처리) 워크플로가 먼저 실행되고, 그게 끝나면 workflow_run 트리거로 이 워크플로가
-# 자동으로 이어서 실행되는 체인의 2번째 단계로 설계됨(월마트/샘스클럽 B1 구현 시 workflow_run 추가
-# 예정). 그 전까지는 workflow_dispatch로만 수동 실행 가능.
+# VNC로 사람이 캡차 처리) 워크플로가 먼저 실행되고, 그게 끝나면(성공/실패 무관 — 월마트/샘스클럽이
+# 실패해도 아마존/이온몰은 독립적으로 갱신할 가치가 있어서) workflow_run 트리거로 이 워크플로가
+# 자동으로 이어서 실행된다. workflow_dispatch로 단독 수동 실행도 계속 가능(입력값은 이 경우에만
+# 쓰이고, workflow_run으로 트리거될 땐 github.event.inputs가 없어 아래 기본값 all/40/빈 값으로
+# 동작함).
 #
 # r.jina.ai 리더 프록시 방식이라 Playwright/브라우저가 필요 없어 GitHub Actions에서도
 # 동작할 것으로 예상되지만, 실제 러너에서 r.jina.ai 아웃바운드가 되는지는 아직 실측 전이다
@@ -30,6 +32,9 @@ on:
         description: '품목유형/대분류에 포함된 텍스트로 필터 (소량 테스트용, 비워두면 전체 83개)'
         required: false
         default: ''
+  workflow_run:
+    workflows: ["월마트/샘스클럽 크롤링"]
+    types: [completed]
 
 jobs:
   crawl:
