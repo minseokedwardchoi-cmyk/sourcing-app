@@ -723,11 +723,20 @@ const ALL_COLS = [
   { key:"country",      label:"제조국",         w:105, filterKey:"country", clickable:"country" },
   { key:"market_status",label:"병행수입",       w:82,  isMarketStatus:true, filterKey:"market_status" },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
-  { key:"count_year3",  label:"",               w:78,  isYearCount:3                      },
-  { key:"count_year2",  label:"",               w:78,  isYearCount:2                      },
+  { key:"yoy",          label:"전년대비",       w:70,  isYoy:true                          },
   { key:"count_year1",  label:"",               w:78,  isYearCount:1                      },
+  { key:"count_year2",  label:"",               w:78,  isYearCount:2                      },
   { key:"_trend",       label:"수입횟수 추이",  w:90,  isTrend:true                        },
 ];
+
+// 전년대비 증감률: count_year2(전년) 값이 0/없음이면 나눗셈이 불가능하므로 null(="-") 반환.
+function yoyPct(yearNow, yearPrev) {
+  if (!yearPrev) return null;
+  return Math.round(((yearNow || 0) - yearPrev) / yearPrev * 100);
+}
+function yoyDisplay(pct) {
+  return pct == null ? "-" : `${pct >= 0 ? "+" : ""}${pct}%`;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PAGE 1: 메인 대시보드
@@ -1109,7 +1118,7 @@ function MainDashboard({ navigate }) {
               <thead>
                 <tr>
                   {cols.map(c=>(
-                    <th key={c.key} className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"sticky", top:0, zIndex:30}}>
+                    <th key={c.key} className={["import_count","yoy","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">{c.label}</span>
                         <ColumnFilter
@@ -1144,7 +1153,7 @@ function MainDashboard({ navigate }) {
                     <tr key={i}>
                       {cols.map(c=>(
                         <td key={c.key} title={c.key==="factory"?undefined:row[c.key]}
-                          className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined}
+                          className={["import_count","yoy","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined}
                           style={
                             c.key==="factory" ? {maxWidth:"none", overflow:"visible"}
                             : c.key==="import_type" ? {padding:"8px 4px", textAlign:"center"}
@@ -1213,6 +1222,10 @@ function MainDashboard({ navigate }) {
                                 onClick={(e)=>{e.stopPropagation();openMonthlyModal(row);}}
                               >📈 추이 보기</button>
                             )
+                            : c.isYoy
+                            ? <span style={{color: yoyPct(row.count_year1,row.count_year2)==null?"#9ca3af":yoyPct(row.count_year1,row.count_year2)>=0?"#15803d":"#dc2626", fontWeight: yoyPct(row.count_year1,row.count_year2)==null?400:600}}>
+                                {yoyDisplay(yoyPct(row.count_year1,row.count_year2))}
+                              </span>
                             : c.isYearCount
                             ? <span style={{color: row[c.key]>0?"#15803d":"#9ca3af", fontWeight: row[c.key]>0?600:400}}>
                                 {row[c.key]>0 ? row[c.key] : "-"}
@@ -3362,7 +3375,7 @@ function FactoryViewDashboard({ navigate }) {
               <thead>
                 <tr>
                   {cols.map(c=>(
-                    <th key={c.key} className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"sticky", top:0, zIndex:30}}>
+                    <th key={c.key} className={["import_count","yoy","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"sticky", top:0, zIndex:30}}>
                       <div className="th-inner">
                         <span className="th-label">{c.label}</span>
                         <ColumnFilter
@@ -3397,7 +3410,7 @@ function FactoryViewDashboard({ navigate }) {
                     <tr key={i}>
                       {cols.map(c=>(
                         <td key={c.key} title={c.key==="factory"?undefined:undefined}
-                          className={["import_count","count_year3","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined}
+                          className={["import_count","yoy","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined}
                           style={
                             c.key==="factory" ? {maxWidth:"none", overflow:"visible"}
                             : c.key==="import_type" ? {padding:"8px 4px", textAlign:"center"}
@@ -3457,6 +3470,10 @@ function FactoryViewDashboard({ navigate }) {
                             ? (
                               <button className="trend-btn" onClick={(e)=>{e.stopPropagation();openMonthlyModal(row);}}>📈 추이 보기</button>
                             )
+                            : c.isYoy
+                            ? <span style={{color: yoyPct(row.count_year1,row.count_year2)==null?"#9ca3af":yoyPct(row.count_year1,row.count_year2)>=0?"#15803d":"#dc2626", fontWeight: yoyPct(row.count_year1,row.count_year2)==null?400:600}}>
+                                {yoyDisplay(yoyPct(row.count_year1,row.count_year2))}
+                              </span>
                             : c.isYearCount
                             ? <span style={{color: row[c.key]>0?"#15803d":"#9ca3af", fontWeight: row[c.key]>0?600:400}}>
                                 {row[c.key]>0 ? row[c.key] : "-"}
