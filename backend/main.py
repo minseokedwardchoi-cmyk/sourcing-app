@@ -2491,13 +2491,16 @@ async def get_all_product_sourcing(request: Request, db: AsyncSession = Depends(
             float(row["estimated_landed_cost_krw"]) if row["estimated_landed_cost_krw"] is not None else None
         )
 
-    # 7,397행 x 31필드를 매번 ProductSourcingFlatRow(**row)로 Pydantic 검증하면
-    # (response_model 선언 때문에 FastAPI가 반환값을 다시 한번 더 검증/직렬화하는 것과
-    # 별개로) 그 자체만 실측 2.5초 넘게 걸렸다 — DB 조회(1~2초)만큼 무거운 별도
-    # 병목이었다. SQL이 이미 타입 맞는 값을 주고 있고 위에서 수동으로 float 변환까지
-    # 끝냈으므로, Pydantic 모델 생성/재검증을 건너뛰고 dict를 그대로 JSON으로 내보낸다
-    # (response_model도 같은 이유로 라우트 선언에서 제거함 — 실측: 4.9초 → 2.3초대).
-    return {"rows": rows}
+    # 7,397행 x 31필드에 대해:
+    #   1) ProductSourcingFlatRow(**row) Pydantic 검증: 실측 2.5초+ (DB 조회만큼 무거움)
+    #   2) 그걸 건너뛰고 dict를 그냥 return해도, FastAPI가 response_model 없는 dict/list
+    #      반환값을 jsonable_encoder()로 한 번 더 훑는다 — 이것도 실측 1초 가까이 걸림
+    #      (순수 Python 재귀 타입 검사라 Pydantic의 Rust 코어보다 오히려 느림).
+    # 둘 다 건너뛰려면 Response를 직접 만들어 반환해야 한다 — 그러면 FastAPI가
+    # 반환값에 아예 손을 안 대고 그대로 내보낸다. SQL이 이미 올바른 타입을 주고
+    # 위에서 수동으로 float 변환까지 끝냈으므로 표준 json.dumps만으로 충분하다.
+    payload = json.dumps({"rows": rows}, ensure_ascii=False).encode("utf-8")
+    return Response(content=payload, media_type="application/json")
 
 
 _EXPORT_IMAGE_BATCH = 300
