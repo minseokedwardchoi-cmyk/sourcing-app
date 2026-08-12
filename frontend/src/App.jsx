@@ -721,9 +721,9 @@ const ALL_COLS = [
   { key:"importer",     label:"수입업체",       w:118, filterKey:"importer"                },
   { key:"factory",      label:"해외제조업소",   w:230, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:105, filterKey:"country", clickable:"country" },
-  { key:"market_status",label:"병행수입",       w:82,  isMarketStatus:true, filterKey:"market_status" },
+  { key:"market_status",label:"병행수입",       w:90,  isMarketStatus:true, filterKey:"market_status" },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
-  { key:"yoy",          label:"전년대비",       w:70,  isYoy:true                          },
+  { key:"yoy",          label:"전년대비",       w:78,  isYoy:true                          },
   { key:"count_year1",  label:"",               w:78,  isYearCount:1                      },
   { key:"count_year2",  label:"",               w:78,  isYearCount:2                      },
   { key:"_trend",       label:"수입횟수 추이",  w:90,  isTrend:true                        },
@@ -1119,8 +1119,10 @@ function MainDashboard({ navigate }) {
                 <tr>
                   {cols.map(c=>(
                     <th key={c.key} className={["import_count","yoy","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner">
-                        <span className="th-label">{c.label}</span>
+                      <div className="th-inner" style={c.key==="yoy"||c.key==="market_status" ? {flexDirection:"column", alignItems:"flex-start", gap:2} : undefined}>
+                        <span className="th-label" style={c.key==="yoy"||c.key==="market_status" ? {whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0} : undefined}>
+                          {c.key==="yoy" ? <>전년<br/>대비</> : c.key==="market_status" ? <>병행<br/>수입</> : c.label}
+                        </span>
                         <ColumnFilter
                           colKey={c.key === "market_status" ? null : ((!searchActive && c.filterKey) || null)}
                           localValues={c.key === "market_status" ? MARKET_STATUS_VALUES : (searchActive && c.filterKey ? (localColValues[c.filterKey] || []) : null)}
@@ -1223,7 +1225,7 @@ function MainDashboard({ navigate }) {
                               >📈 추이 보기</button>
                             )
                             : c.isYoy
-                            ? <span style={{color: yoyPct(row.count_year1,row.count_year2)==null?"#9ca3af":yoyPct(row.count_year1,row.count_year2)>=0?"#15803d":"#dc2626", fontWeight: yoyPct(row.count_year1,row.count_year2)==null?400:600}}>
+                            ? <span style={{color: yoyPct(row.count_year1,row.count_year2)==null?"#9ca3af":yoyPct(row.count_year1,row.count_year2)>=0?"#dc2626":"#2563eb", fontWeight: yoyPct(row.count_year1,row.count_year2)==null?400:600}}>
                                 {yoyDisplay(yoyPct(row.count_year1,row.count_year2))}
                               </span>
                             : c.isYearCount
@@ -3376,8 +3378,10 @@ function FactoryViewDashboard({ navigate }) {
                 <tr>
                   {cols.map(c=>(
                     <th key={c.key} className={["import_count","yoy","count_year2","count_year1"].includes(c.key) ? "col-highlight" : undefined} style={{position:"sticky", top:0, zIndex:30}}>
-                      <div className="th-inner">
-                        <span className="th-label">{c.label}</span>
+                      <div className="th-inner" style={c.key==="yoy"||c.key==="market_status" ? {flexDirection:"column", alignItems:"flex-start", gap:2} : undefined}>
+                        <span className="th-label" style={c.key==="yoy"||c.key==="market_status" ? {whiteSpace:"normal", lineHeight:1.15, flex:"none", minWidth:0} : undefined}>
+                          {c.key==="yoy" ? <>전년<br/>대비</> : c.key==="market_status" ? <>병행<br/>수입</> : c.label}
+                        </span>
                         <ColumnFilter
                           colKey={c.key === "market_status" ? null : ((!searchActive && c.filterKey) || null)}
                           localValues={c.key === "market_status" ? MARKET_STATUS_VALUES : (searchActive && c.filterKey ? (localColValues[c.filterKey] || []) : null)}
@@ -3471,7 +3475,7 @@ function FactoryViewDashboard({ navigate }) {
                               <button className="trend-btn" onClick={(e)=>{e.stopPropagation();openMonthlyModal(row);}}>📈 추이 보기</button>
                             )
                             : c.isYoy
-                            ? <span style={{color: yoyPct(row.count_year1,row.count_year2)==null?"#9ca3af":yoyPct(row.count_year1,row.count_year2)>=0?"#15803d":"#dc2626", fontWeight: yoyPct(row.count_year1,row.count_year2)==null?400:600}}>
+                            ? <span style={{color: yoyPct(row.count_year1,row.count_year2)==null?"#9ca3af":yoyPct(row.count_year1,row.count_year2)>=0?"#dc2626":"#2563eb", fontWeight: yoyPct(row.count_year1,row.count_year2)==null?400:600}}>
                                 {yoyDisplay(yoyPct(row.count_year1,row.count_year2))}
                               </span>
                             : c.isYearCount

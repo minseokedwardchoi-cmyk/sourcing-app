@@ -94,7 +94,10 @@ async def compute_search_summary(
             bucket["market_status"] = row.market_status
             bucket["cr4_pct"] = row.cr4_pct
 
-    ranked = sorted(grouped.items(), key=lambda kv: kv[1]["import_count"], reverse=True)
+    # AI 요약은 실제로 사입 가능한 제품만 추천해야 하므로, 병행수입 가능여부가
+    # "O"인 그룹만 후보로 남기고 그 안에서 수입량 상위 TOP_PRODUCTS_LIMIT개를 뽑는다.
+    importable = {k: v for k, v in grouped.items() if v["market_status"] == "O"}
+    ranked = sorted(importable.items(), key=lambda kv: kv[1]["import_count"], reverse=True)
     top_products = [
         SearchSummaryTopProduct(
             manufacturer=manufacturer,
