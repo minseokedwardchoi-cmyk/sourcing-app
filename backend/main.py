@@ -2188,35 +2188,47 @@ async def upload_product_sourcing_crawl_snapshot(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        run = ProductSourcingCrawlRun(
-            run_at=datetime.utcnow(),
-            site_scope=payload.site_scope,
-            row_count=payload.row_count if payload.row_count is not None else len(payload.rows),
-            note=payload.note,
+        # ORM db.add()로 새로 들어오는 한글 문자열을 INSERT하면 이 프로젝트가 쓰는
+        # SQLAlchemy 베타 버전(2.1.0b2) + asyncpg 조합에서 실측으로 깨지는 것을 확인함
+        # (예: "감자스낵" → "감자\udcec..." 식으로 일부만 깨짐). product_sourcing_importer.py의
+        # 검증된 방식(Core 스타일 Table.insert() 실행)으로 대체 — 같은 프로젝트에서 이미
+        # 대량 한글 데이터를 문제없이 적재해온 경로다.
+        now = datetime.utcnow()
+        result = await db.execute(
+            ProductSourcingCrawlRun.__table__.insert().returning(ProductSourcingCrawlRun.__table__.c.id),
+            {
+                "run_at": now,
+                "site_scope": payload.site_scope,
+                "row_count": payload.row_count if payload.row_count is not None else len(payload.rows),
+                "note": payload.note,
+            },
         )
-        db.add(run)
-        await db.flush()  # run.id 확보
+        run_id = result.scalar_one()
 
-        for row in payload.rows:
-            db.add(ProductSourcingCrawlSnapshotItem(
-                run_id=run.id,
-                category=row.category,
-                product_type=row.product_type,
-                query_used=row.query_used,
-                retailer=row.retailer,
-                source_site=row.source_site,
-                rank=row.rank,
-                brand=row.brand,
-                product_name_en=row.product_name_en,
-                price_usd=row.price_usd,
-                rating=row.rating,
-                review_count=row.review_count,
-                url=row.url,
-                image_url=row.image_url,
-            ))
+        if payload.rows:
+            item_rows = [
+                {
+                    "run_id": run_id,
+                    "category": row.category,
+                    "product_type": row.product_type,
+                    "query_used": row.query_used,
+                    "retailer": row.retailer,
+                    "source_site": row.source_site,
+                    "rank": row.rank,
+                    "brand": row.brand,
+                    "product_name_en": row.product_name_en,
+                    "price_usd": row.price_usd,
+                    "rating": row.rating,
+                    "review_count": row.review_count,
+                    "url": row.url,
+                    "image_url": row.image_url,
+                }
+                for row in payload.rows
+            ]
+            await db.execute(ProductSourcingCrawlSnapshotItem.__table__.insert(), item_rows)
 
         await db.commit()
-        return ProductSourcingCrawlSnapshotUploadResponse(run_id=run.id, inserted=len(payload.rows))
+        return ProductSourcingCrawlSnapshotUploadResponse(run_id=run_id, inserted=len(payload.rows))
 
     except Exception as e:
         await db.rollback()
