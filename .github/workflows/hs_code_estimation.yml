@@ -1,15 +1,22 @@
 name: HS코드 추정 (임베딩 후보검색 + Gemini)
 
-# 브랜드검증(verify_brands.yml)/원산지판독(verify_origin.yml)과 같은 트리거 지점 — 크롤링 체인
-# (crawl_walmart_samsclub.yml → crawl_amazon_aeon.yml) 완료 후 자동 이어서 실행되어, 크롤링
-# 이력(product_sourcing_crawl_snapshot_item)에 새로 나타난 상품을 판정해서 백엔드의
-# hs_code_estimation 캐시에 upsert한다 (backend/hs_code_estimate_gemini.py,
-# backend/HS_CODE_METHODOLOGY.md 참고). 세 워크플로는 서로 독립적이라 병렬로 돌아도 문제없음
-# (다른 캐시 테이블).
+# 크롤링 체인의 두 번째 단계: crawl_walmart_samsclub.yml → crawl_amazon_aeon.yml →
+# verify_origin.yml(원산지판독) → 이 워크플로 → verify_brands.yml(브랜드검증, 맨 마지막)
+# 순서로 직렬 체이닝된다(2026-08 개편 — 예전엔 세 워크플로가 크롤링 완료 시점에 전부
+# 병렬로 떴었는데, 브랜드검증만 배치 처리가 안 돼서(그라운딩이 브랜드별로 따로 필요)
+# 무료 티어 하루 한도(250 RPD)에 걸리면 며칠씩 걸릴 수 있다 — 그래서 배치 가능한
+# 원산지판독/HS코드 추정을 먼저 끝내 "몇 시간 내로 HS코드·원산지·착지원가까지는 다 채워진
+# 상태"를 만들고, 오래 걸릴 수 있는 브랜드검증만 뒤에서 계속 돌게 분리했다).
+# 크롤링 이력(product_sourcing_crawl_snapshot_item)에 새로 나타난 상품을 판정해서
+# 백엔드의 hs_code_estimation 캐시에 upsert한다 (backend/hs_code_estimate_gemini.py,
+# backend/HS_CODE_METHODOLOGY.md 참고).
 #
-# 브랜드검증과 같은 이유로 workflow_run 자동 트리거 시에는 항상 --all-runs로 돌린다(월마트/
+# 원산지판독과 같은 이유로 workflow_run 자동 트리거 시에는 항상 --all-runs로 돌린다(월마트/
 # 샘스클럽 회차를 놓치지 않기 위함, 이미 캐시된 상품은 스킵되니 매번 전체를 다시 훑어도 비용
 # 문제 없음). workflow_dispatch(수동 실행)일 때만 all_runs 입력값을 따른다.
+#
+# 배치 처리(--batch-size) + gemini-2.5-flash-lite 기본 모델로 무료 티어 RPD(1,000/일,
+# flash의 250/일보다 4배 여유)를 절약한다 — hs_code_estimate_gemini.py 상단 설명 참고.
 #
 # HSK 참조표 임베딩 벡터(11,327개 HS10코드)는 관세청이 연 1회만 갱신하므로 actions/cache로
 # 캐싱해서 매 회차 재계산(몇 분 소요)을 피한다 — reference_data/hsk_reference_20260101.csv가
@@ -21,7 +28,7 @@ name: HS코드 추정 (임베딩 후보검색 + Gemini)
 
 on:
   workflow_run:
-    workflows: ["아마존/이온몰 순위 크롤링"]
+    workflows: ["원산지 판독 (Gemini 비전)"]
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -36,11 +43,15 @@ on:
       limit:
         description: '배치 1회당 판정할 상품 수'
         required: false
-        default: '50'
+        default: '300'
+      batch_size:
+        description: 'Gemini 요청 1번에 묶을 상품 수'
+        required: false
+        default: '15'
       max_batches:
         description: '최대 배치 반복 횟수 (대상이 없어지면 그 전에 종료)'
         required: false
-        default: '20'
+        default: '5'
       dry_run:
         description: '대상 상품만 출력하고 실제 판정은 하지 않음'
         required: false
@@ -75,8 +86,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
-          LIMIT="${{ github.event.inputs.limit || '50' }}"
-          MAX_BATCHES="${{ github.event.inputs.max_batches || '20' }}"
+          LIMIT="${{ github.event.inputs.limit || '300' }}"
+          BATCH_SIZE="${{ github.event.inputs.batch_size || '15' }}"
+          MAX_BATCHES="${{ github.event.inputs.max_batches || '5' }}"
           RUN_ID="${{ github.event.inputs.run_id }}"
           DRY_RUN="${{ github.event.inputs.dry_run }}"
 
@@ -87,7 +99,7 @@ jobs:
             ALL_RUNS="${{ github.event.inputs.all_runs }}"
           fi
 
-          ARGS="--limit=${LIMIT}"
+          ARGS="--limit=${LIMIT} --batch-size=${BATCH_SIZE}"
           if [ -n "$RUN_ID" ]; then
             ARGS="${ARGS} --run-id=${RUN_ID}"
           fi
