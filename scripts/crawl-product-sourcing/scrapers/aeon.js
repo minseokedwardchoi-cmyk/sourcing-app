@@ -204,9 +204,12 @@ function parseAeonJapanMarkdown(markdown) {
     seen.add(key);
     out.push({
       id: url || key,
-      // 일본어 제목도 공백으로 브랜드/설명이 분리돼 있는 경우가 많아 같은 규칙을 적용한다
-      // (완벽하진 않음 — 한자/가타카나 텍스트라 콤마 경계 자체가 잘 안 나올 수 있음).
-      brand: extractBrandCommaOrWords(title),
+      // 일본어 제목은 콤마 경계 신호가 거의 없고(250건 샘플 중 사실상 0), 브랜드가 보통
+      // 공백으로 구분된 첫 토큰 1개뿐이다(예: "明治 果汁グミ黄金桃 47g" → 明治만 브랜드,
+      // 나머지는 상품 설명). 영어권 폴백(2단어)을 그대로 쓰면 상품설명까지 끌려와서
+      // fallbackWords=1로 별도 지정(실측 확인: 메인페이지 이온몰-일본 브랜드값의 93%가
+      // 실제로는 "첫 3토큰 고정" 버그였고, 진짜 브랜드는 그중 첫 토큰뿐이었음).
+      brand: extractBrandCommaOrWords(title, { fallbackWords: 1 }),
       title,
       size: extractSize(title),
       url: url || null,
