@@ -355,16 +355,22 @@ class ProductSourcingCrawlSnapshotRow(ProductSourcingCrawlSnapshotRowIn):
     five_year_issue:      Optional[str] = Field(None)
     brand_verification_notes: Optional[str] = Field(None)
     # hs_code_estimation 캐시 조인 결과 (조회 시점에 정규화된 영어상품명으로 찾아서 채움 —
-    # hs_code_estimate_gemini.py가 아직 그 상품을 판정 안 했으면 전부 None). tariff_rate_pct/
-    # tariff_basis는 hs_code만으로 계산 가능한 기본세율(FTA 미적용, 원산지 데이터가 크롤링
-    # 스냅샷엔 없어서)만 채운다 — estimated_landed_cost_krw는 매입원가 환산에 필요한 unit
-    # 데이터도 크롤링 스냅샷엔 없어서 계산하지 않는다(product_sourcing_item과 달리 항상 null).
+    # hs_code_estimate_gemini.py가 아직 그 상품을 판정 안 했으면 전부 None).
     hs_code:            Optional[str] = Field(None)
     hs_code_confidence: Optional[str] = Field(None)
     hs_code_reason:      Optional[str] = Field(None)
     hs_code_status:      Optional[str] = Field(None)
+    # product_origin_verification 캐시 조인 결과 (조회 시점에 url_hash로 찾아서 채움 —
+    # verify_origin_gemini.py가 아직 그 상품을 판독 안 했으면 None).
+    origin:              Optional[str] = Field(None)
+    # hs_code + unit(자동추출) + origin(캐시조인) 세 가지가 다 갖춰진 행만 product_sourcing_item과
+    # 동일한 로직(cost_estimator/mfds_pricing)으로 관세율/착지원가를 계산해서 채운다 —
+    # 셋 중 하나라도 없으면 null(product_sourcing_item의 EstimatedCostCell과 동일하게
+    # "추정불가"로 표시됨).
     tariff_rate_pct:      Optional[float] = Field(None)
     tariff_basis:         Optional[str]   = Field(None)
+    estimated_landed_cost_krw: Optional[float] = Field(None)
+    landed_cost_is_per_kg:    Optional[bool]  = Field(None)
 
 
 class ProductSourcingCrawlRunDetailResponse(BaseModel):

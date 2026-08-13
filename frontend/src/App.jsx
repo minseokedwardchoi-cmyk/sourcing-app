@@ -4575,9 +4575,10 @@ const RETAILER_LABEL_MAP_HISTORY = { amazon: "아마존", walmart: "월마트", 
 
 // 크롤링 스냅샷 1행(product_sourcing_crawl_snapshot_item, 크롤링 가능 필드만 있음)을
 // ProductSourcingDataTable이 기대하는 flat-row 모양(메인 표와 동일한 형태, product_sourcing_item
-// 기준)으로 매핑한다. 원산지/병행수입/리콜/품질/법적리스크/HS코드/관세 등 수작업 검증 필드는
-// 크롤링 데이터에 아예 없으므로 전부 null — 표에는 "-"로 표시되고, 리스크·병행수입 배지는
-// "정보없음"으로 뜬다(사용자 확인: 나중에 이 필드들도 채우는 방식을 별도로 구현할 예정).
+// 기준)으로 매핑한다. 병행수입 판정처럼 크롤링/자동화로 채울 방법이 아예 없는 필드만 null로
+// 남고(표에는 "-", 배지는 "정보없음"), 원산지/단량/HS코드/관세/착지원가는 백엔드가 조회
+// 시점에 캐시 테이블을 조인해서 채워준 값을 그대로 쓴다(HS_CODE_METHODOLOGY.md 및
+// 원산지판독/HS코드 자동화 파이프라인 참고).
 function mapCrawlSnapshotRowToFlatRow(row) {
   let retailerLabel = RETAILER_LABEL_MAP_HISTORY[row.retailer] || row.retailer;
   if (row.source_site === "aeon-jp") retailerLabel += " (일본)";
@@ -4594,10 +4595,10 @@ function mapCrawlSnapshotRowToFlatRow(row) {
     brand_en: row.brand,
     product_name_en: row.product_name_en,
     price_usd: row.price_usd,
-    origin: null,
-    // 백엔드가 저장 시점에 product_name_en에서 자동 추출해 채워준 값(unit_converter.
-    // extract_unit_from_product_name) — 원산지가 없어 착지원가 계산엔 아직 못 쓰지만,
-    // 표에는 그대로 보여준다.
+    // product_origin_verification 캐시 조인 결과 (verify_origin_gemini.py가 아직 그
+    // 상품을 판독 안 했으면 null).
+    origin: row.origin ?? null,
+    // product_name_en에서 저장 시점에 자동 추출된 값(unit_converter.extract_unit_from_product_name).
     unit: row.unit ?? null,
     key_criteria_label: null,
     key_criteria_value: null,
@@ -4618,16 +4619,17 @@ function mapCrawlSnapshotRowToFlatRow(row) {
     product_group_key: null,
     // hs_code_estimation 캐시 조인 결과 (백엔드가 조회 시점에 정규화된 영어상품명으로
     // 찾아서 채워줌) — 아직 그 상품이 판정 안 됐으면 전부 null로 와서 "미판정"으로 표시된다.
-    // estimated_landed_cost_krw는 크롤링 스냅샷엔 원산지/용량(unit)이 없어 항상 null
-    // (관세율만 hs_code 기준 기본세율로 채워짐 — ReadOnlyHsCodeCell/EstimatedCostCell 참고).
+    // tariff_rate_pct 이하는 hs_code + unit(자동추출) + origin(캐시조인)이 다 갖춰진 행만
+    // product_sourcing_item과 동일한 로직으로 채워진다 — 셋 중 하나라도 없으면 null
+    // (EstimatedCostCell이 "추정불가"로 표시).
     hs_code: row.hs_code ?? null,
     hs_code_confidence: row.hs_code_confidence ?? null,
     hs_code_reason: row.hs_code_reason ?? null,
     hs_code_status: row.hs_code_status ?? null,
     tariff_rate_pct: row.tariff_rate_pct ?? null,
     tariff_basis: row.tariff_basis ?? null,
-    estimated_landed_cost_krw: null,
-    landed_cost_is_per_kg: null,
+    estimated_landed_cost_krw: row.estimated_landed_cost_krw ?? null,
+    landed_cost_is_per_kg: row.landed_cost_is_per_kg ?? null,
   };
 }
 

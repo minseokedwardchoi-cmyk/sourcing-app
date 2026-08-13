@@ -2308,11 +2308,17 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
         )).scalars().all()
         hs_by_key = {h.name_key: h for h in hs_rows}
 
-    # tariff_rate_pct/tariff_basis는 hs_code만으로 계산 가능한 기본세율(원산지 데이터가
-    # 크롤링 스냅샷엔 없어 FTA는 미적용)만 채운다. unit(용량)은 저장 시점에
-    # product_name_en에서 자동 추출해 채워두지만(unit_converter.extract_unit_from_product_name),
-    # 매입원가 계산에는 그것 말고도 origin(원산지)이 필요한데 이건 크롤링 스냅샷에 아직
-    # 없어서 estimated_landed_cost_krw는 여전히 계산하지 않는다.
+    # product_origin_verification 캐시 조인 — verify_origin_gemini.py가 쓰는 것과 정확히
+    # 같은 키(url_hash)로 조회한다. origin_text가 이미 "미국"/"이탈리아(추정)"처럼
+    # product_sourcing_item.origin과 같은 표시 형식이라 그대로 쓰면 된다.
+    url_hashes = {_url_hash(item.url) for item in items if item.url}
+    origin_by_hash = {}
+    if url_hashes:
+        ov_rows = (await db.execute(
+            select(ProductOriginVerification).where(ProductOriginVerification.url_hash.in_(url_hashes))
+        )).scalars().all()
+        origin_by_hash = {ov.url_hash: ov for ov in ov_rows}
+
     hs_codes = sorted({_normalize_hs_code(h.hs_code) for h in hs_by_key.values() if h.hs_code} - {None})
     tariff_by_hs_code: dict[str, list[dict]] = {}
     if hs_codes:
@@ -2324,22 +2330,58 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
         for tr in tr_r.mappings().all():
             tariff_by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
 
+    # hs_code + unit(자동추출) + origin(캐시조인)이 다 갖춰진 행만 product_sourcing_item과
+    # 동일한 MFDS 평균단가 기반 매입원가 로직(_recompute_and_store_cost_estimates 참고)으로
+    # 착지원가까지 계산한다 — 그 함수처럼 DB 컬럼에 캐싱해두는 게 아니라 조회 시점에 즉석
+    # 계산이라, 크롤링 스냅샷 데이터 양(회차당 최대 몇천 행)에서는 매번 계산해도 무리 없다.
+    item_names_r = await db.execute(text("SELECT DISTINCT item_name FROM country_item_amount"))
+    all_mfds_item_names = [r[0] for r in item_names_r.all()]
+    price_lookup_r = await db.execute(text(
+        "SELECT country, item_name, amount_usd_k, weight_ton FROM country_item_amount"
+    ))
+    mfds_price_lookup = {
+        (r["country"], r["item_name"]): (float(r["amount_usd_k"]), float(r["weight_ton"]) if r["weight_ton"] else None)
+        for r in price_lookup_r.mappings().all()
+    }
+
     def _row_to_schema(item):
         bv = verification_by_key.get(normalize_brand_key(item.brand)) if item.brand else None
         hs = hs_by_key.get(normalize_product_name_key(item.product_name_en)) if item.product_name_en else None
+        ov = origin_by_hash.get(_url_hash(item.url)) if item.url else None
+        origin_text = ov.origin_text if (ov and ov.origin_text) else None
         image_urls = None
         if item.image_urls:
             try:
                 image_urls = json.loads(item.image_urls)
             except Exception:
                 image_urls = None
+
         tariff_rate_pct = tariff_basis = None
+        estimated_landed_cost_krw = None
+        landed_cost_is_per_kg = None
         if hs and hs.hs_code:
-            tariff_rows = tariff_by_hs_code.get(_normalize_hs_code(hs.hs_code))
-            tariff = resolve_tariff_rate(tariff_rows, None) if tariff_rows else None
+            norm = _normalize_hs_code(hs.hs_code)
+            tariff_rows = tariff_by_hs_code.get(norm) if norm else None
+            price_estimate = estimate_purchase_price(
+                item.product_type, origin_text, item.unit, all_mfds_item_names, mfds_price_lookup,
+            )
+            tariff = None
+            if tariff_rows:
+                origin_country = (
+                    price_estimate.country if price_estimate
+                    else resolve_origin_country(item.product_type or "", origin_text, all_mfds_item_names, mfds_price_lookup)
+                )
+                tariff = resolve_tariff_rate(tariff_rows, origin_country)
             if tariff:
                 tariff_rate_pct = tariff.rate_pct
                 tariff_basis = tariff.basis_label
+                cost = estimate_landed_cost_krw(
+                    price_estimate.price_usd if price_estimate else None, tariff,
+                )
+                if cost is not None:
+                    estimated_landed_cost_krw = cost
+                    landed_cost_is_per_kg = price_estimate.is_per_kg if price_estimate else None
+
         return ProductSourcingCrawlSnapshotRow(
             id=item.id, category=item.category, product_type=item.product_type,
             query_used=item.query_used, retailer=item.retailer, source_site=item.source_site,
@@ -2356,8 +2398,11 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
             hs_code_confidence=hs.confidence if hs else None,
             hs_code_reason=hs.reason if hs else None,
             hs_code_status=hs.status if hs else None,
+            origin=origin_text,
             tariff_rate_pct=tariff_rate_pct,
             tariff_basis=tariff_basis,
+            estimated_landed_cost_krw=estimated_landed_cost_krw,
+            landed_cost_is_per_kg=landed_cost_is_per_kg,
         )
 
     return ProductSourcingCrawlRunDetailResponse(
