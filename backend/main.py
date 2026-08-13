@@ -2191,7 +2191,8 @@ async def get_product_sourcing_types(db: AsyncSession = Depends(get_db)):
 PRIVATE_LABEL_BRAND_KEYWORDS = [
     # Amazon
     "amazon basics", "amazonbasics", "amazon fresh", "amazonfresh",
-    "amazon elements", "amazon grocery", "solimo", "presto!", "happy belly",
+    "amazon elements", "amazon grocery", "amazon saver", "amazon kitchen",
+    "aplenty", "solimo", "presto!", "happy belly",
     "mama bear", "amazon essentials", "365 by whole foods market",
     "whole foods market", "wickedly prime",
     # AEON
@@ -2201,6 +2202,7 @@ PRIVATE_LABEL_BRAND_KEYWORDS = [
     # Walmart
     "great value", "equate", "mainstays", "marketside", "freshness guaranteed",
     "bettergoods", "sam's choice", "parent's choice", "ol' roy", "spring valley",
+    "onn.", "onn",
 ]
 
 
