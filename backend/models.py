@@ -331,6 +331,46 @@ class ProductOriginVerification(Base):
     )
 
 
+class HsCodeEstimation(Base):
+    """
+    상품(SKU) 단위 HS코드 추정 캐시 — brand_verification/product_origin_verification과
+    동일한 패턴(별도 캐시 테이블, product_sourcing_item·크롤링 이력 테이블과는 FK 없음).
+
+    HS코드는 브랜드나 URL이 아니라 "그 제품이 실제로 뭔지"에 붙는 속성이라 영어상품명
+    정규화 키(name_key)로 캐시한다 — HS_CODE_METHODOLOGY.md의 "영어상품명이 같으면 재사용"
+    원칙과 동일. hs_final_7397.csv(7,397건 전수 스캔 판정 결과)를 backfill_hs_code_estimation.py로
+    먼저 시딩해두면, 이후 크롤링에서 이름이 겹치는 상품은 재조사 없이 즉시 재사용된다.
+    새 상품만 hs_code_estimate_gemini.py가 HSK 품목표 임베딩 후보검색 + Gemini 구조화출력으로
+    판정해서 upsert한다.
+
+    product_sourcing_item(메인페이지)은 이 캐시로 전혀 갱신되지 않는다 — 메인 테이블 승격
+    로직이 생기면 그쪽에서 name_key로 조회해서 반영하면 된다. 지금은 크롤링 히스토리(테스트
+    페이지) 조회 시점(GET /crawl-runs/{run_id})에 조인해서 보여주는 용도.
+    """
+    __tablename__ = "hs_code_estimation"
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+
+    name_key            = Column(String(500), nullable=False, unique=True, comment="정규화된 영어상품명 (조회 키, lower+trim+공백정리)")
+    product_name_en      = Column(Text,        nullable=True,  comment="판정에 사용한 영어상품명 원문 (참고용)")
+    product_type_hint    = Column(String(300), nullable=True,  comment="판정 당시 품목유형 (참고용, 매칭 키 아님)")
+
+    hs_code              = Column(String(20),  nullable=True,  comment="추정 HS코드 (10자리, 비어있으면 무관상품 판정)")
+    confidence           = Column(String(20),  nullable=True,  comment="high/medium/very_low")
+    reason               = Column(Text,        nullable=True,  comment="판정 근거 텍스트")
+    evidence_url         = Column(String(100), nullable=True,  comment="항상 '관세청 2026 HSK'")
+    status                = Column(String(50),  nullable=True,  comment="researched_v2_direct/reused_matched_by_sku_name_en/flagged_non_food_mismatch/needs_manual_review 등 — HS_CODE_METHODOLOGY.md 참고")
+
+    estimation_source    = Column(String(30),  nullable=True,  comment="seed_hs_final_7397 / gemini_estimated")
+    estimation_model     = Column(String(50),  nullable=True,  comment="Gemini 모델명 (시딩분은 null)")
+    verified_at           = Column(DateTime,    nullable=True,  comment="판정(또는 시딩) 실행 시각")
+
+    __table_args__ = (
+        Index("ix_hce_name_key", "name_key"),
+        Index("ix_hce_hs_code", "hs_code"),
+    )
+
+
 class TariffRate(Base):
     """
     HS코드(품목번호)별 관세율표 — 관세청_품목번호별 관세율표(data.go.kr) 원본을 그대로 적재.
