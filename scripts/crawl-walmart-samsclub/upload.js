@@ -53,6 +53,7 @@ function buildRows(records) {
         review_count: parseReviewCount(item.reviewCount),
         url: item.url || null,
         image_url: item.image || null,
+        image_urls: item.imageUrls && item.imageUrls.length ? item.imageUrls : null,
       });
     }
   }

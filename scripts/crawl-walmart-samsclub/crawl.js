@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { scrapeWalmart } from "./scrapers/walmart.js";
-import { scrapeSamsClub } from "./scrapers/samsclub.js";
+import { scrapeWalmart, scrapeWalmartProductImages } from "./scrapers/walmart.js";
+import { scrapeSamsClub, scrapeSamsClubProductImages } from "./scrapers/samsclub.js";
 import { parseCsvObjects } from "../crawl-product-sourcing/csv.js";
 
 // 83개 상품유형 × (월마트/샘스클럽)을 순회하며 베스트셀러 순위를 크롤링한다.
@@ -18,12 +18,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TYPE_QUERY_MAP_PATH = path.join(__dirname, "..", "crawl-product-sourcing", "type-query-map.csv");
 
 function parseArgs(argv) {
-  const args = { site: "all", limit: 40, only: "", results: "results.jsonl" };
+  const args = { site: "all", limit: 40, only: "", results: "results.jsonl", galleryLimit: 0 };
   for (const raw of argv) {
-    const m = raw.match(/^--([a-zA-Z]+)=(.*)$/);
+    const m = raw.match(/^--([a-zA-Z-]+)=(.*)$/);
     if (!m) continue;
-    const [, key, value] = m;
-    if (key === "limit") args[key] = Number(value);
+    const [, rawKey, value] = m;
+    const key = rawKey === "gallery-limit" ? "galleryLimit" : rawKey;
+    if (key === "limit" || key === "galleryLimit") args[key] = Number(value);
     else args[key] = value;
   }
   return args;
@@ -71,8 +72,16 @@ async function main() {
   const done = loadDoneKeys(resultsPath);
 
   console.log(
-    `[crawl] 대상 ${rows.length}개 유형 × ${sites.length}개 사이트, limit=${args.limit}, results=${resultsPath}`
+    `[crawl] 대상 ${rows.length}개 유형 × ${sites.length}개 사이트, limit=${args.limit}, ` +
+    `galleryLimit=${args.galleryLimit}, results=${resultsPath}`
   );
+  if (args.galleryLimit > 0) {
+    console.log(
+      `[crawl] --gallery-limit=${args.galleryLimit} — 유형×사이트마다 상위 ${args.galleryLimit}개 ` +
+      `상품은 상세페이지까지 방문해서 원산지판독용 갤러리 사진을 추가로 수집합니다 ` +
+      `(페이지 방문이 늘어나 캡차가 더 자주 뜰 수 있고 실행 시간도 길어집니다).`
+    );
+  }
 
   console.log("[crawl] Chromium 실행 (headed, VNC로 사람이 볼 수 있음)...");
   const browser = await chromium.launch({ headless: false, args: ["--start-maximized"] });
@@ -103,6 +112,25 @@ async function main() {
           } else {
             items = await scrapeSamsClub(page, query, args.limit, true);
           }
+
+          if (args.galleryLimit > 0) {
+            const targets = items.slice(0, args.galleryLimit).filter((it) => it.url);
+            for (const item of targets) {
+              try {
+                const imageUrls = site === "walmart"
+                  ? await scrapeWalmartProductImages(page, item.url)
+                  : await scrapeSamsClubProductImages(page, item.url);
+                if (imageUrls.length) {
+                  item.imageUrls = imageUrls;
+                  console.log(`[crawl]   갤러리 ${imageUrls.length}장 확보: ${item.title?.slice(0, 40)}`);
+                }
+              } catch (galleryError) {
+                console.warn(`[crawl]   갤러리 수집 실패(무시하고 계속): ${galleryError.message}`);
+              }
+              await sleep(1200 + Math.random() * 800);
+            }
+          }
+
           appendResult(resultsPath, {
             productType, category, query, retailer: site, status: "ok", items,
           });

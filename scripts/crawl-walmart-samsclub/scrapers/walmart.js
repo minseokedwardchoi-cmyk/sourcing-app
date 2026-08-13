@@ -159,3 +159,60 @@ export async function scrapeWalmart(page, query, limit = 5, sort = "best-sellers
 
   return organic;
 }
+
+/**
+ * 상품 상세페이지를 방문해서 갤러리 사진(정면/후면/측면 등) URL을 여러 장 뽑는다.
+ * 원산지판독(verify_origin_gemini.py)이 후면 라벨 사진을 볼 수 있게 하려는 용도 —
+ * 검색결과 카드에는 정면 썸네일 1장만 있어서 이게 필요하다.
+ *
+ * ⚠️ 실제 월마트 상세페이지 마크업으로 검증 안 됨(이 프로젝트 환경은 브라우저 접근이
+ * 없어 실행 자체를 못 함) — 후보 selector를 여러 개 순서대로 시도하는 방어적 구현.
+ * 실행해보고 0장만 나오면 실제 DOM 보면서 selector 보강 필요.
+ *
+ * detail 페이지 방문도 search와 마찬가지로 봇 확인(캡차)이 뜰 수 있어서 동일하게
+ * waitForHumanIfChallenged로 처리한다 — 호출 쪽(crawl.js)에서 이미 캡차를 한 번
+ * 통과했다면 같은 브라우저 컨텍스트라 세션이 유지돼 대부분 안 뜰 것으로 기대되지만,
+ * 상세페이지마다 새로 뜰 가능성도 배제 못 함(그래서 호출 횟수를 제한해서 쓸 것 —
+ * crawl.js의 --gallery-limit 참고).
+ */
+export async function scrapeWalmartProductImages(page, productUrl, maxImages = 4) {
+  await page.goto(productUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.waitForTimeout(1500);
+
+  const passed = await waitForHumanIfChallenged(
+    page,
+    async () => isChallenged(await page.textContent("body").catch(() => "")),
+    "walmart-detail",
+    { interactive: true, maxWaitMs: 60000 }
+  );
+  if (!passed) return [];
+
+  await page.waitForTimeout(500);
+
+  const images = await page.evaluate((max) => {
+    const candidateSelectors = [
+      '[data-testid="media-thumbnail"] img',
+      '[data-testid="hero-carousel"] img',
+      '[data-testid="ProductImageCarousel"] img',
+      '[class*="thumbnail" i] img',
+      '[class*="carousel" i] img',
+      'img[data-testid="productImage"]',
+    ];
+    const seen = new Set();
+    const out = [];
+    for (const sel of candidateSelectors) {
+      const nodes = document.querySelectorAll(sel);
+      for (const img of nodes) {
+        const src = img.getAttribute("src") || img.getAttribute("data-src");
+        if (!src || seen.has(src)) continue;
+        seen.add(src);
+        out.push(src);
+        if (out.length >= max) return out;
+      }
+      if (out.length >= max) break;
+    }
+    return out;
+  }, maxImages);
+
+  return images;
+}

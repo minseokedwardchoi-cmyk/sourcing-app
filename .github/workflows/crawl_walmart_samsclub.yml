@@ -27,6 +27,10 @@ on:
         description: '품목유형/대분류에 포함된 텍스트로 필터 (소량 테스트용, 비워두면 전체 83개)'
         required: false
         default: ''
+      gallery_limit:
+        description: '유형×사이트당 상위 N개 상품은 상세페이지까지 방문해 원산지판독용 갤러리 사진 추가 수집 (0=끔, 대시보드 버튼 트리거는 항상 0 — 캡차/시간 부담 때문에 수동 테스트로만 켜서 확인할 것)'
+        required: false
+        default: '0'
 
 jobs:
   crawl:
@@ -118,7 +122,8 @@ jobs:
         run: |
           LIMIT="${{ github.event.inputs.limit || '40' }}"
           ONLY="${{ github.event.inputs.only || '' }}"
-          ARGS="--site=all --limit=${LIMIT} --results=results.jsonl"
+          GALLERY_LIMIT="${{ github.event.inputs.gallery_limit || '0' }}"
+          ARGS="--site=all --limit=${LIMIT} --gallery-limit=${GALLERY_LIMIT} --results=results.jsonl"
           if [ -n "$ONLY" ]; then
             ARGS="${ARGS} --only=${ONLY}"
           fi

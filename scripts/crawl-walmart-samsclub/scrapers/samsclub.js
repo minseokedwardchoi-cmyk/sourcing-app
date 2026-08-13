@@ -148,3 +148,51 @@ export async function scrapeSamsClub(page, query, limit = 5, interactive = false
   const organic = rawItems.filter((it) => !it.sponsored).slice(0, limit);
   return organic.length ? organic : rawItems.slice(0, limit);
 }
+
+/**
+ * 상품 상세페이지를 방문해서 갤러리 사진(정면/후면/측면 등) URL을 여러 장 뽑는다.
+ * walmart.js의 scrapeWalmartProductImages와 같은 목적(원산지판독용 후면 라벨 사진 확보).
+ *
+ * ⚠️ 이 파일 전체가 이미 "실제 마크업을 본 적이 없는 추측 기반 구현"이라고 명시돼 있는데,
+ * 이 함수도 마찬가지로 미검증 — 후보 selector를 여러 개 순서대로 시도하는 방어적 구현.
+ */
+export async function scrapeSamsClubProductImages(page, productUrl, maxImages = 4) {
+  await page.goto(productUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.waitForTimeout(1500);
+
+  const passed = await waitForHumanIfChallenged(
+    page,
+    async () => isChallenged(await page.textContent("body").catch(() => "")),
+    "samsclub-detail",
+    { interactive: true, maxWaitMs: 60000 }
+  );
+  if (!passed) return [];
+
+  await page.waitForTimeout(500);
+
+  const images = await page.evaluate((max) => {
+    const candidateSelectors = [
+      '[class*="thumbnail" i] img',
+      '[class*="carousel" i] img',
+      '[class*="gallery" i] img',
+      '[data-testid*="image" i] img',
+      'button[class*="thumb" i] img',
+    ];
+    const seen = new Set();
+    const out = [];
+    for (const sel of candidateSelectors) {
+      const nodes = document.querySelectorAll(sel);
+      for (const img of nodes) {
+        const src = img.getAttribute("src") || img.getAttribute("data-src");
+        if (!src || seen.has(src)) continue;
+        seen.add(src);
+        out.push(src);
+        if (out.length >= max) return out;
+      }
+      if (out.length >= max) break;
+    }
+    return out;
+  }, maxImages);
+
+  return images;
+}
