@@ -2186,6 +2186,31 @@ async def get_product_sourcing_types(db: AsyncSession = Depends(get_db)):
 # product_sourcing_item(메인페이지 실제 데이터, 수작업 검증 데이터 포함)은 이 경로로는
 # 절대 건드리지 않는다 — "크롤링 히스토리" 버튼에서 과거 회차를 조회하는 용도.
 
+# 유통사 자체 PB(Private Label/자체 브랜드) 상품은 소싱 후보로서 의미가 없어 크롤링
+# 스냅샷 저장 단계에서 제외한다. brand/product_name_en 어느 쪽에서든 매칭되면 제외.
+PRIVATE_LABEL_BRAND_KEYWORDS = [
+    # Amazon
+    "amazon basics", "amazonbasics", "amazon fresh", "amazonfresh",
+    "amazon elements", "amazon grocery", "amazon saver", "amazon kitchen",
+    "aplenty", "solimo", "presto!", "happy belly",
+    "mama bear", "amazon essentials", "365 by whole foods market",
+    "whole foods market", "wickedly prime",
+    # AEON
+    "topvalu", "top valu", "home coordy",
+    # Sam's Club
+    "member's mark", "members mark",
+    # Walmart
+    "great value", "equate", "mainstays", "marketside", "freshness guaranteed",
+    "bettergoods", "sam's choice", "parent's choice", "ol' roy", "spring valley",
+    "onn.", "onn",
+]
+
+
+def _is_private_label_row(brand: str | None, product_name_en: str | None) -> bool:
+    haystack = f"{brand or ''} {product_name_en or ''}".lower()
+    return any(keyword in haystack for keyword in PRIVATE_LABEL_BRAND_KEYWORDS)
+
+
 @app.post("/api/product-sourcing/crawl-snapshot", response_model=ProductSourcingCrawlSnapshotUploadResponse)
 async def upload_product_sourcing_crawl_snapshot(
     payload: ProductSourcingCrawlSnapshotUploadRequest,
@@ -2198,18 +2223,20 @@ async def upload_product_sourcing_crawl_snapshot(
         # 검증된 방식(Core 스타일 Table.insert() 실행)으로 대체 — 같은 프로젝트에서 이미
         # 대량 한글 데이터를 문제없이 적재해온 경로다.
         now = datetime.utcnow()
+        kept_rows = [row for row in payload.rows if not _is_private_label_row(row.brand, row.product_name_en)]
+
         result = await db.execute(
             ProductSourcingCrawlRun.__table__.insert().returning(ProductSourcingCrawlRun.__table__.c.id),
             {
                 "run_at": now,
                 "site_scope": payload.site_scope,
-                "row_count": payload.row_count if payload.row_count is not None else len(payload.rows),
+                "row_count": len(kept_rows),
                 "note": payload.note,
             },
         )
         run_id = result.scalar_one()
 
-        if payload.rows:
+        if kept_rows:
             item_rows = [
                 {
                     "run_id": run_id,
@@ -2228,12 +2255,12 @@ async def upload_product_sourcing_crawl_snapshot(
                     "image_url": row.image_url,
                     "image_urls": json.dumps(row.image_urls, ensure_ascii=False) if row.image_urls else None,
                 }
-                for row in payload.rows
+                for row in kept_rows
             ]
             await db.execute(ProductSourcingCrawlSnapshotItem.__table__.insert(), item_rows)
 
         await db.commit()
-        return ProductSourcingCrawlSnapshotUploadResponse(run_id=run_id, inserted=len(payload.rows))
+        return ProductSourcingCrawlSnapshotUploadResponse(run_id=run_id, inserted=len(kept_rows))
 
     except Exception as e:
         await db.rollback()
