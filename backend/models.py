@@ -223,6 +223,7 @@ class ProductSourcingCrawlSnapshotItem(Base):
 
     brand            = Column(String(200), nullable=True)
     product_name_en  = Column(String(500), nullable=True)
+    unit             = Column(String(50),  nullable=True, comment="단량(용량) — 크롤러가 안 보내줘도 저장 시점에 product_name_en에서 unit_converter.extract_unit_from_product_name()으로 자동 추출해서 채움")
     price_usd        = Column(Numeric,     nullable=True)
     rating           = Column(Numeric,     nullable=True)
     review_count     = Column(Integer,     nullable=True)

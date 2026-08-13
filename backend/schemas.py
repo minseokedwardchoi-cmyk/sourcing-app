@@ -344,6 +344,9 @@ class ProductSourcingCrawlRunListResponse(BaseModel):
 
 class ProductSourcingCrawlSnapshotRow(ProductSourcingCrawlSnapshotRowIn):
     id: int
+    # product_name_en에서 저장 시점에 자동 추출된 단량 (unit_converter.extract_unit_from_product_name
+    # 참고) — 크롤러가 보내는 입력값이 아니라 서버가 채우는 값이라 Row(출력) 쪽에만 있다.
+    unit: Optional[str] = Field(None)
     # brand_verification 캐시 조인 결과 (크롤링 당시 저장되는 값이 아니라 조회 시점에 brand로
     # 찾아서 채움 — verify_brands.yml이 아직 그 브랜드를 검증 안 했으면 전부 None).
     recall_status:        Optional[str] = Field(None)

@@ -4595,7 +4595,10 @@ function mapCrawlSnapshotRowToFlatRow(row) {
     product_name_en: row.product_name_en,
     price_usd: row.price_usd,
     origin: null,
-    unit: null,
+    // 백엔드가 저장 시점에 product_name_en에서 자동 추출해 채워준 값(unit_converter.
+    // extract_unit_from_product_name) — 원산지가 없어 착지원가 계산엔 아직 못 쓰지만,
+    // 표에는 그대로 보여준다.
+    unit: row.unit ?? null,
     key_criteria_label: null,
     key_criteria_value: null,
     parallel_import: null,

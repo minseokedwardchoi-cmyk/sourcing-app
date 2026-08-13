@@ -71,6 +71,7 @@ from product_sourcing_exporter import build_workbook_skeleton, add_flat_sheet, e
 from tariff_rate_importer import import_tariff_rates
 from hs_code_importer import import_hs_codes
 from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
+from unit_converter import extract_unit_from_product_name
 from country_utils import match_all_countries_in_text_broad
 from brand_key_normalize import normalize_brand_key
 from product_name_key_normalize import normalize_product_name_key
@@ -2223,6 +2224,10 @@ async def upload_product_sourcing_crawl_snapshot(
                     "rank": row.rank,
                     "brand": row.brand,
                     "product_name_en": row.product_name_en,
+                    # 크롤러가 단량을 따로 안 보내줘도(현재 크롤러들은 안 보냄), 저장 시점에
+                    # product_name_en 원문에서 직접 뽑아 채운다 — product_sourcing_item처럼
+                    # 사람이 입력한 "단량" 컬럼이 없는 크롤링 스냅샷의 유일한 소스.
+                    "unit": extract_unit_from_product_name(row.product_name_en),
                     "price_usd": row.price_usd,
                     "rating": row.rating,
                     "review_count": row.review_count,
@@ -2304,8 +2309,10 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
         hs_by_key = {h.name_key: h for h in hs_rows}
 
     # tariff_rate_pct/tariff_basis는 hs_code만으로 계산 가능한 기본세율(원산지 데이터가
-    # 크롤링 스냅샷엔 없어 FTA는 미적용)만 채운다. estimated_landed_cost_krw는 매입원가
-    # 환산에 unit(용량)이 필요한데 이것도 크롤링 스냅샷엔 없어서 계산하지 않는다.
+    # 크롤링 스냅샷엔 없어 FTA는 미적용)만 채운다. unit(용량)은 저장 시점에
+    # product_name_en에서 자동 추출해 채워두지만(unit_converter.extract_unit_from_product_name),
+    # 매입원가 계산에는 그것 말고도 origin(원산지)이 필요한데 이건 크롤링 스냅샷에 아직
+    # 없어서 estimated_landed_cost_krw는 여전히 계산하지 않는다.
     hs_codes = sorted({_normalize_hs_code(h.hs_code) for h in hs_by_key.values() if h.hs_code} - {None})
     tariff_by_hs_code: dict[str, list[dict]] = {}
     if hs_codes:
@@ -2337,6 +2344,7 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
             id=item.id, category=item.category, product_type=item.product_type,
             query_used=item.query_used, retailer=item.retailer, source_site=item.source_site,
             rank=item.rank, brand=item.brand, product_name_en=item.product_name_en,
+            unit=item.unit,
             price_usd=item.price_usd, rating=item.rating, review_count=item.review_count,
             url=item.url, image_url=item.image_url, image_urls=image_urls,
             recall_status=bv.recall_status if bv else None,
