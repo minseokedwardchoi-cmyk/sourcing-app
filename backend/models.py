@@ -228,6 +228,7 @@ class ProductSourcingCrawlSnapshotItem(Base):
     review_count     = Column(Integer,     nullable=True)
     url              = Column(Text,        nullable=True)
     image_url        = Column(Text,        nullable=True)
+    image_urls       = Column(Text,        nullable=True, comment="정면/후면/측면 등 추가 상품 사진 URL 목록 (JSON 배열). 크롤러가 상세페이지에서 여러 장 수집한 경우에만 채워짐(현재 월마트/샘스클럽은 미지원) — 없으면 verify_origin_gemini.py가 아마존/이온몰에 한해 자체적으로 상세페이지를 다시 읽어 보강함")
 
     __table_args__ = (
         Index("ix_pscsi_run_id", "run_id"),
@@ -288,6 +289,45 @@ class BrandVerification(Base):
 
     __table_args__ = (
         Index("ix_bv_brand_key", "brand_key"),
+    )
+
+
+class ProductOriginVerification(Base):
+    """
+    상품(SKU) 단위 원산지 판독 캐시.
+
+    브랜드검증과 달리 원산지는 브랜드 단위로 재사용할 수 없다 — 같은 브랜드도 유통사·
+    용량마다 원산지가 다를 수 있고, zip 전달 패키지 지침에서도 "브랜드명만 보지 말고
+    용량까지 확인" QC 경고가 있었다. 그래서 브랜드 키가 아니라 **상품 URL 단위**로
+    캐시한다(크롤링 회차가 바뀌어도 같은 URL이면 재검증 안 함).
+
+    판독은 사람이 정면/후면/측면 사진을 보고 "Product of/Made in ~" 문구를 찾던
+    수작업(원산지_판독_방법_INSTRUCTIONS.md)을 Gemini 비전 API로 대체한 것. 사진에서
+    못 찾으면 지침의 추정 규칙(미국 COOL 가공식품 예외, 일본 "国内製造" 표기,
+    상업생산 안 하는 나라면 원료 수입 추정 등)을 일반화해서 적용 — 값 뒤 "(추정)"으로
+    실측과 구분.
+
+    product_sourcing_item(메인페이지)과는 조인 관계 없음(FK 없음) — url 문자열로만
+    매칭. 메인 테이블 승격 로직이 생기면 그 로직이 url로 이 캐시를 조회해서
+    origin 컬럼을 채우면 된다.
+    """
+    __tablename__ = "product_origin_verification"
+
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+
+    url               = Column(Text,        nullable=False, comment="상품 상세페이지 URL (조회 키)")
+    url_hash          = Column(String(64),  nullable=False, unique=True, comment="url의 sha256 — url 자체는 길이가 커서 유니크 인덱스는 해시로")
+
+    origin_found      = Column(String(5),   nullable=True,  comment="Y=사진에서 실측 / E=추정치 / N=확인불가")
+    origin_text       = Column(Text,        nullable=True,  comment="Y면 라벨 문구 그대로(요약), E면 '국가명(추정)', N이면 빈 값")
+    note              = Column(Text,        nullable=True,  comment="근거·특이사항")
+
+    images_used       = Column(Text,        nullable=True,  comment="판독에 실제 사용한 이미지 URL 목록 (JSON 배열, 스팟체크용)")
+    verification_model = Column(String(50), nullable=True,  comment="검증에 사용한 Gemini 모델명")
+    verified_at        = Column(DateTime,   nullable=True,  comment="검증 실행 시각")
+
+    __table_args__ = (
+        Index("ix_pov_url_hash", "url_hash"),
     )
 
 

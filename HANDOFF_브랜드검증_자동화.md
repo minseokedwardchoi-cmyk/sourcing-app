@@ -1,22 +1,31 @@
-# 브랜드검증(Gemini) 자동화 — 크롤링 세션 인수인계
+# 브랜드검증 + 원산지판독(Gemini) 자동화 — 크롤링 세션 인수인계
 
 > 이 문서를 크롤링 자동화 작업 중인 세션에 붙여넣어 주세요. 브랜드검증(리콜/품질·표시/
-> 법적·평판 리스크) 파이프라인은 이미 만들어져 있고, 크롤링이 완성되면 사람 개입 없이
-> 자동으로 이어서 실행됩니다 — 크롤링 쪽에서 알아두면 좋을 것들만 정리했습니다.
+> 법적·평판 리스크)과 원산지판독 파이프라인이 둘 다 이미 만들어져 있고, 크롤링이
+> 완성되면 사람 개입 없이 자동으로 이어서 실행됩니다 — 크롤링 쪽에서 알아두면 좋을
+> 것들만 정리했습니다. (파일명은 브랜드검증만 있던 때 이름 그대로 유지 — 링크 안 깨지게)
 
 ## 요약
 
-기존엔 Claude Code + WebSearch로 브랜드마다 사람처럼 조사해서 엑셀/CSV에 채워넣던
-브랜드검증(`brand_verify.csv` 방식)을, Gemini API(웹검색 그라운딩)로 자동화했습니다.
-브랜드 단위 캐시 테이블(`brand_verification`)에 브랜드 1건당 1번만 검증해서 쌓고,
-크롤링 체인이 끝나면 GitHub Actions가 자동으로 이어서 실행됩니다:
+기존엔 Claude Code + WebSearch/비전으로 사람이 직접 조사하던 두 작업을 Gemini API로
+자동화했습니다:
+- **브랜드검증**: 브랜드마다 리콜/품질표시/법적평판 웹서치 → Gemini(`google_search`
+  그라운딩). **브랜드 단위** 캐시(`brand_verification`) — 같은 브랜드는 여러 유통사·
+  품목유형에서 재사용.
+- **원산지판독**: 상품 패키지 사진에서 "Made in ~" 문구 읽기 → Gemini 비전 API.
+  **상품(URL) 단위** 캐시(`product_origin_verification`) — 같은 브랜드도 유통사·
+  용량마다 원산지가 다를 수 있어서 브랜드 단위로는 재사용 안 함.
+
+둘 다 크롤링 체인이 끝나면 GitHub Actions가 자동으로 이어서 실행됩니다(서로 독립적,
+병렬로 돌아도 무방):
 
 ```
 crawl_walmart_samsclub.yml (VNC, 사람이 캡차)
   → workflow_run →
 crawl_amazon_aeon.yml (자동)
   → workflow_run →
-verify_brands.yml (Gemini 브랜드검증, 이번에 추가됨)
+verify_brands.yml (Gemini 브랜드검증)
+verify_origin.yml (Gemini 원산지판독)
 ```
 
 ## 이미 만들어진 것
@@ -35,6 +44,23 @@ verify_brands.yml (Gemini 브랜드검증, 이번에 추가됨)
   이미 채워져 있던 브랜드검증 데이터 1,926개 브랜드를 캐시로 이전 완료(로컬 1회 실행,
   이미 완료됨)
 - **워크플로**: `.github/workflows/verify_brands.yml`
+
+그리고 원산지판독:
+
+- **DB**: `product_origin_verification` 테이블 — url(원문)/url_hash(sha256, 유니크
+  조회키)/origin_found(Y=실측/E=추정/N=확인불가)/origin_text/note/images_used/
+  verification_model/verified_at
+- **API**: `POST /api/product-origin-verification/check`(이미 캐시된 url 목록 확인,
+  배치), `POST /api/product-origin-verification/upsert`
+- **검증 스크립트**: `backend/verify_origin_gemini.py` — 사진(있으면)+상품 컨텍스트를
+  Gemini 비전 API 1회 호출(그라운딩 불필요 — 원산지 표시 규정은 정적 지식이라 바로
+  구조화 출력 받음)로 판독. 판정 기준(라벨 문구 우선 → 없으면 국가별 추정규칙 → 그래도
+  없으면 확인불가)은 원본 수작업 지침을 83개 유형 전체에 맞게 일반화해서 이식.
+- **사진 확보**: `product_sourcing_crawl_snapshot_item`에 크롤러가 `image_urls`(복수)를
+  안 보내주면, 아마존/이온몰에 한해 이 스크립트가 상품 상세페이지를 `r.jina.ai`로 직접
+  다시 읽어서 갤러리 사진을 추가로 뽑아냅니다(검색결과 썸네일 1장보다 후면 라벨이 보일
+  확률이 높음). **월마트/샘스클럽은 이 자체보강이 안 됩니다** — 아래 3-1번 참고.
+- **워크플로**: `.github/workflows/verify_origin.yml`
 
 ## 크롤링 쪽에서 알아둘 것 (중요도순)
 
@@ -55,28 +81,45 @@ First/Cold 등) 나오기 전까지 최대 3단어"를 브랜드로 취급합니
 크롤링 데이터 품질 자체에는 영향이 있으니 83개 유형 전체 크롤링 전에 한 번 봐주시면
 좋습니다).
 
-### 3. 아마존은 상대적으로 안전해 보임
+### 3. ⚠️⚠️ 원산지판독용 — 월마트/샘스클럽에 상세페이지 갤러리 사진(image_urls) 요청
+원산지 문구는 대부분 패키지 **뒷면**에 있는데, 지금 크롤러는 검색결과 페이지에서 정면
+썸네일 1장만 가져옵니다(`image_url` 단일 컬럼). 아마존/이온몰은 `verify_origin_gemini.py`가
+상세페이지를 `r.jina.ai`로 스스로 다시 읽어서 사진을 보강하지만, **월마트/샘스클럽은
+PerimeterX 봇차단 때문에 이 자체보강이 안 될 가능성이 높습니다** — 즉 지금 상태로는
+월마트/샘스클럽 상품의 원산지 실측(Y) 적중률이 낮게 나올 겁니다.
+
+**요청**: `crawl_walmart_samsclub.yml`의 `crawl.js`가 이미 상품 상세페이지를 살아있는
+브라우저(Playwright)로 방문하고 있으니, 그 김에 갤러리 이미지 URL을 2~4개(정면/후면/측면)
+같이 수집해서 업로드 payload에 `image_urls`(문자열 배열) 필드로 추가해주시면 됩니다.
+스키마는 이미 열어뒀습니다 — `POST /api/product-sourcing/crawl-snapshot`의 각 행에
+기존 `image_url`(단일, 하위호환용으로 계속 유지)과 별개로 `image_urls`(배열, optional)를
+같이 보내면, `verify_origin_gemini.py`가 자체보강 없이 그 사진들을 바로 씁니다. 코드
+수정 없이 그대로 반영됩니다.
+
+### 4. 아마존은 상대적으로 안전해 보임
 `scrapers/amazon.js`는 상품 제목과 별개로 마크다운의 "## 브랜드명" 헤딩에서 brand를
 따로 뽑는 로직이 있어서, 올리브유 전용이 아니라 구조적으로 더 일반화된 방식입니다
 (실측 검증까진 안 했지만 코드상 그렇게 보임).
 
-### 4. 크롤링 워크플로 이름을 바꾸면 트리거가 깨짐
-`verify_brands.yml`은 `workflow_run: workflows: ["아마존/이온몰 순위 크롤링"]`으로
-`crawl_amazon_aeon.yml`의 `name:` 필드를 정확히 문자열 매칭합니다. 이 워크플로 이름을
-바꾸거나 체인 마지막 단계를 다른 워크플로로 바꾸게 되면, `verify_brands.yml`의 이 부분도
-같이 고쳐줘야 자동 체인이 유지됩니다.
+### 5. 크롤링 워크플로 이름을 바꾸면 트리거가 깨짐
+`verify_brands.yml`, `verify_origin.yml` 둘 다 `workflow_run: workflows: ["아마존/이온몰
+순위 크롤링"]`으로 `crawl_amazon_aeon.yml`의 `name:` 필드를 정확히 문자열 매칭합니다.
+이 워크플로 이름을 바꾸거나 체인 마지막 단계를 다른 워크플로로 바꾸게 되면, 두 워크플로
+전부 이 부분을 같이 고쳐줘야 자동 체인이 유지됩니다.
 
-### 5. product_sourcing_item(메인페이지)은 전혀 안 건드림
-`brand_verification`은 완전히 독립된 캐시입니다. 크롤링 결과를 메인 테이블로 승격하는
-로직(아직 없음, 다른 세션 작업으로 알고 있음)을 만들 때, 그 로직에서 브랜드별로
-`brand_verification`을 조회해서(현재는 `GET /api/brand-verification/keys`만 있고
-개별 조회용 GET은 없음 — 필요하면 그때 추가하면 됨) `recall_status` 등 5개 컬럼을
-채우면 재검증 없이 바로 반영됩니다.
+### 6. product_sourcing_item(메인페이지)은 전혀 안 건드림
+`brand_verification`, `product_origin_verification` 둘 다 완전히 독립된 캐시입니다.
+크롤링 결과를 메인 테이블로 승격하는 로직(아직 없음, 다른 세션 작업으로 알고 있음)을
+만들 때, 그 로직에서 브랜드별로 `brand_verification`을(현재는 `GET
+/api/brand-verification/keys`만 있고 개별 조회용 GET은 없음 — 필요하면 그때 추가하면
+됨), 상품 URL별로 `product_origin_verification`을 조회해서 각각 `recall_status` 등
+5개 컬럼 / `origin` 컬럼을 채우면 재검증 없이 바로 반영됩니다.
 
-### 6. 크롤링 이력에 테스트 더미 데이터 하나 남아있음
+### 7. 크롤링 이력에 테스트 더미 데이터 하나 남아있음
 `product_sourcing_crawl_snapshot_item`에 `brand="테스트브랜드"`, `product_name_en="Test"`
 행이 1건 있습니다(크롤러 개발 중 테스트로 남은 것으로 추정). 지워도 되고 안 지워도
-브랜드검증이 이걸 조사해서 캐시에 의미없는 항목 하나 남기는 정도라 치명적이진 않습니다.
+브랜드검증/원산지판독이 이걸 조사해서 캐시에 의미없는 항목 하나 남기는 정도라 치명적이진
+않습니다.
 
 ## 확인 완료된 것
 
@@ -86,6 +129,8 @@ First/Cold 등) 나오기 전까지 최대 3단어"를 브랜드로 취급합니
 
 ## 아직 안 한 것 (이 세션 범위 밖)
 
-- Gemini 실전 대량 검증 실행 (지금까진 dry-run·소량 테스트만)
+- Gemini 실전 대량 검증/판독 실행 (지금까진 dry-run·소량 테스트만, `verify_origin_gemini.py`는
+  아직 실행 자체를 한 번도 안 해봄 — r.jina.ai 상세페이지 재읽기 부분이 특히 미검증)
 - 이온몰 brand 필드 채우기 (위 1번)
+- 월마트/샘스클럽 갤러리 사진(image_urls) 수집 (위 3번)
 - 크롤링 결과 → `product_sourcing_item` 승격 로직

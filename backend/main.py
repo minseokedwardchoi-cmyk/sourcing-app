@@ -39,7 +39,7 @@ from database import get_db, engine, Base, AsyncSessionLocal
 from models import (
     ImportHistory, ProductSourcingItem, CrawlRunStatus,
     ProductSourcingCrawlRun, ProductSourcingCrawlSnapshotItem, ProductSourcingCrawlSession,
-    BrandVerification,
+    BrandVerification, ProductOriginVerification,
 )
 from schemas import (
     SkuHistoryResponse, SkuHistoryRow, PaginationMeta,
@@ -59,6 +59,8 @@ from schemas import (
     ProductSourcingWalmartSamsclubTriggerResponse, ProductSourcingWalmartSamsclubSessionCallbackRequest,
     ProductSourcingWalmartSamsclubSessionFinishedRequest, ProductSourcingWalmartSamsclubSessionStatusResponse,
     BrandVerificationKeysResponse, BrandVerificationUpsertRequest, BrandVerificationUpsertResponse,
+    ProductOriginVerificationCheckRequest, ProductOriginVerificationCheckResponse,
+    ProductOriginVerificationUpsertRequest, ProductOriginVerificationUpsertResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
@@ -329,6 +331,7 @@ async def _startup_bg():
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS estimated_landed_cost_krw NUMERIC",
             "ALTER TABLE product_sourcing_item ADD COLUMN IF NOT EXISTS landed_cost_is_per_kg BOOLEAN",
             "ALTER TABLE country_item_amount ADD COLUMN IF NOT EXISTS weight_ton NUMERIC",
+            "ALTER TABLE product_sourcing_crawl_snapshot_item ADD COLUMN IF NOT EXISTS image_urls TEXT",
         ]:
             try:
                 await conn.execute(text(col_sql))
@@ -2223,6 +2226,7 @@ async def upload_product_sourcing_crawl_snapshot(
                     "review_count": row.review_count,
                     "url": row.url,
                     "image_url": row.image_url,
+                    "image_urls": json.dumps(row.image_urls, ensure_ascii=False) if row.image_urls else None,
                 }
                 for row in payload.rows
             ]
@@ -2287,12 +2291,18 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
 
     def _row_to_schema(item):
         bv = verification_by_key.get(normalize_brand_key(item.brand)) if item.brand else None
+        image_urls = None
+        if item.image_urls:
+            try:
+                image_urls = json.loads(item.image_urls)
+            except Exception:
+                image_urls = None
         return ProductSourcingCrawlSnapshotRow(
             id=item.id, category=item.category, product_type=item.product_type,
             query_used=item.query_used, retailer=item.retailer, source_site=item.source_site,
             rank=item.rank, brand=item.brand, product_name_en=item.product_name_en,
             price_usd=item.price_usd, rating=item.rating, review_count=item.review_count,
-            url=item.url, image_url=item.image_url,
+            url=item.url, image_url=item.image_url, image_urls=image_urls,
             recall_status=bv.recall_status if bv else None,
             quality_label_status=bv.quality_label_status if bv else None,
             legal_risk_status=bv.legal_risk_status if bv else None,
@@ -2455,6 +2465,72 @@ async def upsert_brand_verification(
             count += 1
         await db.commit()
         return BrandVerificationUpsertResponse(upserted=count)
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+# ─── 3-4-3. 원산지 판독 캐시 (product_origin_verification) ─────────────────────
+# 브랜드검증과 동일한 이유로(CI 러너가 DB에 직접 안 붙음) 이 두 엔드포인트로만 접근한다.
+# verify_origin_gemini.py 참고. 브랜드 단위가 아니라 상품 URL 단위 캐시라는 점만 다름
+# (같은 브랜드도 유통사·용량마다 원산지가 다를 수 있어서 브랜드 단위로 재사용 못함).
+
+def _url_hash(url: str) -> str:
+    import hashlib
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
+@app.post("/api/product-origin-verification/check", response_model=ProductOriginVerificationCheckResponse)
+async def check_product_origin_verification(
+    payload: ProductOriginVerificationCheckRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    if not payload.urls:
+        return ProductOriginVerificationCheckResponse(verified_urls=[])
+    hash_to_url = {_url_hash(u): u for u in payload.urls}
+    r = await db.execute(
+        select(ProductOriginVerification.url_hash)
+        .where(ProductOriginVerification.url_hash.in_(list(hash_to_url.keys())))
+    )
+    found_hashes = set(r.scalars().all())
+    return ProductOriginVerificationCheckResponse(
+        verified_urls=[hash_to_url[h] for h in found_hashes if h in hash_to_url]
+    )
+
+
+@app.post("/api/product-origin-verification/upsert", response_model=ProductOriginVerificationUpsertResponse)
+async def upsert_product_origin_verification(
+    payload: ProductOriginVerificationUpsertRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        now = datetime.utcnow()
+        count = 0
+        for item in payload.items:
+            await db.execute(text("""
+                INSERT INTO product_origin_verification
+                    (url, url_hash, origin_found, origin_text, note, images_used, verification_model, verified_at)
+                VALUES
+                    (:url, :url_hash, :origin_found, :origin_text, :note, :images_used, :model, :verified_at)
+                ON CONFLICT (url_hash) DO UPDATE SET
+                    url = EXCLUDED.url,
+                    origin_found = EXCLUDED.origin_found,
+                    origin_text = EXCLUDED.origin_text,
+                    note = EXCLUDED.note,
+                    images_used = EXCLUDED.images_used,
+                    verification_model = EXCLUDED.verification_model,
+                    verified_at = EXCLUDED.verified_at
+            """), {
+                "url": item.url, "url_hash": _url_hash(item.url),
+                "origin_found": item.origin_found, "origin_text": item.origin_text, "note": item.note,
+                "images_used": json.dumps(item.images_used, ensure_ascii=False) if item.images_used is not None else None,
+                "model": item.verification_model, "verified_at": now,
+            })
+            count += 1
+        await db.commit()
+        return ProductOriginVerificationUpsertResponse(upserted=count)
     except Exception as e:
         await db.rollback()
         import traceback

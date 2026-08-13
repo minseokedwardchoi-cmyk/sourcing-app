@@ -1,0 +1,117 @@
+name: 원산지 판독 (Gemini 비전)
+
+# 브랜드검증(verify_brands.yml)과 같은 트리거 지점 — 크롤링 체인
+# (crawl_walmart_samsclub.yml → crawl_amazon_aeon.yml) 완료 후 자동 이어서 실행되어,
+# 크롤링 이력(product_sourcing_crawl_snapshot_item)에 새로 나타난 상품의 패키지 사진을
+# Gemini 비전 API로 판독해서 백엔드의 product_origin_verification 캐시에 upsert한다
+# (backend/verify_origin_gemini.py 참고).
+#
+# 브랜드검증과 달리 상품 URL 단위 캐시라 대상 건수가 훨씬 많을 수 있다(브랜드는
+# 수천 개, 상품은 그보다 많음) — limit/max_batches를 브랜드검증보다 낮게 잡아 비용을
+# 통제한다. 두 워크플로는 서로 독립적이라 병렬로 돌아도 문제없음(다른 캐시 테이블).
+#
+# 월마트/샘스클럽은 봇차단 때문에 상세페이지에서 사진을 추가로 못 가져올 가능성이 높아,
+# 크롤링 당시 저장된 썸네일 1장(또는 그것도 없으면 사진 없이 텍스트 추정)만으로 판독한다
+# — 실측(Y) 적중률이 아마존/이온몰보다 낮을 것으로 예상됨. HANDOFF 문서에 월마트/샘스클럽
+# 쪽이 상세페이지 방문 시 갤러리 사진(image_urls)도 같이 보내달라는 요청을 남겨뒀다.
+
+on:
+  workflow_run:
+    workflows: ["아마존/이온몰 순위 크롤링"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: '특정 크롤링 회차 ID (비우면 최신 회차)'
+        required: false
+        default: ''
+      all_runs:
+        description: '모든 회차를 통틀어 대상 상품 추출 (최초 1회 소급용)'
+        required: false
+        default: 'false'
+      limit:
+        description: '배치 1회당 판독할 상품 수'
+        required: false
+        default: '15'
+      max_batches:
+        description: '최대 배치 반복 횟수 (대상이 없어지면 그 전에 종료)'
+        required: false
+        default: '15'
+      dry_run:
+        description: '대상 상품만 출력하고 실제 판독은 하지 않음'
+        required: false
+        default: 'false'
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: pip install -r backend/requirements-brand-verify.txt
+
+      - name: 원산지 판독 (대상이 없어질 때까지 배치 반복)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          LIMIT="${{ github.event.inputs.limit || '15' }}"
+          MAX_BATCHES="${{ github.event.inputs.max_batches || '15' }}"
+          RUN_ID="${{ github.event.inputs.run_id }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # 크롤링 체인 자동 실행 — 월마트/샘스클럽 회차를 놓치지 않도록 항상 전체 회차 대상
+            ALL_RUNS="true"
+          else
+            ALL_RUNS="${{ github.event.inputs.all_runs }}"
+          fi
+
+          ARGS="--limit=${LIMIT}"
+          if [ -n "$RUN_ID" ]; then
+            ARGS="${ARGS} --run-id=${RUN_ID}"
+          fi
+          if [ "$ALL_RUNS" = "true" ]; then
+            ARGS="${ARGS} --all-runs"
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS="${ARGS} --dry-run"
+          fi
+
+          FAILURES=0
+          for i in $(seq 1 "$MAX_BATCHES"); do
+            echo "=== 배치 $i / $MAX_BATCHES (${ARGS}) ==="
+            set +e
+            out=$(python backend/verify_origin_gemini.py ${ARGS})
+            status=$?
+            set -e
+            echo "$out"
+
+            if [ "$status" -ne 0 ]; then
+              FAILURES=$((FAILURES + 1))
+              echo "배치 $i 실패 (누적 실패 ${FAILURES}회) — 다음 배치로 계속 진행"
+              if [ "$FAILURES" -ge 3 ]; then
+                echo "연속/누적 실패가 너무 많음 — 중단"
+                exit 1
+              fi
+              continue
+            fi
+
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "dry-run 모드 — 1회만 실행하고 종료"
+              break
+            fi
+
+            if echo "$out" | grep -q "미검증 0건"; then
+              echo "남은 미검증 상품 없음 — 종료"
+              break
+            fi
+          done

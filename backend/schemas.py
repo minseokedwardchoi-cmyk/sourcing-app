@@ -315,6 +315,7 @@ class ProductSourcingCrawlSnapshotRowIn(BaseModel):
     review_count:     Optional[int]   = Field(None)
     url:              Optional[str]   = Field(None)
     image_url:        Optional[str]   = Field(None)
+    image_urls:       Optional[list[str]] = Field(None, description="정면/후면/측면 등 추가 사진 URL (현재는 크롤러가 안 보내도 됨 — verify_origin_gemini.py가 아마존/이온몰은 자체 보강함. 월마트/샘스클럽처럼 봇차단으로 자체 보강이 안 되는 유통사는 크롤러가 상세페이지 방문 시 채워주면 원산지 판독 커버리지가 올라감)")
 
 
 class ProductSourcingCrawlSnapshotUploadRequest(BaseModel):
@@ -405,6 +406,31 @@ class BrandVerificationUpsertRequest(BaseModel):
 
 
 class BrandVerificationUpsertResponse(BaseModel):
+    upserted: int
+
+
+class ProductOriginVerificationCheckRequest(BaseModel):
+    urls: list[str] = Field(default_factory=list, description="캐시 존재 여부를 확인할 상품 URL 목록")
+
+
+class ProductOriginVerificationCheckResponse(BaseModel):
+    verified_urls: list[str] = Field(default_factory=list, description="urls 중 이미 product_origin_verification에 있는 것들")
+
+
+class ProductOriginVerificationUpsertItem(BaseModel):
+    url:                 str             = Field(..., description="상품 상세페이지 URL (조회 키)")
+    origin_found:        str             = Field(..., description="Y=실측 / E=추정 / N=확인불가")
+    origin_text:         Optional[str]   = Field(None)
+    note:                Optional[str]   = Field(None)
+    images_used:         Optional[list[str]] = Field(None, description="판독에 실제 사용한 이미지 URL")
+    verification_model:  Optional[str]   = Field(None)
+
+
+class ProductOriginVerificationUpsertRequest(BaseModel):
+    items: list[ProductOriginVerificationUpsertItem] = Field(default_factory=list)
+
+
+class ProductOriginVerificationUpsertResponse(BaseModel):
     upserted: int
 
 
