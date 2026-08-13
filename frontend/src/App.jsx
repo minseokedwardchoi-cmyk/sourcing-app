@@ -4575,11 +4575,13 @@ function mapCrawlSnapshotRowToFlatRow(row) {
     key_criteria_value: null,
     parallel_import: null,
     importers: null,
-    recall_status: null,
-    quality_label_status: null,
-    legal_risk_status: null,
-    five_year_issue: null,
-    notes: null,
+    // brand_verification 캐시 조인 결과 (백엔드가 조회 시점에 brand로 찾아서 채워줌) —
+    // 아직 그 브랜드가 검증 안 됐으면 전부 null로 와서 "-"로 표시된다.
+    recall_status: row.recall_status ?? null,
+    quality_label_status: row.quality_label_status ?? null,
+    legal_risk_status: row.legal_risk_status ?? null,
+    five_year_issue: row.five_year_issue ?? null,
+    notes: row.brand_verification_notes ?? null,
     rating: row.rating,
     review_count: row.review_count,
     url: row.url,

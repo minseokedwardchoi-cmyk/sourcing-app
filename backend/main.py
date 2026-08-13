@@ -69,6 +69,7 @@ from tariff_rate_importer import import_tariff_rates
 from hs_code_importer import import_hs_codes
 from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
 from country_utils import match_all_countries_in_text_broad
+from brand_key_normalize import normalize_brand_key
 from mfds_pricing import estimate_purchase_price, resolve_mfds_price, resolve_origin_country
 from mfds_manual_overrides import get_mfds_item
 from mfds_item_matcher import match_product_to_mfds_item
@@ -2271,18 +2272,37 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
         )
     )
     items = r.scalars().all()
+
+    # brand_verification 캐시 조인 — verify_brands_gemini.py가 크롤링 이력의 브랜드를 검증할 때
+    # 쓰는 것과 정확히 같은 키(normalize_brand_key(brand))로 조회해야 매칭된다. 크롤링 시점이
+    # 아니라 조회 시점에 조인하므로, 이후 새로 검증되는 브랜드도 별도 백필 없이 바로 반영된다.
+    brand_keys = {normalize_brand_key(item.brand) for item in items if item.brand}
+    brand_keys.discard("")
+    verification_by_key = {}
+    if brand_keys:
+        bv_rows = (await db.execute(
+            select(BrandVerification).where(BrandVerification.brand_key.in_(brand_keys))
+        )).scalars().all()
+        verification_by_key = {bv.brand_key: bv for bv in bv_rows}
+
+    def _row_to_schema(item):
+        bv = verification_by_key.get(normalize_brand_key(item.brand)) if item.brand else None
+        return ProductSourcingCrawlSnapshotRow(
+            id=item.id, category=item.category, product_type=item.product_type,
+            query_used=item.query_used, retailer=item.retailer, source_site=item.source_site,
+            rank=item.rank, brand=item.brand, product_name_en=item.product_name_en,
+            price_usd=item.price_usd, rating=item.rating, review_count=item.review_count,
+            url=item.url, image_url=item.image_url,
+            recall_status=bv.recall_status if bv else None,
+            quality_label_status=bv.quality_label_status if bv else None,
+            legal_risk_status=bv.legal_risk_status if bv else None,
+            five_year_issue=bv.five_year_issue if bv else None,
+            brand_verification_notes=bv.notes if bv else None,
+        )
+
     return ProductSourcingCrawlRunDetailResponse(
         run_id=run.id, run_at=run.run_at, site_scope=run.site_scope, note=run.note,
-        rows=[
-            ProductSourcingCrawlSnapshotRow(
-                id=item.id, category=item.category, product_type=item.product_type,
-                query_used=item.query_used, retailer=item.retailer, source_site=item.source_site,
-                rank=item.rank, brand=item.brand, product_name_en=item.product_name_en,
-                price_usd=item.price_usd, rating=item.rating, review_count=item.review_count,
-                url=item.url, image_url=item.image_url,
-            )
-            for item in items
-        ],
+        rows=[_row_to_schema(item) for item in items],
     )
 
 
