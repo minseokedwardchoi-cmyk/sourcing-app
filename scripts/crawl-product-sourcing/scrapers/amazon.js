@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { extractBrandCommaOrWords } from "../brand-extract.js";
 
 // oliveoil-scraper(D:\AI 프로젝트\유통사크롤러\...\oliveoil-scraper, r.jina.ai 리더 프록시 방식)의
 // scrapers/amazon.js를 그대로 가져오되, reviewCount 추출 로직만 추가했다.
@@ -149,7 +150,9 @@ export function parseAmazonMarkdown(markdown, pageNumber) {
     const asin = segment.match(/\/(?:dp|gp\/aw\/d)\/(B[0-9A-Z]{9})/i)?.[1] || `html-${pageNumber}-${index}`;
     imageItems.push({
       asin,
-      brand: brandHeading,
+      // "## 브랜드" 헤딩이 있으면 그게 가장 신뢰도 높음 — 없으면 제목 텍스트에서
+      // 콤마 경계(또는 앞 2단어)로 폴백 추출한다(brand-extract.js 참고).
+      brand: brandHeading || extractBrandCommaOrWords(title),
       title,
       size: extractSize(title),
       url: asin.startsWith("B") ? `https://www.amazon.com/dp/${asin}` : null,
@@ -205,7 +208,7 @@ export function parseAmazonMarkdown(markdown, pageNumber) {
 
     out.push({
       asin: `html-${pageNumber}-${i}`,
-      brand: null,
+      brand: extractBrandCommaOrWords(title),
       title,
       size: extractSize(title),
       url: null,

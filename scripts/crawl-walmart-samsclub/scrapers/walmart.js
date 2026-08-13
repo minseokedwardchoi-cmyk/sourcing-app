@@ -54,31 +54,15 @@ export async function scrapeWalmart(page, query, limit = 5, sort = "best-sellers
       return m ? clean(m[0]) : null;
     };
 
+    // 카테고리별 불용어 목록(예: 올리브유 전용 Extra/Virgin/Olive/Oil...)은 83개 유형
+    // 전체로 확장하면서 다른 품목에서 오작동해 폐기함. 월마트 상품명은 콤마가 브랜드가
+    // 아니라 상품명 맨 끝(용량 표기 앞)에 오는 경우가 많아 콤마를 경계 신호로 못 쓰고,
+    // 메인페이지 기존 데이터 실측 검증(50% 샘플) 기준 가장 무난했던 "앞 2단어 고정"만 쓴다
+    // (scripts/crawl-product-sourcing/brand-extract.js의 extractBrandFixedWords와 동일 로직 —
+    // 이 함수는 page.$$eval 안에서 브라우저 컨텍스트로 직렬화돼 실행되므로 import 불가해 인라인함).
     const parseBrand = (title) => {
-      const stop = new Set([
-        "Extra",
-        "Virgin",
-        "Olive",
-        "Oil",
-        "Oils",
-        "Organic",
-        "Cooking",
-        "Smooth",
-        "Robust",
-        "Pure",
-        "First",
-        "Cold",
-        "100%",
-      ]);
-      const words = title.split(/\s+/);
-      const brandWords = [];
-      for (const w of words) {
-        const bare = w.replace(/[^A-Za-z%]/g, "");
-        if (stop.has(bare)) break;
-        brandWords.push(w);
-        if (brandWords.length >= 3) break;
-      }
-      return brandWords.join(" ") || words[0] || null;
+      const words = title.split(/\s+/).filter(Boolean);
+      return words.slice(0, 2).join(" ") || null;
     };
 
     const out = [];

@@ -108,19 +108,11 @@ export async function scrapeSamsClub(page, query, limit = 5, interactive = false
       );
       const size = sizeMatch ? clean(sizeMatch[0]) : null;
 
-      const stop = new Set([
-        "Extra", "Virgin", "Olive", "Oil", "Oils", "Organic", "Cooking",
-        "Smooth", "Robust", "Pure", "First", "Cold", "Member's", "Mark",
-      ]);
-      const words = title.split(/\s+/);
-      const brandWords = [];
-      for (const w of words) {
-        const bare = w.replace(/[^A-Za-z%']/g, "");
-        if (stop.has(bare)) break;
-        brandWords.push(w);
-        if (brandWords.length >= 3) break;
-      }
-      const brand = brandWords.join(" ") || words[0] || null;
+      // 카테고리별 불용어 목록은 83개 유형 전체로 확장하면서 다른 품목에서 오작동해
+      // 폐기함(walmart.js와 같은 이유 — 상세 근거는 그쪽 주석 참고). 샘스클럽도 콤마가
+      // 브랜드 경계가 아니라 상품명 끝 용량 표기 앞에 오는 경우가 많아 "앞 2단어 고정"만 쓴다.
+      const words = title.split(/\s+/).filter(Boolean);
+      const brand = words.slice(0, 2).join(" ") || null;
 
       const imgEl = container.querySelector("img");
       const image = imgEl?.getAttribute("src") || imgEl?.getAttribute("data-src") || null;

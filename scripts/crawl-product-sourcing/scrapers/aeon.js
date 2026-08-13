@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { translateToJapanese } from "../translate.js";
+import { extractBrandCommaOrWords } from "../brand-extract.js";
 
 // oliveoil-scraper의 scrapers/aeon.js를 거의 그대로 가져오되, isQueryRelevant()(올리브유류
 // 전용 "family" 체크가 섞여 있던 함수)는 제거했다 — 이번 작업은 올리브유 한정이 아니라
@@ -143,7 +144,7 @@ async function scrapeAeonMalaysia(query, limit = Infinity) {
     const likeCount = likeMatch ? Number(likeMatch[1]) : null;
     const candidate = {
       id,
-      brand: null,
+      brand: extractBrandCommaOrWords(title),
       title,
       size: extractSize(title),
       url,
@@ -203,7 +204,9 @@ function parseAeonJapanMarkdown(markdown) {
     seen.add(key);
     out.push({
       id: url || key,
-      brand: null,
+      // 일본어 제목도 공백으로 브랜드/설명이 분리돼 있는 경우가 많아 같은 규칙을 적용한다
+      // (완벽하진 않음 — 한자/가타카나 텍스트라 콤마 경계 자체가 잘 안 나올 수 있음).
+      brand: extractBrandCommaOrWords(title),
       title,
       size: extractSize(title),
       url: url || null,
