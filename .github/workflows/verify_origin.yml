@@ -1,14 +1,18 @@
 name: 원산지 판독 (Gemini 비전)
 
-# 브랜드검증(verify_brands.yml)과 같은 트리거 지점 — 크롤링 체인
-# (crawl_walmart_samsclub.yml → crawl_amazon_aeon.yml) 완료 후 자동 이어서 실행되어,
-# 크롤링 이력(product_sourcing_crawl_snapshot_item)에 새로 나타난 상품의 패키지 사진을
-# Gemini 비전 API로 판독해서 백엔드의 product_origin_verification 캐시에 upsert한다
-# (backend/verify_origin_gemini.py 참고).
+# 크롤링 체인의 첫 번째 단계: crawl_walmart_samsclub.yml → crawl_amazon_aeon.yml 완료 후
+# 자동 이어서 실행되어, 크롤링 이력(product_sourcing_crawl_snapshot_item)에 새로 나타난
+# 상품의 패키지 사진을 Gemini 비전 API로 판독해서 백엔드의 product_origin_verification
+# 캐시에 upsert한다 (backend/verify_origin_gemini.py 참고). 이 워크플로가 끝나면
+# hs_code_estimation.yml이 이어서 트리거되고, 그게 끝나면 마지막으로 verify_brands.yml이
+# 트리거되는 직렬 체인이다(2026-08 개편 — 배치 처리가 안 되는 브랜드검증만 하루 무료
+# 한도(250 RPD) 때문에 며칠 걸릴 수 있어서 맨 뒤로 뺐다. 자세한 이유는
+# hs_code_estimation.yml 상단 주석 참고).
 #
-# 브랜드검증과 달리 상품 URL 단위 캐시라 대상 건수가 훨씬 많을 수 있다(브랜드는
-# 수천 개, 상품은 그보다 많음) — limit/max_batches를 브랜드검증보다 낮게 잡아 비용을
-# 통제한다. 두 워크플로는 서로 독립적이라 병렬로 돌아도 문제없음(다른 캐시 테이블).
+# 상품 URL 단위 캐시라 대상 건수가 브랜드검증보다 훨씬 많을 수 있다(브랜드는 수천 개,
+# 상품은 그보다 많음) — 그 대신 배치 처리(--batch-size) + gemini-2.5-flash-lite 기본
+# 모델로 무료 티어 RPD(1,000/일)를 절약한다(verify_origin_gemini.py 상단 설명 참고).
+# 이미지가 토큰을 많이 먹어서 배치 크기는 HS코드보다 작게(기본 4) 잡는다.
 #
 # 월마트/샘스클럽은 봇차단 때문에 상세페이지에서 사진을 추가로 못 가져올 가능성이 높아,
 # 크롤링 당시 저장된 썸네일 1장(또는 그것도 없으면 사진 없이 텍스트 추정)만으로 판독한다
@@ -32,11 +36,15 @@ on:
       limit:
         description: '배치 1회당 판독할 상품 수'
         required: false
-        default: '15'
+        default: '100'
+      batch_size:
+        description: 'Gemini 요청 1번에 묶을 상품 수 (이미지가 토큰을 많이 먹어서 HS코드보다 작게)'
+        required: false
+        default: '4'
       max_batches:
         description: '최대 배치 반복 횟수 (대상이 없어지면 그 전에 종료)'
         required: false
-        default: '15'
+        default: '10'
       dry_run:
         description: '대상 상품만 출력하고 실제 판독은 하지 않음'
         required: false
@@ -63,8 +71,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
-          LIMIT="${{ github.event.inputs.limit || '15' }}"
-          MAX_BATCHES="${{ github.event.inputs.max_batches || '15' }}"
+          LIMIT="${{ github.event.inputs.limit || '100' }}"
+          BATCH_SIZE="${{ github.event.inputs.batch_size || '4' }}"
+          MAX_BATCHES="${{ github.event.inputs.max_batches || '10' }}"
           RUN_ID="${{ github.event.inputs.run_id }}"
           DRY_RUN="${{ github.event.inputs.dry_run }}"
 
@@ -75,7 +84,7 @@ jobs:
             ALL_RUNS="${{ github.event.inputs.all_runs }}"
           fi
 
-          ARGS="--limit=${LIMIT}"
+          ARGS="--limit=${LIMIT} --batch-size=${BATCH_SIZE}"
           if [ -n "$RUN_ID" ]; then
             ARGS="${ARGS} --run-id=${RUN_ID}"
           fi

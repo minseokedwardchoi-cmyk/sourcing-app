@@ -3831,6 +3831,29 @@ function HsCodeCell({ row }) {
   );
 }
 
+// 크롤링 히스토리(테스트 페이지) 전용 — product_sourcing_item(메인 표)이 아니라
+// hs_code_estimation 캐시 조회 결과일 뿐이라 여기서 수정 가능하게 만들면 안 된다
+// (HsCodeCell처럼 저장 시 product_type 기준으로 메인 표를 업데이트해버리면, 크롤링
+// 스냅샷 행의 product_type이 우연히 메인 표와 같을 때 엉뚱한 데이터를 덮어쓰게 됨).
+// 그래서 입력창 대신 값 표시 + 판정 근거(reason)/상태를 title 툴팁으로만 보여준다.
+function ReadOnlyHsCodeCell({ row }) {
+  if (!row.hs_code) {
+    const label = row.hs_code_status === "flagged_non_food_mismatch" ? "무관상품" : "미판정";
+    return <span style={{color:"#c2c8d1"}} title={row.hs_code_reason || ""}>{label}</span>;
+  }
+  const needsReview = row.hs_code_confidence && row.hs_code_confidence !== "high";
+  return (
+    <div style={{display:"flex", flexDirection:"column", gap:2}} title={row.hs_code_reason || ""}>
+      <span style={{fontSize:12}}>{row.hs_code}</span>
+      {needsReview && (
+        <span style={{fontSize:10, color:"#b45309"}}>
+          (검토 필요 · {row.hs_code_confidence})
+        </span>
+      )}
+    </div>
+  );
+}
+
 // 품목명(product_type) 원문 맨 앞에는 리서치 당시 기준으로 삼은 대표 제품의 브랜드명이
 // 붙어 있는 경우가 많다(예: "OLITALIA 엑스트라버진 올리브유"). 이 값은 실제 각 행의
 // brand_kr/brand_en과 무관한 참고용 라벨일 뿐이라, 품목명 열에서는 유형만 남기고 뗀다.
@@ -3920,7 +3943,7 @@ function productTypeDisplay(value) {
   return PRODUCT_TYPE_DISPLAY_OVERRIDES[value] || value;
 }
 
-function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isProductFirst = true, accentIndex = 0, coverage = null, highlight = false }) {
+function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isProductFirst = true, accentIndex = 0, coverage = null, highlight = false, readOnlyHsCode = false }) {
   const [expanded, setExpanded] = useState(false);
   const meta = RETAILER_META[row.retailer] || { emoji: "🛒", label: row.retailer_label || row.retailer };
   const rowBg = highlight ? "#f4f8ff" : (bandIndex % 2 === 1 ? "#f8fafc" : undefined);
@@ -3960,7 +3983,7 @@ function ProductSourcingTableRow({ row, isBrandFirst = true, bandIndex = 0, isPr
         <td><ClampCell>{row.origin || "-"}</ClampCell></td>
         <td><ProductSourcingRiskCell row={row}/></td>
         <td><span className={`badge ${statusBadgeClass(row.parallel_import)}`} title={parallelImportTitle(row)}>{parallelImportDisplay(row.parallel_import) || "정보없음"}</span></td>
-        <td onClick={e=>e.stopPropagation()}><HsCodeCell row={row}/></td>
+        <td onClick={e=>e.stopPropagation()}>{readOnlyHsCode ? <ReadOnlyHsCodeCell row={row}/> : <HsCodeCell row={row}/>}</td>
         <td style={{whiteSpace:"nowrap"}}><EstimatedCostCell row={row}/></td>
       </tr>
       {expanded && (
@@ -4148,6 +4171,7 @@ const PRODUCT_SOURCING_PAGE_SIZE = 50;
 function ProductSourcingDataTable({
   rows: allRows, loading, error, toolbarExtra, belowToolbar,
   showRecommendations = true, searchPlaceholder = "품목명, 브랜드, 상품명 검색...",
+  readOnlyHsCode = false,
 }) {
   const [search, setSearch] = useState("");
   const [colFilters, setColFilters] = useState({}); // { product_type, retailer_label, brand_kr }
@@ -4361,6 +4385,7 @@ function ProductSourcingDataTable({
                         bandIndex={e.bandIndex}
                         isProductFirst={e.isProductFirst}
                         accentIndex={e.accentIndex}
+                        readOnlyHsCode={readOnlyHsCode}
                         coverage={e.row.product_group_key ? productCoverageMap.get(e.row.product_group_key) : null}
                       />
                     </React.Fragment>
@@ -4550,9 +4575,10 @@ const RETAILER_LABEL_MAP_HISTORY = { amazon: "아마존", walmart: "월마트", 
 
 // 크롤링 스냅샷 1행(product_sourcing_crawl_snapshot_item, 크롤링 가능 필드만 있음)을
 // ProductSourcingDataTable이 기대하는 flat-row 모양(메인 표와 동일한 형태, product_sourcing_item
-// 기준)으로 매핑한다. 원산지/병행수입/리콜/품질/법적리스크/HS코드/관세 등 수작업 검증 필드는
-// 크롤링 데이터에 아예 없으므로 전부 null — 표에는 "-"로 표시되고, 리스크·병행수입 배지는
-// "정보없음"으로 뜬다(사용자 확인: 나중에 이 필드들도 채우는 방식을 별도로 구현할 예정).
+// 기준)으로 매핑한다. 병행수입 판정처럼 크롤링/자동화로 채울 방법이 아예 없는 필드만 null로
+// 남고(표에는 "-", 배지는 "정보없음"), 원산지/단량/HS코드/관세/착지원가는 백엔드가 조회
+// 시점에 캐시 테이블을 조인해서 채워준 값을 그대로 쓴다(HS_CODE_METHODOLOGY.md 및
+// 원산지판독/HS코드 자동화 파이프라인 참고).
 function mapCrawlSnapshotRowToFlatRow(row) {
   let retailerLabel = RETAILER_LABEL_MAP_HISTORY[row.retailer] || row.retailer;
   if (row.source_site === "aeon-jp") retailerLabel += " (일본)";
@@ -4569,8 +4595,11 @@ function mapCrawlSnapshotRowToFlatRow(row) {
     brand_en: row.brand,
     product_name_en: row.product_name_en,
     price_usd: row.price_usd,
-    origin: null,
-    unit: null,
+    // product_origin_verification 캐시 조인 결과 (verify_origin_gemini.py가 아직 그
+    // 상품을 판독 안 했으면 null).
+    origin: row.origin ?? null,
+    // product_name_en에서 저장 시점에 자동 추출된 값(unit_converter.extract_unit_from_product_name).
+    unit: row.unit ?? null,
     key_criteria_label: null,
     key_criteria_value: null,
     parallel_import: null,
@@ -4588,12 +4617,19 @@ function mapCrawlSnapshotRowToFlatRow(row) {
     image_url: row.image_url,
     brand_group_key: null,
     product_group_key: null,
-    hs_code: null,
-    hs_code_confidence: null,
-    tariff_rate_pct: null,
-    tariff_basis: null,
-    estimated_landed_cost_krw: null,
-    landed_cost_is_per_kg: null,
+    // hs_code_estimation 캐시 조인 결과 (백엔드가 조회 시점에 정규화된 영어상품명으로
+    // 찾아서 채워줌) — 아직 그 상품이 판정 안 됐으면 전부 null로 와서 "미판정"으로 표시된다.
+    // tariff_rate_pct 이하는 hs_code + unit(자동추출) + origin(캐시조인)이 다 갖춰진 행만
+    // product_sourcing_item과 동일한 로직으로 채워진다 — 셋 중 하나라도 없으면 null
+    // (EstimatedCostCell이 "추정불가"로 표시).
+    hs_code: row.hs_code ?? null,
+    hs_code_confidence: row.hs_code_confidence ?? null,
+    hs_code_reason: row.hs_code_reason ?? null,
+    hs_code_status: row.hs_code_status ?? null,
+    tariff_rate_pct: row.tariff_rate_pct ?? null,
+    tariff_basis: row.tariff_basis ?? null,
+    estimated_landed_cost_krw: row.estimated_landed_cost_krw ?? null,
+    landed_cost_is_per_kg: row.landed_cost_is_per_kg ?? null,
   };
 }
 
@@ -4658,6 +4694,7 @@ function ProductSourcingHistoryPage({ navigate }) {
               loading={detailLoading}
               error={detailError}
               showRecommendations={false}
+              readOnlyHsCode={true}
               toolbarExtra={
                 <>
                   <span style={{fontSize:13, color:"#6b7280"}}>회차</span>

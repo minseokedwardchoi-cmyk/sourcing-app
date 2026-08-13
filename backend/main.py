@@ -39,7 +39,7 @@ from database import get_db, engine, Base, AsyncSessionLocal
 from models import (
     ImportHistory, ProductSourcingItem, CrawlRunStatus,
     ProductSourcingCrawlRun, ProductSourcingCrawlSnapshotItem, ProductSourcingCrawlSession,
-    BrandVerification, ProductOriginVerification,
+    BrandVerification, ProductOriginVerification, HsCodeEstimation,
 )
 from schemas import (
     SkuHistoryResponse, SkuHistoryRow, PaginationMeta,
@@ -61,6 +61,7 @@ from schemas import (
     BrandVerificationKeysResponse, BrandVerificationUpsertRequest, BrandVerificationUpsertResponse,
     ProductOriginVerificationCheckRequest, ProductOriginVerificationCheckResponse,
     ProductOriginVerificationUpsertRequest, ProductOriginVerificationUpsertResponse,
+    HsCodeEstimationKeysResponse, HsCodeEstimationUpsertRequest, HsCodeEstimationUpsertResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
@@ -70,8 +71,10 @@ from product_sourcing_exporter import build_workbook_skeleton, add_flat_sheet, e
 from tariff_rate_importer import import_tariff_rates
 from hs_code_importer import import_hs_codes
 from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
+from unit_converter import extract_unit_from_product_name
 from country_utils import match_all_countries_in_text_broad
 from brand_key_normalize import normalize_brand_key
+from product_name_key_normalize import normalize_product_name_key
 from mfds_pricing import estimate_purchase_price, resolve_mfds_price, resolve_origin_country
 from mfds_manual_overrides import get_mfds_item
 from mfds_item_matcher import match_product_to_mfds_item
@@ -2248,6 +2251,10 @@ async def upload_product_sourcing_crawl_snapshot(
                     "rank": row.rank,
                     "brand": row.brand,
                     "product_name_en": row.product_name_en,
+                    # 크롤러가 단량을 따로 안 보내줘도(현재 크롤러들은 안 보냄), 저장 시점에
+                    # product_name_en 원문에서 직접 뽑아 채운다 — product_sourcing_item처럼
+                    # 사람이 입력한 "단량" 컬럼이 없는 크롤링 스냅샷의 유일한 소스.
+                    "unit": extract_unit_from_product_name(row.product_name_en),
                     "price_usd": row.price_usd,
                     "rating": row.rating,
                     "review_count": row.review_count,
@@ -2316,18 +2323,97 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
         )).scalars().all()
         verification_by_key = {bv.brand_key: bv for bv in bv_rows}
 
+    # hs_code_estimation 캐시 조인 — hs_code_estimate_gemini.py/backfill_hs_code_estimation.py가
+    # 쓰는 것과 정확히 같은 키(normalize_product_name_key(product_name_en))로 조회한다. 브랜드
+    # 검증과 마찬가지로 조회 시점 조인이라 새로 판정되는 상품도 별도 백필 없이 바로 반영된다.
+    name_keys = {normalize_product_name_key(item.product_name_en) for item in items if item.product_name_en}
+    name_keys.discard("")
+    hs_by_key = {}
+    if name_keys:
+        hs_rows = (await db.execute(
+            select(HsCodeEstimation).where(HsCodeEstimation.name_key.in_(name_keys))
+        )).scalars().all()
+        hs_by_key = {h.name_key: h for h in hs_rows}
+
+    # product_origin_verification 캐시 조인 — verify_origin_gemini.py가 쓰는 것과 정확히
+    # 같은 키(url_hash)로 조회한다. origin_text가 이미 "미국"/"이탈리아(추정)"처럼
+    # product_sourcing_item.origin과 같은 표시 형식이라 그대로 쓰면 된다.
+    url_hashes = {_url_hash(item.url) for item in items if item.url}
+    origin_by_hash = {}
+    if url_hashes:
+        ov_rows = (await db.execute(
+            select(ProductOriginVerification).where(ProductOriginVerification.url_hash.in_(url_hashes))
+        )).scalars().all()
+        origin_by_hash = {ov.url_hash: ov for ov in ov_rows}
+
+    hs_codes = sorted({_normalize_hs_code(h.hs_code) for h in hs_by_key.values() if h.hs_code} - {None})
+    tariff_by_hs_code: dict[str, list[dict]] = {}
+    if hs_codes:
+        tr_r = await db.execute(text("""
+            SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
+            FROM tariff_rate
+            WHERE hs_code = ANY(:codes)
+        """), {"codes": hs_codes})
+        for tr in tr_r.mappings().all():
+            tariff_by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
+
+    # hs_code + unit(자동추출) + origin(캐시조인)이 다 갖춰진 행만 product_sourcing_item과
+    # 동일한 MFDS 평균단가 기반 매입원가 로직(_recompute_and_store_cost_estimates 참고)으로
+    # 착지원가까지 계산한다 — 그 함수처럼 DB 컬럼에 캐싱해두는 게 아니라 조회 시점에 즉석
+    # 계산이라, 크롤링 스냅샷 데이터 양(회차당 최대 몇천 행)에서는 매번 계산해도 무리 없다.
+    item_names_r = await db.execute(text("SELECT DISTINCT item_name FROM country_item_amount"))
+    all_mfds_item_names = [r[0] for r in item_names_r.all()]
+    price_lookup_r = await db.execute(text(
+        "SELECT country, item_name, amount_usd_k, weight_ton FROM country_item_amount"
+    ))
+    mfds_price_lookup = {
+        (r["country"], r["item_name"]): (float(r["amount_usd_k"]), float(r["weight_ton"]) if r["weight_ton"] else None)
+        for r in price_lookup_r.mappings().all()
+    }
+
     def _row_to_schema(item):
         bv = verification_by_key.get(normalize_brand_key(item.brand)) if item.brand else None
+        hs = hs_by_key.get(normalize_product_name_key(item.product_name_en)) if item.product_name_en else None
+        ov = origin_by_hash.get(_url_hash(item.url)) if item.url else None
+        origin_text = ov.origin_text if (ov and ov.origin_text) else None
         image_urls = None
         if item.image_urls:
             try:
                 image_urls = json.loads(item.image_urls)
             except Exception:
                 image_urls = None
+
+        tariff_rate_pct = tariff_basis = None
+        estimated_landed_cost_krw = None
+        landed_cost_is_per_kg = None
+        if hs and hs.hs_code:
+            norm = _normalize_hs_code(hs.hs_code)
+            tariff_rows = tariff_by_hs_code.get(norm) if norm else None
+            price_estimate = estimate_purchase_price(
+                item.product_type, origin_text, item.unit, all_mfds_item_names, mfds_price_lookup,
+            )
+            tariff = None
+            if tariff_rows:
+                origin_country = (
+                    price_estimate.country if price_estimate
+                    else resolve_origin_country(item.product_type or "", origin_text, all_mfds_item_names, mfds_price_lookup)
+                )
+                tariff = resolve_tariff_rate(tariff_rows, origin_country)
+            if tariff:
+                tariff_rate_pct = tariff.rate_pct
+                tariff_basis = tariff.basis_label
+                cost = estimate_landed_cost_krw(
+                    price_estimate.price_usd if price_estimate else None, tariff,
+                )
+                if cost is not None:
+                    estimated_landed_cost_krw = cost
+                    landed_cost_is_per_kg = price_estimate.is_per_kg if price_estimate else None
+
         return ProductSourcingCrawlSnapshotRow(
             id=item.id, category=item.category, product_type=item.product_type,
             query_used=item.query_used, retailer=item.retailer, source_site=item.source_site,
             rank=item.rank, brand=item.brand, product_name_en=item.product_name_en,
+            unit=item.unit,
             price_usd=item.price_usd, rating=item.rating, review_count=item.review_count,
             url=item.url, image_url=item.image_url, image_urls=image_urls,
             recall_status=bv.recall_status if bv else None,
@@ -2335,6 +2421,15 @@ async def get_product_sourcing_crawl_run(run_id: int, db: AsyncSession = Depends
             legal_risk_status=bv.legal_risk_status if bv else None,
             five_year_issue=bv.five_year_issue if bv else None,
             brand_verification_notes=bv.notes if bv else None,
+            hs_code=hs.hs_code if hs else None,
+            hs_code_confidence=hs.confidence if hs else None,
+            hs_code_reason=hs.reason if hs else None,
+            hs_code_status=hs.status if hs else None,
+            origin=origin_text,
+            tariff_rate_pct=tariff_rate_pct,
+            tariff_basis=tariff_basis,
+            estimated_landed_cost_krw=estimated_landed_cost_krw,
+            landed_cost_is_per_kg=landed_cost_is_per_kg,
         )
 
     return ProductSourcingCrawlRunDetailResponse(
@@ -2558,6 +2653,64 @@ async def upsert_product_origin_verification(
             count += 1
         await db.commit()
         return ProductOriginVerificationUpsertResponse(upserted=count)
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+# ─── 3-4-4. HS코드 추정 캐시 (hs_code_estimation) ──────────────────────────
+# 브랜드검증/원산지판독과 동일한 이유로(CI 러너가 DB에 직접 안 붙음) 이 두 엔드포인트로만
+# 접근한다. hs_code_estimate_gemini.py, backfill_hs_code_estimation.py 참고. 상품 단위
+# 캐시라는 점은 원산지판독과 같지만 키는 URL이 아니라 정규화된 영어상품명(name_key) —
+# HS코드는 브랜드나 유통사가 아니라 "그 제품이 실제로 뭔지"에 붙는 속성이라
+# HS_CODE_METHODOLOGY.md의 "영어상품명이 같으면 재사용" 원칙을 그대로 조회 키로 쓴다.
+
+@app.get("/api/hs-code-estimation/keys", response_model=HsCodeEstimationKeysResponse)
+async def list_hs_code_estimation_keys(db: AsyncSession = Depends(get_db)):
+    r = await db.execute(select(HsCodeEstimation.name_key))
+    return HsCodeEstimationKeysResponse(name_keys=list(r.scalars().all()))
+
+
+@app.post("/api/hs-code-estimation/upsert", response_model=HsCodeEstimationUpsertResponse)
+async def upsert_hs_code_estimation(
+    payload: HsCodeEstimationUpsertRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        now = datetime.utcnow()
+        count = 0
+        for item in payload.items:
+            await db.execute(text("""
+                INSERT INTO hs_code_estimation
+                    (name_key, product_name_en, product_type_hint, hs_code, confidence,
+                     reason, evidence_url, status, estimation_source, estimation_model, verified_at)
+                VALUES
+                    (:name_key, :product_name_en, :product_type_hint, :hs_code, :confidence,
+                     :reason, :evidence_url, :status, :source, :model, :verified_at)
+                ON CONFLICT (name_key) DO UPDATE SET
+                    product_name_en = EXCLUDED.product_name_en,
+                    product_type_hint = EXCLUDED.product_type_hint,
+                    hs_code = EXCLUDED.hs_code,
+                    confidence = EXCLUDED.confidence,
+                    reason = EXCLUDED.reason,
+                    evidence_url = EXCLUDED.evidence_url,
+                    status = EXCLUDED.status,
+                    estimation_source = EXCLUDED.estimation_source,
+                    estimation_model = EXCLUDED.estimation_model,
+                    verified_at = EXCLUDED.verified_at
+            """), {
+                "name_key": item.name_key, "product_name_en": item.product_name_en,
+                "product_type_hint": item.product_type_hint, "hs_code": item.hs_code,
+                "confidence": item.confidence, "reason": item.reason,
+                "evidence_url": item.evidence_url, "status": item.status,
+                "source": item.estimation_source, "model": item.estimation_model,
+                "verified_at": now,
+            })
+            count += 1
+        await db.commit()
+        return HsCodeEstimationUpsertResponse(upserted=count)
     except Exception as e:
         await db.rollback()
         import traceback

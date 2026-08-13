@@ -1,0 +1,144 @@
+name: HS코드 추정 (임베딩 후보검색 + Gemini)
+
+# 크롤링 체인의 두 번째 단계: crawl_walmart_samsclub.yml → crawl_amazon_aeon.yml →
+# verify_origin.yml(원산지판독) → 이 워크플로 → verify_brands.yml(브랜드검증, 맨 마지막)
+# 순서로 직렬 체이닝된다(2026-08 개편 — 예전엔 세 워크플로가 크롤링 완료 시점에 전부
+# 병렬로 떴었는데, 브랜드검증만 배치 처리가 안 돼서(그라운딩이 브랜드별로 따로 필요)
+# 무료 티어 하루 한도(250 RPD)에 걸리면 며칠씩 걸릴 수 있다 — 그래서 배치 가능한
+# 원산지판독/HS코드 추정을 먼저 끝내 "몇 시간 내로 HS코드·원산지·착지원가까지는 다 채워진
+# 상태"를 만들고, 오래 걸릴 수 있는 브랜드검증만 뒤에서 계속 돌게 분리했다).
+# 크롤링 이력(product_sourcing_crawl_snapshot_item)에 새로 나타난 상품을 판정해서
+# 백엔드의 hs_code_estimation 캐시에 upsert한다 (backend/hs_code_estimate_gemini.py,
+# backend/HS_CODE_METHODOLOGY.md 참고).
+#
+# 원산지판독과 같은 이유로 workflow_run 자동 트리거 시에는 항상 --all-runs로 돌린다(월마트/
+# 샘스클럽 회차를 놓치지 않기 위함, 이미 캐시된 상품은 스킵되니 매번 전체를 다시 훑어도 비용
+# 문제 없음). workflow_dispatch(수동 실행)일 때만 all_runs 입력값을 따른다.
+#
+# 배치 처리(--batch-size) + gemini-2.5-flash-lite 기본 모델로 무료 티어 RPD(1,000/일,
+# flash의 250/일보다 4배 여유)를 절약한다 — hs_code_estimate_gemini.py 상단 설명 참고.
+#
+# HSK 참조표 임베딩 벡터(11,327개 HS10코드)는 관세청이 연 1회만 갱신하므로 actions/cache로
+# 캐싱해서 매 회차 재계산(몇 분 소요)을 피한다 — reference_data/hsk_reference_20260101.csv가
+# 바뀌면(연도 갱신) 캐시 키도 같이 바뀌어 자동으로 재계산된다.
+#
+# product_sourcing_item(메인페이지, 수작업 검증 데이터 포함)은 이 워크플로가 전혀 건드리지
+# 않는다 — 상품 단위 캐시만 채운다. 다른 크롤링 워크플로와 동일하게 DATABASE_URL로 Postgres에
+# 직접 붙지 않고 백엔드 HTTP API만 호출한다.
+
+on:
+  workflow_run:
+    workflows: ["원산지 판독 (Gemini 비전)"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: '특정 크롤링 회차 ID (비우면 최신 회차)'
+        required: false
+        default: ''
+      all_runs:
+        description: '모든 회차를 통틀어 대상 상품 추출 (최초 1회 소급용)'
+        required: false
+        default: 'false'
+      limit:
+        description: '배치 1회당 판정할 상품 수'
+        required: false
+        default: '300'
+      batch_size:
+        description: 'Gemini 요청 1번에 묶을 상품 수'
+        required: false
+        default: '15'
+      max_batches:
+        description: '최대 배치 반복 횟수 (대상이 없어지면 그 전에 종료)'
+        required: false
+        default: '5'
+      dry_run:
+        description: '대상 상품만 출력하고 실제 판정은 하지 않음'
+        required: false
+        default: 'false'
+
+jobs:
+  estimate:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: pip install -r backend/requirements-hs-code-estimate.txt
+
+      - name: HSK 참조벡터 캐시 복원
+        uses: actions/cache@v4
+        with:
+          path: |
+            backend/reference_data/hsk_reference_vectors.npy
+            backend/reference_data/hsk_reference_codes.csv
+          key: hsk-reference-vectors-${{ hashFiles('backend/reference_data/hsk_reference_20260101.csv') }}
+
+      - name: HS코드 판정 (대상이 없어질 때까지 배치 반복)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          LIMIT="${{ github.event.inputs.limit || '300' }}"
+          BATCH_SIZE="${{ github.event.inputs.batch_size || '15' }}"
+          MAX_BATCHES="${{ github.event.inputs.max_batches || '5' }}"
+          RUN_ID="${{ github.event.inputs.run_id }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # 크롤링 체인 자동 실행 — 월마트/샘스클럽 회차를 놓치지 않도록 항상 전체 회차 대상
+            ALL_RUNS="true"
+          else
+            ALL_RUNS="${{ github.event.inputs.all_runs }}"
+          fi
+
+          ARGS="--limit=${LIMIT} --batch-size=${BATCH_SIZE}"
+          if [ -n "$RUN_ID" ]; then
+            ARGS="${ARGS} --run-id=${RUN_ID}"
+          fi
+          if [ "$ALL_RUNS" = "true" ]; then
+            ARGS="${ARGS} --all-runs"
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS="${ARGS} --dry-run"
+          fi
+
+          cd backend
+          FAILURES=0
+          for i in $(seq 1 "$MAX_BATCHES"); do
+            echo "=== 배치 $i / $MAX_BATCHES (${ARGS}) ==="
+            set +e
+            out=$(python hs_code_estimate_gemini.py ${ARGS})
+            status=$?
+            set -e
+            echo "$out"
+
+            if [ "$status" -ne 0 ]; then
+              FAILURES=$((FAILURES + 1))
+              echo "배치 $i 실패 (누적 실패 ${FAILURES}회) — 다음 배치로 계속 진행"
+              if [ "$FAILURES" -ge 3 ]; then
+                echo "연속/누적 실패가 너무 많음 — 중단"
+                exit 1
+              fi
+              continue
+            fi
+
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "dry-run 모드 — 1회만 실행하고 종료"
+              break
+            fi
+
+            if echo "$out" | grep -q "미판정 0개"; then
+              echo "남은 미판정 상품 없음 — 종료"
+              break
+            fi
+          done
+          # actions/cache@v4는 cache miss였을 경우 post-step에서 위 path를 자동으로
+          # 저장한다(캐시 hit면 저장 스킵) — 별도 save 스텝 불필요.

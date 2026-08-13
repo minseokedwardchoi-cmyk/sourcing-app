@@ -344,6 +344,9 @@ class ProductSourcingCrawlRunListResponse(BaseModel):
 
 class ProductSourcingCrawlSnapshotRow(ProductSourcingCrawlSnapshotRowIn):
     id: int
+    # product_name_en에서 저장 시점에 자동 추출된 단량 (unit_converter.extract_unit_from_product_name
+    # 참고) — 크롤러가 보내는 입력값이 아니라 서버가 채우는 값이라 Row(출력) 쪽에만 있다.
+    unit: Optional[str] = Field(None)
     # brand_verification 캐시 조인 결과 (크롤링 당시 저장되는 값이 아니라 조회 시점에 brand로
     # 찾아서 채움 — verify_brands.yml이 아직 그 브랜드를 검증 안 했으면 전부 None).
     recall_status:        Optional[str] = Field(None)
@@ -351,6 +354,23 @@ class ProductSourcingCrawlSnapshotRow(ProductSourcingCrawlSnapshotRowIn):
     legal_risk_status:    Optional[str] = Field(None)
     five_year_issue:      Optional[str] = Field(None)
     brand_verification_notes: Optional[str] = Field(None)
+    # hs_code_estimation 캐시 조인 결과 (조회 시점에 정규화된 영어상품명으로 찾아서 채움 —
+    # hs_code_estimate_gemini.py가 아직 그 상품을 판정 안 했으면 전부 None).
+    hs_code:            Optional[str] = Field(None)
+    hs_code_confidence: Optional[str] = Field(None)
+    hs_code_reason:      Optional[str] = Field(None)
+    hs_code_status:      Optional[str] = Field(None)
+    # product_origin_verification 캐시 조인 결과 (조회 시점에 url_hash로 찾아서 채움 —
+    # verify_origin_gemini.py가 아직 그 상품을 판독 안 했으면 None).
+    origin:              Optional[str] = Field(None)
+    # hs_code + unit(자동추출) + origin(캐시조인) 세 가지가 다 갖춰진 행만 product_sourcing_item과
+    # 동일한 로직(cost_estimator/mfds_pricing)으로 관세율/착지원가를 계산해서 채운다 —
+    # 셋 중 하나라도 없으면 null(product_sourcing_item의 EstimatedCostCell과 동일하게
+    # "추정불가"로 표시됨).
+    tariff_rate_pct:      Optional[float] = Field(None)
+    tariff_basis:         Optional[str]   = Field(None)
+    estimated_landed_cost_krw: Optional[float] = Field(None)
+    landed_cost_is_per_kg:    Optional[bool]  = Field(None)
 
 
 class ProductSourcingCrawlRunDetailResponse(BaseModel):
@@ -431,6 +451,31 @@ class ProductOriginVerificationUpsertRequest(BaseModel):
 
 
 class ProductOriginVerificationUpsertResponse(BaseModel):
+    upserted: int
+
+
+class HsCodeEstimationKeysResponse(BaseModel):
+    name_keys: list[str] = Field(default_factory=list, description="hs_code_estimation에 이미 존재하는 name_key 전체 목록 (스킵 대상 판단용)")
+
+
+class HsCodeEstimationUpsertItem(BaseModel):
+    name_key:           str             = Field(..., description="정규화된 영어상품명 키 (product_name_key_normalize.normalize_product_name_key 결과)")
+    product_name_en:     Optional[str]   = Field(None, description="판정에 사용한 영어상품명 원문")
+    product_type_hint:   Optional[str]   = Field(None, description="판정 당시 품목유형 (참고용)")
+    hs_code:             Optional[str]   = Field(None, description="추정 HS코드 10자리 (무관상품이면 비움)")
+    confidence:          Optional[str]   = Field(None, description="high/medium/very_low")
+    reason:              Optional[str]   = Field(None)
+    evidence_url:         Optional[str]   = Field(None)
+    status:               Optional[str]   = Field(None, description="researched_v2_direct/flagged_non_food_mismatch/needs_manual_review 등")
+    estimation_source:   Optional[str]   = Field(None, description="seed_hs_final_7397 / gemini_estimated")
+    estimation_model:    Optional[str]   = Field(None)
+
+
+class HsCodeEstimationUpsertRequest(BaseModel):
+    items: list[HsCodeEstimationUpsertItem] = Field(default_factory=list)
+
+
+class HsCodeEstimationUpsertResponse(BaseModel):
     upserted: int
 
 
