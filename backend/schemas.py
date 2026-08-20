@@ -541,6 +541,20 @@ class HsCodeUploadResponse(BaseModel):
     unmatched_samples:       list[HsCodeUnmatchedRow] = Field(default_factory=list, description="skipped_unmatched 상세 목록 (최대 200개)")
 
 
+class ImportHistoryHsCodeUnmatchedRow(BaseModel):
+    sku_name: str
+    hs_code:  str
+    reason:   str = Field(..., description="no_matching_db_row")
+
+
+class ImportHistoryHsCodeUploadResponse(BaseModel):
+    total_rows:              int = Field(..., description="파일 내 SKU명+hs_code가 채워진 행 수")
+    updated:                 int = Field(..., description="실제로 DB에 반영된 행 수(같은 SKU명의 여러 행 포함)")
+    skipped_low_confidence:  int = Field(..., description="low/very_low 신뢰도라 의도적으로 반영 안 한 행 수")
+    skipped_unmatched:       int = Field(..., description="DB에 매칭되는 sku_name이 없어 반영 못한 행 수")
+    unmatched_samples:       list[ImportHistoryHsCodeUnmatchedRow] = Field(default_factory=list, description="skipped_unmatched 상세 목록 (최대 200개)")
+
+
 # ─── 공장별 보기 페이지 ───────────────────────────────────────────────────────
 class FactoryViewRow(BaseModel):
     category:      Optional[str]  = Field(None)
