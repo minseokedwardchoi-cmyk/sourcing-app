@@ -5,7 +5,12 @@ scripts/upload_product_sourcing.py
 백엔드의 /api/upload-product-sourcing 엔드포인트로 업로드한다.
 
 이 엔드포인트는 업로드 시마다 product_sourcing_item 테이블을 통째로 비우고 새로
-채우므로, 리서치 파일이 갱신될 때마다 이 스크립트만 다시 실행하면 된다.
+채우므로, 리서치 파일이 갱신될 때마다 이 스크립트만 다시 실행하면 된다. 기존
+brand_group_key/product_group_key(유통사 간 동일 제품 매칭)는 동일 상품 행에
+한해 자동으로 이어붙지만, 새로 등장한 상품은 그룹핑이 비어있는 채로 남는다 —
+업로드 후 GitHub Actions "유통사 간 동일 제품 매칭 (Gemini)" 워크플로(또는
+backend/match_product_groups_gemini.py)를 한 번 돌려서 채워야 화면에서도
+새 상품이 같은 브랜드/제품으로 묶여 보인다.
 
 사용법:
   python3 scripts/upload_product_sourcing.py 파일경로.xlsx

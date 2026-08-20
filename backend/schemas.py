@@ -259,8 +259,9 @@ class ProductSourcingSearchResponse(BaseModel):
 
 
 class ProductSourcingUploadResponse(BaseModel):
-    inserted:           int
-    product_type_count: int
+    inserted:              int
+    product_type_count:    int
+    group_keys_restored:   int = Field(0, description="재업로드 전 이미 채워져 있던 brand_group_key/product_group_key 중, 동일 상품(품목유형+유통사+브랜드명+상품명+단량 일치)에 그대로 복원된 행 수")
 
 
 class ProductSourcingFlatRow(BaseModel):
@@ -427,6 +428,45 @@ class BrandVerificationUpsertRequest(BaseModel):
 
 class BrandVerificationUpsertResponse(BaseModel):
     upserted: int
+
+
+class ProductGroupKeyPendingTypesResponse(BaseModel):
+    product_types: list[str] = Field(default_factory=list, description="brand_group_key가 NULL인 행이 하나라도 있는 product_type 목록 (미매칭 품목)")
+
+
+class ProductGroupKeyRow(BaseModel):
+    id:                 int
+    retailer:           str
+    rank:               int
+    brand_kr:           Optional[str]  = Field(None)
+    brand_en:           Optional[str]  = Field(None)
+    product_name_en:    Optional[str]  = Field(None)
+    unit:               Optional[str]  = Field(None)
+    brand_group_key:    Optional[str]  = Field(None, description="이미 채워져 있으면 그대로(재사용/스팟체크용), NULL이면 미매칭")
+    product_group_key:  Optional[str]  = Field(None)
+
+
+class ProductGroupKeyRowsResponse(BaseModel):
+    product_type: str
+    rows:          list[ProductGroupKeyRow] = Field(default_factory=list)
+
+
+class ProductGroupKeyVocabResponse(BaseModel):
+    brand_group_keys: list[str] = Field(default_factory=list, description="다른 품목유형에서 이미 쓰인 brand_group_key 전체 (동일 브랜드가 카테고리마다 다른 키로 갈라지지 않도록 재사용 대상)")
+
+
+class ProductGroupKeyUpsertItem(BaseModel):
+    id:                 int
+    brand_group_key:    str = Field(..., description="정규화된 브랜드 키 (영문 소문자 + 언더스코어)")
+    product_group_key:  str = Field(..., description="brand_group_key + 라인/등급 구분")
+
+
+class ProductGroupKeyUpsertRequest(BaseModel):
+    items: list[ProductGroupKeyUpsertItem] = Field(default_factory=list)
+
+
+class ProductGroupKeyUpsertResponse(BaseModel):
+    updated: int
 
 
 class ProductOriginVerificationCheckRequest(BaseModel):

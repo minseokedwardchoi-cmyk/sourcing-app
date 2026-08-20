@@ -1,0 +1,85 @@
+name: 유통사 간 동일 제품 매칭 (Gemini)
+
+# scripts/upload_product_sourcing.py로 리서치 엑셀을 재업로드하면
+# product_sourcing_importer.import_product_sourcing()이 기존 brand_group_key/
+# product_group_key를 최대한 이어붙이지만, 새로 등장한 상품 행은 NULL로
+# 남는다. 이 워크플로는 그 NULL 행이 남은 품목유형만 골라 Gemini로 재매칭한다
+# (backend/match_product_groups_gemini.py 참고). 엑셀 업로드 자체가 수작업
+# 트리거라 이 워크플로도 수동 실행(workflow_dispatch)만 지원한다.
+#
+# verify_brands.yml과 동일하게, 대상이 없어질 때까지 배치를 반복한다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: '배치 1회당 처리할 품목유형 수'
+        required: false
+        default: '5'
+      max_batches:
+        description: '최대 배치 반복 횟수 (대상이 없어지면 그 전에 종료)'
+        required: false
+        default: '20'
+      dry_run:
+        description: '대상 품목유형만 출력하고 실제 매칭은 하지 않음'
+        required: false
+        default: 'false'
+
+jobs:
+  match:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 의존성 설치
+        run: pip install -r backend/requirements-product-match.txt
+
+      - name: 제품 그룹핑 매칭 (대상이 없어질 때까지 배치 반복)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          LIMIT="${{ github.event.inputs.limit || '5' }}"
+          MAX_BATCHES="${{ github.event.inputs.max_batches || '20' }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+
+          ARGS="--limit=${LIMIT}"
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS="${ARGS} --dry-run"
+          fi
+
+          FAILURES=0
+          for i in $(seq 1 "$MAX_BATCHES"); do
+            echo "=== 배치 $i / $MAX_BATCHES (${ARGS}) ==="
+            set +e
+            out=$(python backend/match_product_groups_gemini.py ${ARGS})
+            status=$?
+            set -e
+            echo "$out"
+
+            if [ "$status" -ne 0 ]; then
+              FAILURES=$((FAILURES + 1))
+              echo "배치 $i 실패 (누적 실패 ${FAILURES}회) — 다음 배치로 계속 진행"
+              if [ "$FAILURES" -ge 3 ]; then
+                echo "연속/누적 실패가 너무 많음 — 중단"
+                exit 1
+              fi
+              continue
+            fi
+
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "dry-run 모드 — 1회만 실행하고 종료"
+              break
+            fi
+
+            if echo "$out" | grep -q "미매칭 품목유형 없음"; then
+              echo "남은 미매칭 품목유형 없음 — 종료"
+              break
+            fi
+          done

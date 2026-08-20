@@ -64,6 +64,8 @@ from schemas import (
     ProductOriginVerificationCheckRequest, ProductOriginVerificationCheckResponse,
     ProductOriginVerificationUpsertRequest, ProductOriginVerificationUpsertResponse,
     HsCodeEstimationKeysResponse, HsCodeEstimationUpsertRequest, HsCodeEstimationUpsertResponse,
+    ProductGroupKeyPendingTypesResponse, ProductGroupKeyRowsResponse, ProductGroupKeyRow,
+    ProductGroupKeyVocabResponse, ProductGroupKeyUpsertRequest, ProductGroupKeyUpsertResponse,
 )
 from importer import import_excel, COMPETITOR_MAP, competitor_ilike_clause
 from contact_importer import import_contacts
@@ -2206,6 +2208,69 @@ async def recompute_product_sourcing_costs(db: AsyncSession = Depends(get_db)):
 async def get_product_sourcing_types(db: AsyncSession = Depends(get_db)):
     r = await db.execute(text("SELECT DISTINCT product_type FROM product_sourcing_item ORDER BY product_type"))
     return ProductSourcingTypesResponse(types=[row[0] for row in r.fetchall()])
+
+
+# ─── 3-3-1. 브랜드/제품 그룹핑 키 (brand_group_key/product_group_key) ─────────
+# 화면의 브랜드→제품→유통사 정렬(위 get_all_product_sourcing 주석 참고)에 쓰이는
+# 그룹핑 키는 matching_prompt.md 절차(유통사 간 동일 제품 판단 — 브랜드 언어 표기
+# 차이, 포맷/라인 구분, 번들 판별 등 의미적 판단)로 채워지는데, 엑셀 재업로드 시
+# import_product_sourcing()이 이전 값을 최대한 이어붙이되 새로 등장한 상품은
+# NULL로 남긴다. 이 세 엔드포인트는 match_product_groups_gemini.py가 그 NULL
+# 행만 골라 Gemini로 매칭한 뒤 다시 채워넣는 용도 — 다른 크롤링/검증 스크립트와
+# 동일하게 DATABASE_URL 직접 접속 대신 백엔드 HTTP API만 경유한다.
+
+@app.get("/api/product-sourcing/group-keys/pending-types", response_model=ProductGroupKeyPendingTypesResponse)
+async def get_product_group_key_pending_types(db: AsyncSession = Depends(get_db)):
+    r = await db.execute(text(
+        "SELECT DISTINCT product_type FROM product_sourcing_item "
+        "WHERE brand_group_key IS NULL ORDER BY product_type"
+    ))
+    return ProductGroupKeyPendingTypesResponse(product_types=[row[0] for row in r.fetchall()])
+
+
+@app.get("/api/product-sourcing/group-keys/rows", response_model=ProductGroupKeyRowsResponse)
+async def get_product_group_key_rows(product_type: str, db: AsyncSession = Depends(get_db)):
+    """해당 품목유형의 전체 행(원칙 1: 전수 스캔용) — 이미 그룹핑된 행도 함께
+    내려줘서, 새로 등장한 상품을 기존 브랜드/제품 그룹에 합칠지 판단할 수 있게 한다."""
+    r = await db.execute(text("""
+        SELECT id, retailer, rank, brand_kr, brand_en, product_name_en, unit,
+               brand_group_key, product_group_key
+        FROM product_sourcing_item
+        WHERE product_type = :pt
+        ORDER BY retailer, rank
+    """), {"pt": product_type})
+    rows = [ProductGroupKeyRow(**dict(row)) for row in r.mappings().all()]
+    return ProductGroupKeyRowsResponse(product_type=product_type, rows=rows)
+
+
+@app.get("/api/product-sourcing/group-keys/vocab", response_model=ProductGroupKeyVocabResponse)
+async def get_product_group_key_vocab(db: AsyncSession = Depends(get_db)):
+    r = await db.execute(text(
+        "SELECT DISTINCT brand_group_key FROM product_sourcing_item "
+        "WHERE brand_group_key IS NOT NULL ORDER BY brand_group_key"
+    ))
+    return ProductGroupKeyVocabResponse(brand_group_keys=[row[0] for row in r.fetchall()])
+
+
+@app.post("/api/product-sourcing/group-keys/upsert", response_model=ProductGroupKeyUpsertResponse)
+async def upsert_product_group_keys(
+    payload: ProductGroupKeyUpsertRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        count = 0
+        for item in payload.items:
+            r = await db.execute(text(
+                "UPDATE product_sourcing_item SET brand_group_key = :bg, product_group_key = :pg WHERE id = :id"
+            ), {"bg": item.brand_group_key, "pg": item.product_group_key, "id": item.id})
+            count += r.rowcount
+        await db.commit()
+        return ProductGroupKeyUpsertResponse(updated=count)
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 
 # ─── 3-4-1. 아마존/이온몰 자동 크롤링 이력 (product_sourcing_item과는 완전히 별개 테이블) ──

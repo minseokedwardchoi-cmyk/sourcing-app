@@ -354,21 +354,61 @@ async def _ensure_image_columns(db: AsyncSession) -> None:
             await db.rollback()
 
 
+def _group_key_identity(rec: dict) -> tuple:
+    """brand_group_key/product_group_key를 재업로드 사이에 이어붙이기 위한 식별
+    키. 이 테이블에 자체 PK나 소스 고유 ID가 없어(엑셀 리서치가 매번 통째로
+    재적재되는 구조), (품목유형, 유통사, 브랜드한글명, 영문상품명, 단량)이
+    이전 회차와 이번 회차에서 동일하면 "같은 상품 행"으로 간주한다. 엑셀에서
+    상품명/단량 표기가 살짝 바뀌면 매칭이 끊겨 NULL로 남는데, 이건 놓치는
+    것보다 안전한 쪽(브랜드_key_normalize.py와 동일한 트레이드오프)이다."""
+    return (
+        rec.get("product_type"), rec.get("retailer"), rec.get("brand_kr"),
+        rec.get("product_name_en"), rec.get("unit"),
+    )
+
+
 async def import_product_sourcing(file_bytes: bytes, db: AsyncSession) -> dict:
     """Excel(카드 시트 + raw 시트) → product_sourcing_item 테이블 전체 재적재.
 
     품목/유통사 구성이 매번 파일 전체를 대체하는 성격의 리서치 자료라, 증분
     업데이트 대신 매 업로드마다 테이블을 비우고 새로 채운다(재수입해도 중복이
     쌓이지 않도록).
+
+    brand_group_key/product_group_key(매칭_prompt.md 절차로 수작업/Gemini
+    자동화로 채워온 유통사 간 동일제품 그룹핑)는 이 테이블 자체가 재적재되는
+    한 여기서 만든 값이 아니면 통째로 사라진다 — 그래서 삭제 전에 기존 값을
+    (품목유형, 유통사, 브랜드한글명, 영문상품명, 단량) 조합으로 스냅샷해두고,
+    새로 들어오는 행 중 같은 조합이면 그대로 이어붙인다. 조합이 안 맞는 행
+    (완전히 새로 등장한 상품, 또는 표기가 바뀐 기존 상품)은 NULL로 남고,
+    match_product_groups_gemini.py가 이후 배치로 채운다.
     """
     records = build_records(file_bytes)
 
     await _ensure_image_columns(db)
+
+    existing = await db.execute(text("""
+        SELECT product_type, retailer, brand_kr, product_name_en, unit,
+               brand_group_key, product_group_key
+        FROM product_sourcing_item
+        WHERE brand_group_key IS NOT NULL
+    """))
+    key_by_identity: dict[tuple, tuple[str, str]] = {}
+    for row in existing.fetchall():
+        identity = (row.product_type, row.retailer, row.brand_kr, row.product_name_en, row.unit)
+        key_by_identity[identity] = (row.brand_group_key, row.product_group_key)
+
     await db.execute(ProductSourcingItem.__table__.delete())
 
+    restored = 0
     CHUNK = 2000
     for i in range(0, len(records), CHUNK):
-        await db.execute(ProductSourcingItem.__table__.insert(), records[i:i + CHUNK])
+        chunk = records[i:i + CHUNK]
+        for rec in chunk:
+            found = key_by_identity.get(_group_key_identity(rec))
+            if found:
+                rec["brand_group_key"], rec["product_group_key"] = found
+                restored += 1
+        await db.execute(ProductSourcingItem.__table__.insert(), chunk)
         await db.flush()
 
     await db.commit()
@@ -377,4 +417,5 @@ async def import_product_sourcing(file_bytes: bytes, db: AsyncSession) -> dict:
     return {
         "inserted": len(records),
         "product_type_count": len(types),
+        "group_keys_restored": restored,
     }
