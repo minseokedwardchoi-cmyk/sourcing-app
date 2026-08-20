@@ -58,6 +58,22 @@ class ImportHistory(Base):
     contact_status   = Column(String(100),  nullable=True,  comment="MD 컨택 상태 (컨택이력 없음/컨택 중/거래성사 등)")
     md_name          = Column(String(100),  nullable=True,  comment="담당 MD명")
 
+    # ── HS코드 / 원가 (product_sourcing_item과 동일한 패턴) ────
+    # hs_code는 SKU 단위로 나중에 파일 업로드로 일괄 반영될 예정 (매칭 키는
+    # 업로드 시점에 확정). unit(용량)은 원가 계산(mfds_pricing)에 필요한데
+    # 원본 수입이력 데이터엔 없어 별도로 채워야 한다 — 없으면 estimate_purchase_price가
+    # 1kg당 금액(is_per_kg=True)으로 대체 표시한다.
+    hs_code               = Column(String(20),  nullable=True,  comment="HS코드 (품목분류, 10자리 — 원가 자동계산용)")
+    hs_code_confidence    = Column(String(20),  nullable=True,  comment="HS코드 신뢰도 (high/medium 등)")
+    unit                  = Column(String(100), nullable=True,  comment="단량/용량 (원가 계산용)")
+
+    # 아래 4개는 조회마다 계산하지 않고 hs_code/관세율표 변경 시점에 미리 계산해
+    # 저장해둔 캐시값 (cost_estimator.py, _recompute_and_store_import_history_cost_estimates 참고)
+    tariff_rate_pct            = Column(Numeric,     nullable=True,  comment="적용 관세율(%) — 캐시된 계산 결과")
+    tariff_basis                = Column(String(100), nullable=True,  comment="적용 세율 근거 (캐시된 계산 결과)")
+    estimated_landed_cost_krw  = Column(Numeric,     nullable=True,  comment="추정 착지원가(원) — 캐시된 계산 결과. landed_cost_is_per_kg=True면 1kg당 금액")
+    landed_cost_is_per_kg      = Column(Boolean,      nullable=True,  comment="True면 estimated_landed_cost_krw가 상품 1개당이 아니라 1kg당 금액(원/kg)임")
+
     __table_args__ = (
         # 집계 기준 복합 인덱스 (수입횟수 카운팅용)
         Index("ix_agg_key", "category", "mc", "sku_name", "import_type",
@@ -69,6 +85,7 @@ class ImportHistory(Base):
         Index("ix_mc",           "mc"),
         Index("ix_country",      "country"),
         Index("ix_import_date",  "import_date"),
+        Index("ix_ih_hs_code",   "hs_code"),
     )
 
 

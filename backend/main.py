@@ -52,6 +52,8 @@ from schemas import (
     ProductSourcingRetailerGroup, ProductSourcingSearchResponse,
     ProductSourcingUploadResponse, ProductSourcingFlatRow, ProductSourcingAllResponse,
     TariffUploadResponse, HsCodeUpdateRequest, HsCodeUpdateResponse, HsCodeUploadResponse,
+    ImportHistoryHsCodeUpdateRequest, ImportHistoryHsCodeUpdateResponse,
+    ImportHistoryHsCodeUploadResponse,
     CostCoverageRow, CostCoverageResponse,
     ProductSourcingCrawlSnapshotUploadRequest, ProductSourcingCrawlSnapshotUploadResponse,
     ProductSourcingCrawlRunListResponse, ProductSourcingCrawlRunSummary,
@@ -70,6 +72,7 @@ from product_sourcing_importer import import_product_sourcing
 from product_sourcing_exporter import build_workbook_skeleton, add_flat_sheet, embed_image
 from tariff_rate_importer import import_tariff_rates
 from hs_code_importer import import_hs_codes
+from import_history_hs_code_importer import import_history_hs_codes
 from cost_estimator import resolve_tariff_rate, estimate_landed_cost_krw
 from unit_converter import extract_unit_from_product_name
 from country_utils import match_all_countries_in_text_broad
@@ -348,13 +351,21 @@ async def _startup_bg():
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS contact_status VARCHAR(100)",
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS md_name VARCHAR(100)",
             "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS sku_name_en VARCHAR(500)",
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS hs_code VARCHAR(20)",
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS hs_code_confidence VARCHAR(20)",
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS unit VARCHAR(100)",
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS tariff_rate_pct NUMERIC",
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS tariff_basis VARCHAR(100)",
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS estimated_landed_cost_krw NUMERIC",
+            "ALTER TABLE import_history ADD COLUMN IF NOT EXISTS landed_cost_is_per_kg BOOLEAN",
         ]:
             try:
                 await conn.execute(text(col_sql))
             except Exception:
                 pass
         if not await _matview_has_column(conn, "sku_history_mv", "earliest_import") \
-                or not await _matview_has_column(conn, "sku_history_mv", "market_status"):
+                or not await _matview_has_column(conn, "sku_history_mv", "market_status") \
+                or not await _matview_has_column(conn, "sku_history_mv", "hs_code"):
             await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_factory_mv"))
             await conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS sku_history_mv"))
 
@@ -413,6 +424,7 @@ async def _startup_bg():
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_gin_sku       ON import_history USING gin (sku_name      gin_trgm_ops)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_gin_factory   ON import_history USING gin (factory       gin_trgm_ops)",
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_gin_importer  ON import_history USING gin (importer      gin_trgm_ops)",
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ih_hs_code       ON import_history (hs_code)",
         # sku_name_en 보강 업로드의 매칭 키 — 이 인덱스 없이는 매 업로드마다
         # 백만 행 테이블을 훑어 UPDATE ... FROM 조인을 해야 해서 커넥션을
         # 오래 붙잡고 있다가 QueuePool이 고갈됨.
@@ -447,7 +459,16 @@ _SKU_HISTORY_MV_SQL = """
             COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 2
                   THEN 1 END)::int                  AS count_year2,
             COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date)) = EXTRACT(YEAR FROM CURRENT_DATE) - 3
-                  THEN 1 END)::int                  AS count_year3
+                  THEN 1 END)::int                  AS count_year3,
+            -- HS코드/원가는 SKU 단위 속성이라 이 그룹 내에서는 항상 동일한 값이어야
+            -- 정상이다(같은 sku_name 행들은 같은 hs_code를 갖도록 업로드/재계산에서 보장) —
+            -- MAX()는 그룹당 하나뿐인 값을 그대로 꺼내는 용도일 뿐 실제 집계가 아니다.
+            MAX(hs_code)                            AS hs_code,
+            MAX(hs_code_confidence)                 AS hs_code_confidence,
+            MAX(tariff_rate_pct)                    AS tariff_rate_pct,
+            MAX(tariff_basis)                       AS tariff_basis,
+            MAX(estimated_landed_cost_krw)          AS estimated_landed_cost_krw,
+            bool_or(landed_cost_is_per_kg)          AS landed_cost_is_per_kg
         FROM import_history
         GROUP BY category, mc, sku_name, import_type, importer, manufacturer, factory, country
     ),
@@ -2109,6 +2130,9 @@ async def upload_tariff_rates(
         content = await file.read()
         result = await import_tariff_rates(content, db)
         await _recompute_and_store_cost_estimates(db)
+        await _recompute_and_store_import_history_cost_estimates(db)
+        import asyncio
+        asyncio.create_task(_refresh_mvs_safe())
 
         print("TARIFF_RATE_UPLOAD_RESULT:", result)
         return TariffUploadResponse(**result)
@@ -2862,6 +2886,173 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
     return len(updates)
 
 
+# ─── SKU/OEM 수입이력 페이지의 HS코드/원가 (product_sourcing_item과 동일한 패턴을
+# import_history에 그대로 적용) ────────────────────────────────────────────────
+# 원산지 텍스트가 없는 대신 country(제조국) 컬럼을 origin으로 재사용한다. unit(용량)은
+# 원본 수입이력 데이터에 없어 대부분 비어 있을 수 있는데, 그 경우
+# estimate_purchase_price가 1kg당 금액(is_per_kg=True)으로 대체 표시한다.
+async def _recompute_and_store_import_history_cost_estimates(db: AsyncSession) -> int:
+    """hs_code가 채워진 모든 import_history 행의 관세율/추정 착지원가를 다시 계산해서
+    tariff_rate_pct/tariff_basis/estimated_landed_cost_krw/landed_cost_is_per_kg에
+    저장해둔다. hs_code 업로드/수동수정, 관세율표 재적재 시점에 호출한다.
+    호출부는 이후 sku_history_mv도 REFRESH해야 SKU/OEM 수입이력 페이지에 반영된다
+    (_refresh_mvs_safe 참고). 반환값: 갱신한 행 수."""
+    rows_r = await db.execute(text("""
+        SELECT id, hs_code, country, unit, product_type
+        FROM import_history
+        WHERE hs_code IS NOT NULL AND hs_code <> ''
+    """))
+    rows = [dict(r) for r in rows_r.mappings().all()]
+
+    item_names_r = await db.execute(text("SELECT DISTINCT item_name FROM country_item_amount"))
+    all_mfds_item_names = [r[0] for r in item_names_r.all()]
+    price_lookup_r = await db.execute(text(
+        "SELECT country, item_name, amount_usd_k, weight_ton FROM country_item_amount"
+    ))
+    mfds_price_lookup = {
+        (r["country"], r["item_name"]): (float(r["amount_usd_k"]), float(r["weight_ton"]) if r["weight_ton"] else None)
+        for r in price_lookup_r.mappings().all()
+    }
+
+    await db.execute(text("""
+        UPDATE import_history
+        SET tariff_rate_pct = NULL, tariff_basis = NULL, estimated_landed_cost_krw = NULL, landed_cost_is_per_kg = NULL
+        WHERE (hs_code IS NULL OR hs_code = '')
+          AND (tariff_rate_pct IS NOT NULL OR tariff_basis IS NOT NULL OR estimated_landed_cost_krw IS NOT NULL)
+    """))
+
+    if not rows:
+        await db.commit()
+        return 0
+
+    hs_codes = sorted({_normalize_hs_code(row["hs_code"]) for row in rows} - {None})
+    by_hs_code: dict[str, list[dict]] = {}
+    if hs_codes:
+        tr_r = await db.execute(text("""
+            SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
+            FROM tariff_rate
+            WHERE hs_code = ANY(:codes)
+        """), {"codes": hs_codes})
+        for tr in tr_r.mappings().all():
+            by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
+
+    updates = []
+    for row in rows:
+        norm = _normalize_hs_code(row["hs_code"])
+        tariff_rows = by_hs_code.get(norm) if norm else None
+        price_estimate = estimate_purchase_price(
+            row.get("product_type"), row.get("country"), row.get("unit"),
+            all_mfds_item_names, mfds_price_lookup,
+        )
+        tariff = None
+        if tariff_rows:
+            origin_country = (
+                price_estimate.country if price_estimate
+                else resolve_origin_country(
+                    row.get("product_type") or "", row.get("country"),
+                    all_mfds_item_names, mfds_price_lookup,
+                )
+            )
+            tariff = resolve_tariff_rate(tariff_rows, origin_country)
+        cost = estimate_landed_cost_krw(
+            price_estimate.price_usd if price_estimate else None,
+            tariff,
+        ) if tariff else None
+        updates.append({
+            "id": row["id"],
+            "rate_pct": tariff.rate_pct if tariff else None,
+            "basis": tariff.basis_label if tariff else None,
+            "cost": cost,
+            "is_per_kg": price_estimate.is_per_kg if (price_estimate and cost is not None) else None,
+        })
+
+    BATCH = 5000
+    for i in range(0, len(updates), BATCH):
+        chunk = updates[i:i + BATCH]
+        await db.execute(text("""
+            UPDATE import_history AS t
+            SET tariff_rate_pct = v.rate_pct,
+                tariff_basis = v.basis,
+                estimated_landed_cost_krw = v.cost,
+                landed_cost_is_per_kg = v.is_per_kg
+            FROM (
+                SELECT * FROM unnest(:ids ::integer[], :rate_pcts ::numeric[], :bases ::varchar[], :costs ::numeric[], :is_per_kgs ::boolean[])
+                AS v(id, rate_pct, basis, cost, is_per_kg)
+            ) AS v
+            WHERE t.id = v.id
+        """), {
+            "ids": [u["id"] for u in chunk],
+            "rate_pcts": [u["rate_pct"] for u in chunk],
+            "bases": [u["basis"] for u in chunk],
+            "costs": [u["cost"] for u in chunk],
+            "is_per_kgs": [u["is_per_kg"] for u in chunk],
+        })
+        await db.commit()
+
+    return len(updates)
+
+
+@app.patch("/api/import-history/hs-code", response_model=ImportHistoryHsCodeUpdateResponse)
+async def update_import_history_hs_code(
+    payload: ImportHistoryHsCodeUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """SKU명(sku_name) 단위로 HS코드를 지정/수정 — 같은 SKU명에 속한 모든 수입이력
+    행에 일괄 적용된다. 나중에 HS코드 파일을 대량 업로드하는 기능이 추가되기 전까지
+    수동 입력/테스트용으로 쓴다."""
+    hs_code = payload.hs_code.strip() if payload.hs_code else None
+    r = await db.execute(text("""
+        UPDATE import_history SET hs_code = :hs_code WHERE sku_name = :sku_name
+    """), {"hs_code": hs_code, "sku_name": payload.sku_name})
+    await db.commit()
+    await _recompute_and_store_import_history_cost_estimates(db)
+    import asyncio
+    asyncio.create_task(_refresh_mvs_safe())
+    return ImportHistoryHsCodeUpdateResponse(sku_name=payload.sku_name, hs_code=hs_code, updated_rows=r.rowcount)
+
+
+@app.post("/api/upload-import-history-hs-codes", response_model=ImportHistoryHsCodeUploadResponse)
+async def upload_import_history_hs_codes(
+    file: UploadFile = File(..., description="SKU/OEM 수입이력 HS코드 리서치 결과 Excel (SKU명 단위)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """confidence='high'인 행은 hs_code 그대로, 'medium'은 hs_code_confidence='medium'으로
+    같이 저장(프론트에서 '(검토 필요)' 표시), 'low'/'very_low'/미상은 반영하지 않는다.
+    같은 sku_name의 import_history 행이 여러 개면 전부 일괄 반영된다 — PATCH
+    /api/import-history/hs-code와 동일한 단위."""
+    try:
+        if not file.filename.endswith((".xlsx", ".xls")):
+            raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls)만 업로드 가능합니다.")
+
+        content = await file.read()
+        result = await import_history_hs_codes(content, db)
+        await _recompute_and_store_import_history_cost_estimates(db)
+        import asyncio
+        asyncio.create_task(_refresh_mvs_safe())
+
+        print("IMPORT_HISTORY_HS_CODE_UPLOAD_RESULT:", result)
+        return ImportHistoryHsCodeUploadResponse(**result)
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+@app.post("/api/import-history/recompute-costs")
+async def recompute_import_history_costs(db: AsyncSession = Depends(get_db)):
+    """SKU/OEM 수입이력의 추정원가 캐시를 수동으로 재계산 (관세율표 업로드 시 자동
+    호출되므로 평소엔 따로 부를 필요 없음)."""
+    updated = await _recompute_and_store_import_history_cost_estimates(db)
+    import asyncio
+    asyncio.create_task(_refresh_mvs_safe())
+    return {"updated": updated}
+
+
 @app.get("/api/product-sourcing/cost-coverage", response_model=CostCoverageResponse)
 async def get_cost_coverage(db: AsyncSession = Depends(get_db)):
     """hs_code가 채워진 행 전체를 훑어서 추정원가 계산이 실패한 행과 사유를 진단.
@@ -3597,7 +3788,13 @@ async def get_factory_view(
                 COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
                       = EXTRACT(YEAR FROM CURRENT_DATE) - 2 THEN 1 END)::int AS count_year2,
                 COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
-                      = EXTRACT(YEAR FROM CURRENT_DATE) - 3 THEN 1 END)::int AS count_year3
+                      = EXTRACT(YEAR FROM CURRENT_DATE) - 3 THEN 1 END)::int AS count_year3,
+                MAX(hs_code)                   AS hs_code,
+                MAX(hs_code_confidence)        AS hs_code_confidence,
+                MAX(tariff_rate_pct)           AS tariff_rate_pct,
+                MAX(tariff_basis)              AS tariff_basis,
+                MAX(estimated_landed_cost_krw) AS estimated_landed_cost_krw,
+                bool_or(landed_cost_is_per_kg) AS landed_cost_is_per_kg
             FROM import_history
             WHERE COALESCE(import_date, process_date)
                   BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
@@ -3661,7 +3858,13 @@ async def get_factory_view(
                 SUM(count_year1)::int                                                  AS count_year1,
                 SUM(count_year2)::int                                                  AS count_year2,
                 SUM(count_year3)::int                                                  AS count_year3,
-                array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)       AS importers
+                array_agg(DISTINCT importer) FILTER (WHERE importer IS NOT NULL)       AS importers,
+                MAX(hs_code)                                                           AS hs_code,
+                MAX(hs_code_confidence)                                                AS hs_code_confidence,
+                MAX(tariff_rate_pct)                                                   AS tariff_rate_pct,
+                MAX(tariff_basis)                                                      AS tariff_basis,
+                MAX(estimated_landed_cost_krw)                                         AS estimated_landed_cost_krw,
+                bool_or(landed_cost_is_per_kg)                                         AS landed_cost_is_per_kg
             FROM {source_sql}
             WHERE 1=1
                 {search_cond}
@@ -3738,6 +3941,12 @@ async def get_factory_view(
                 count_year3   = r["count_year3"] or 0,
                 market_status = r["market_status"],
                 cr4_pct       = r["cr4_pct"],
+                hs_code                   = r["hs_code"],
+                hs_code_confidence        = r["hs_code_confidence"],
+                tariff_rate_pct           = r["tariff_rate_pct"],
+                tariff_basis              = r["tariff_basis"],
+                estimated_landed_cost_krw = r["estimated_landed_cost_krw"],
+                landed_cost_is_per_kg     = r["landed_cost_is_per_kg"],
             )
             for r in rows
         ],
