@@ -15,6 +15,7 @@ import {
   fetchFactoryView, fetchFactoryViewMonthly,
   fetchProductSourcingAll,
   updateProductSourcingHsCode,
+  updateImportHistoryHsCode,
   getProductSourcingExportUrl,
   fetchProductSourcingCrawlRuns,
   fetchProductSourcingCrawlRun,
@@ -722,6 +723,8 @@ const ALL_COLS = [
   { key:"factory",      label:"해외제조업소",   w:230, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:105, filterKey:"country", clickable:"country" },
   { key:"market_status",label:"병행수입",       w:90,  isMarketStatus:true, filterKey:"market_status" },
+  { key:"hs_code",      label:"HS코드",         w:110, isHsCode:true                       },
+  { key:"estimated_landed_cost_krw", label:"원가", w:110, isEstimatedCost:true              },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
   { key:"yoy",          label:"전년대비",       w:78,  isYoy:true                          },
   { key:"count_year1",  label:"",               w:78,  isYearCount:1                      },
@@ -1244,6 +1247,10 @@ function MainDashboard({ navigate }) {
                             ? renderTrunc("importer", row[c.key], 6, i)
                             : c.isMarketStatus
                             ? <MarketStatusBadge status={row.market_status}/>
+                            : c.isHsCode
+                            ? <ImportHistoryHsCodeCell row={row}/>
+                            : c.isEstimatedCost
+                            ? <EstimatedCostCell row={row}/>
                             : row[c.key]||"-"}
                         </td>
                       ))}
@@ -3503,6 +3510,10 @@ function FactoryViewDashboard({ navigate }) {
                               })()
                             : c.isMarketStatus
                             ? <MarketStatusBadge status={row.market_status}/>
+                            : c.isHsCode
+                            ? <ImportHistoryHsCodeCell row={row}/>
+                            : c.isEstimatedCost
+                            ? <EstimatedCostCell row={row}/>
                             : row[c.key]||"-"}
                         </td>
                       ))}
@@ -3824,6 +3835,52 @@ function HsCodeCell({ row }) {
       />
       {needsReview && (
         <span style={{fontSize:10, color:"#b45309"}} title={`HS코드 추정 신뢰도: ${row.hs_code_confidence} — 관세사/원본 확인 권장`}>
+          (검토 필요)
+        </span>
+      )}
+    </div>
+  );
+}
+
+// SKU/OEM 수입이력 페이지 전용 — HsCodeCell과 동일한 UX(인라인 입력 + blur 저장)이지만
+// product_type이 아니라 sku_name 단위로 저장한다(updateImportHistoryHsCode). 나중에 HS코드
+// 파일을 대량 업로드하는 기능이 붙기 전까지 수동 입력/테스트용으로도 쓸 수 있다.
+function ImportHistoryHsCodeCell({ row }) {
+  const [value, setValue] = useState(row.hs_code || "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setValue(row.hs_code || ""); }, [row.hs_code]);
+
+  const save = async () => {
+    const next = value.trim();
+    if (next === (row.hs_code || "")) return;
+    setSaving(true);
+    try {
+      await updateImportHistoryHsCode(row.sku_name, next);
+    } catch (e) {
+      alert(e.message || "HS코드 저장 실패");
+      setValue(row.hs_code || "");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const needsReview = row.hs_code_confidence && row.hs_code_confidence !== "high";
+
+  return (
+    <div style={{display:"flex", flexDirection:"column", gap:2}}>
+      <input
+        type="text"
+        value={value}
+        placeholder="미지정"
+        disabled={saving}
+        onClick={e => e.stopPropagation()}
+        onChange={e => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={e => { if (e.key === "Enter") e.target.blur(); }}
+        style={{width:88, fontSize:12, padding:"3px 5px", border:"1px solid #e5e7eb", borderRadius:4}}
+      />
+      {needsReview && (
+        <span style={{fontSize:10, color:"#b45309"}} title={`HS코드 추정 신뢰도: ${row.hs_code_confidence}`}>
           (검토 필요)
         </span>
       )}

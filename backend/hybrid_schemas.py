@@ -26,6 +26,12 @@ class HybridSkuHistoryRow(BaseModel):
     count_year3: int = 0
     market_status: Optional[str] = Field(None, description="병행수입 가능여부: O(수입업체 2곳 이상)/X(1곳뿐)")
     cr4_pct: Optional[float] = Field(None, description="더 이상 계산하지 않음 — 항상 null (하위 호환용으로 필드만 유지)")
+    hs_code: Optional[str] = None
+    hs_code_confidence: Optional[str] = None
+    tariff_rate_pct: Optional[float] = None
+    tariff_basis: Optional[str] = None
+    estimated_landed_cost_krw: Optional[float] = None
+    landed_cost_is_per_kg: Optional[bool] = None
     match_type: str = Field("exact", description="exact, semantic, or popular taxonomy rescue")
     semantic_score: Optional[float] = None
     relevance_score: Optional[float] = None

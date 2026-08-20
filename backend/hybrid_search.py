@@ -200,7 +200,13 @@ def _source_sql(date_from: Optional[str], date_to: Optional[str], params: dict) 
                     COUNT(CASE WHEN EXTRACT(YEAR FROM COALESCE(import_date, process_date))
                           = EXTRACT(YEAR FROM CURRENT_DATE) - 3 THEN 1 END)::int AS count_year3,
                     NULL::text    AS market_status,
-                    NULL::numeric AS cr4_pct
+                    NULL::numeric AS cr4_pct,
+                    MAX(hs_code)                   AS hs_code,
+                    MAX(hs_code_confidence)        AS hs_code_confidence,
+                    MAX(tariff_rate_pct)           AS tariff_rate_pct,
+                    MAX(tariff_basis)              AS tariff_basis,
+                    MAX(estimated_landed_cost_krw) AS estimated_landed_cost_krw,
+                    bool_or(landed_cost_is_per_kg) AS landed_cost_is_per_kg
                 FROM import_history
                 WHERE COALESCE(import_date, process_date)
                       BETWEEN CAST(:date_from AS date) AND CAST(:date_to AS date)
@@ -586,7 +592,9 @@ async def search_hybrid(
                     d.match_type, d.semantic_score, d.relevance_score,
                     d.mc_intent_bonus, d.category_intent_bonus, d.best_keyword_bonus,
                     d.mc_mismatch_penalty, d.category_mismatch_penalty,
-                    s.market_status, s.cr4_pct
+                    s.market_status, s.cr4_pct,
+                    s.hs_code, s.hs_code_confidence, s.tariff_rate_pct, s.tariff_basis,
+                    s.estimated_landed_cost_krw, s.landed_cost_is_per_kg
                 FROM filtered_source s
                 JOIN thresholded d
                   ON s.category IS NOT DISTINCT FROM d.category
@@ -659,7 +667,9 @@ async def search_hybrid(
                     NULL::float AS best_keyword_bonus,
                     NULL::float AS mc_mismatch_penalty,
                     NULL::float AS category_mismatch_penalty,
-                    fs.market_status, fs.cr4_pct
+                    fs.market_status, fs.cr4_pct,
+                    hs_code, hs_code_confidence, tariff_rate_pct, tariff_basis,
+                    estimated_landed_cost_krw, landed_cost_is_per_kg
                 FROM filtered_source fs
             )
             SELECT {count_select}

@@ -417,6 +417,20 @@ export async function updateProductSourcingHsCode(productType, hsCode) {
   return res.json();
 }
 
+/** SKU명 단위 HS코드 지정/수정 (같은 SKU명의 전체 수입이력 행에 일괄 적용) */
+export async function updateImportHistoryHsCode(skuName, hsCode) {
+  const res = await fetch(`${BASE_URL}/api/import-history/hs-code`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sku_name: skuName, hs_code: hsCode || null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "HS코드 저장 실패");
+  }
+  return res.json();
+}
+
 /** 원본 엑셀(유형별카드) 형식 다운로드 URL — 사진 포함 .xlsx */
 export function getProductSourcingExportUrl() {
   return `${BASE_URL}/api/product-sourcing/export-original`;

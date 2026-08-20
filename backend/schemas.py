@@ -495,6 +495,17 @@ class HsCodeUpdateResponse(BaseModel):
     updated_rows: int
 
 
+class ImportHistoryHsCodeUpdateRequest(BaseModel):
+    sku_name: str = Field(..., description="HS코드를 지정할 SKU명 (정확히 일치)")
+    hs_code:  Optional[str] = Field(None, description="HS코드 (빈 값/None이면 해제)")
+
+
+class ImportHistoryHsCodeUpdateResponse(BaseModel):
+    sku_name:     str
+    hs_code:      Optional[str]
+    updated_rows: int
+
+
 class HsCodeUnmatchedRow(BaseModel):
     product_type: str
     retailer_raw: str  = Field(..., description="원본 유통사 서브타이틀 텍스트")
@@ -549,6 +560,12 @@ class FactoryViewRow(BaseModel):
     count_year3:   int            = Field(0)
     market_status: Optional[str]  = Field(None, description="병행수입 가능여부: O(수입업체 2곳 이상)/X(1곳뿐)")
     cr4_pct:       Optional[float] = Field(None, description="더 이상 계산하지 않음 — 항상 null (하위 호환용으로 필드만 유지)")
+    hs_code:                     Optional[str]   = Field(None)
+    hs_code_confidence:          Optional[str]   = Field(None)
+    tariff_rate_pct:              Optional[float] = Field(None)
+    tariff_basis:                 Optional[str]   = Field(None)
+    estimated_landed_cost_krw:   Optional[float] = Field(None)
+    landed_cost_is_per_kg:       Optional[bool]  = Field(None)
 
 
 class FactoryViewResponse(BaseModel):
