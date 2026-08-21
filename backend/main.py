@@ -3166,6 +3166,24 @@ async def recompute_import_history_costs(db: AsyncSession = Depends(get_db)):
     return {"updated": updated}
 
 
+@app.get("/api/import-history/product-type-samples")
+async def get_import_history_product_type_samples(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """디버그용: product_type이 채워진 import_history 행 샘플 — 이 컬럼이 실제
+    원본 통관데이터에서 어떤 값으로 들어오는지, 같은 행의 sku_name/mc/category와
+    어떻게 다른지 눈으로 확인하기 위한 용도(product_type NULL 행이 많아 원가
+    계산이 sku_name으로 폴백하게 된 배경 확인)."""
+    r = await db.execute(text("""
+        SELECT id, product_type, sku_name, mc, category, country, importer
+        FROM import_history
+        WHERE product_type IS NOT NULL AND product_type <> ''
+        LIMIT :limit
+    """), {"limit": limit})
+    return {"rows": [dict(row) for row in r.mappings().all()]}
+
+
 @app.get("/api/import-history/cost-coverage", response_model=ImportHistoryCostCoverageResponse)
 async def get_import_history_cost_coverage(
     sku_name: str = Query(..., description="진단할 SKU명 (정확히 일치) — import_history는 120k+ 행이라 전체 스캔은 게이트웨이 타임아웃(Render 60s)에 걸려 sku_name 단위로만 지원한다"),
