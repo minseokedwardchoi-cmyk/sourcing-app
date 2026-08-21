@@ -55,6 +55,7 @@ from schemas import (
     ImportHistoryHsCodeUpdateRequest, ImportHistoryHsCodeUpdateResponse,
     ImportHistoryHsCodeUploadResponse,
     CostCoverageRow, CostCoverageResponse,
+    ImportHistoryCostCoverageRow, ImportHistoryCostCoverageResponse,
     ProductSourcingCrawlSnapshotUploadRequest, ProductSourcingCrawlSnapshotUploadResponse,
     ProductSourcingCrawlRunListResponse, ProductSourcingCrawlRunSummary,
     ProductSourcingCrawlRunDetailResponse, ProductSourcingCrawlSnapshotRow,
@@ -3159,6 +3160,95 @@ async def recompute_import_history_costs(db: AsyncSession = Depends(get_db)):
     import asyncio
     asyncio.create_task(_refresh_mvs_safe())
     return {"updated": updated}
+
+
+@app.get("/api/import-history/cost-coverage", response_model=ImportHistoryCostCoverageResponse)
+async def get_import_history_cost_coverage(db: AsyncSession = Depends(get_db)):
+    """hs_code가 채워진 import_history 행 전체를 훑어서 추정원가 계산이 실패한
+    행과 사유를 진단. get_cost_coverage(product_sourcing_item용)와 동일한
+    로직이며, origin 대신 country 컬럼을 원산지 텍스트로 쓴다는 점만 다르다.
+    사유 종류는 get_cost_coverage 문서 참고."""
+    rows_r = await db.execute(text("""
+        SELECT id, sku_name, product_type, hs_code, country
+        FROM import_history
+        WHERE hs_code IS NOT NULL AND hs_code <> ''
+    """))
+    rows = [dict(r) for r in rows_r.mappings().all()]
+
+    hs_codes = sorted({_normalize_hs_code(row["hs_code"]) for row in rows} - {None})
+    by_hs_code: dict[str, list[dict]] = {}
+    if hs_codes:
+        tr_r = await db.execute(text("""
+            SELECT hs_code, rate_type, rate_pct, effective_from, effective_to
+            FROM tariff_rate
+            WHERE hs_code = ANY(:codes)
+        """), {"codes": hs_codes})
+        for tr in tr_r.mappings().all():
+            by_hs_code.setdefault(tr["hs_code"], []).append(dict(tr))
+
+    item_names_r = await db.execute(text("SELECT DISTINCT item_name FROM country_item_amount"))
+    all_mfds_item_names = [r[0] for r in item_names_r.all()]
+    price_lookup_r = await db.execute(text(
+        "SELECT country, item_name, amount_usd_k, weight_ton FROM country_item_amount"
+    ))
+    mfds_price_lookup = {
+        (r["country"], r["item_name"]): (float(r["amount_usd_k"]), float(r["weight_ton"]) if r["weight_ton"] else None)
+        for r in price_lookup_r.mappings().all()
+    }
+
+    fully_estimated = 0
+    tariff_resolved_no_price = 0
+    hs_code_not_found = 0
+    problems: list[ImportHistoryCostCoverageRow] = []
+
+    for row in rows:
+        norm = _normalize_hs_code(row["hs_code"])
+        tariff_rows = by_hs_code.get(norm) if norm else None
+        origin_country = resolve_origin_country(
+            row.get("product_type") or "", row.get("country"), all_mfds_item_names, mfds_price_lookup,
+        )
+        tariff = resolve_tariff_rate(tariff_rows, origin_country) if tariff_rows else None
+
+        if tariff is None:
+            hs_code_not_found += 1
+            problems.append(ImportHistoryCostCoverageRow(
+                id=row["id"], sku_name=row["sku_name"], product_type=row["product_type"],
+                hs_code=row["hs_code"], country=row["country"], matched_country=origin_country,
+                reason="hs_code_not_in_tariff_table",
+            ))
+            continue
+
+        mfds_item = get_mfds_item(row.get("product_type")) or match_product_to_mfds_item(
+            row.get("product_type") or "", all_mfds_item_names
+        ).matched_item_name
+        if not mfds_item:
+            reason = "mfds_item_not_matched"
+        else:
+            candidates = match_all_countries_in_text_broad(row.get("country"))
+            if not candidates:
+                reason = "origin_country_not_resolved"
+            else:
+                lookup = resolve_mfds_price(row.get("product_type") or "", row.get("country"), all_mfds_item_names, mfds_price_lookup)
+                reason = "mfds_weight_data_missing" if lookup is None else None
+
+        if reason:
+            tariff_resolved_no_price += 1
+            problems.append(ImportHistoryCostCoverageRow(
+                id=row["id"], sku_name=row["sku_name"], product_type=row["product_type"],
+                hs_code=row["hs_code"], country=row["country"], matched_country=origin_country,
+                reason=reason,
+            ))
+            continue
+
+        fully_estimated += 1
+
+    return ImportHistoryCostCoverageResponse(
+        total_with_hs_code=len(rows),
+        fully_estimated=fully_estimated,
+        tariff_resolved_no_price=tariff_resolved_no_price,
+        hs_code_not_found=hs_code_not_found,
+        problem_rows=problems[:300],
+    )
 
 
 @app.get("/api/product-sourcing/cost-coverage", response_model=CostCoverageResponse)
