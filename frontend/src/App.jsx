@@ -723,13 +723,13 @@ const ALL_COLS = [
   { key:"factory",      label:"해외제조업소",   w:230, filterKey:"factory", clickable:"mfr" },
   { key:"country",      label:"제조국",         w:105, filterKey:"country", clickable:"country" },
   { key:"market_status",label:"병행수입",       w:90,  isMarketStatus:true, filterKey:"market_status" },
-  { key:"hs_code",      label:"HS코드",         w:110, isHsCode:true                       },
-  { key:"estimated_landed_cost_krw", label:"원가", w:110, isEstimatedCost:true              },
   { key:"import_count", label:"수입횟수(전체)", w:100, isNumeric:true                      },
   { key:"yoy",          label:"전년대비",       w:78,  isYoy:true                          },
   { key:"count_year1",  label:"",               w:78,  isYearCount:1                      },
   { key:"count_year2",  label:"",               w:78,  isYearCount:2                      },
   { key:"_trend",       label:"수입횟수 추이",  w:90,  isTrend:true                        },
+  { key:"hs_code",      label:"HS코드",         w:110, isHsCode:true                       },
+  { key:"estimated_landed_cost_krw", label:"원가", w:110, isEstimatedCost:true              },
 ];
 
 // 전년대비 증감률: count_year2(전년) 값이 0/없음이면 나눗셈이 불가능하므로 null(="-") 반환.
