@@ -1882,6 +1882,21 @@ async def migrate_email_crawl_columns(db: AsyncSession = Depends(get_db)):
     return {"message": "email_source, email_crawled_at 컬럼 및 인덱스 적용 완료 (이미 있었다면 변경 없음)"}
 
 
+# ─── 3-1-0-1. 크롤링 스냅샷 unit 컬럼 마이그레이션 ─────────────────────────
+# backend/migrations/20260813_crawl_snapshot_unit.sql로 파일은 만들어져 있었지만
+# production DB에 실제로 적용된 적이 없어서 product_sourcing_crawl_snapshot_item을
+# 조회하는 모든 엔드포인트(/api/product-sourcing/crawl-runs/{id} 등)가 500을 내고
+# 있었음(2026-08-21 실측 확인). 위 email-crawl-migrate와 같은 이유로 HTTP 엔드포인트로 둔다.
+@app.post("/api/product-sourcing/crawl-snapshot-migrate")
+async def migrate_crawl_snapshot_unit_column(db: AsyncSession = Depends(get_db)):
+    await db.execute(text("""
+        ALTER TABLE product_sourcing_crawl_snapshot_item
+            ADD COLUMN IF NOT EXISTS unit VARCHAR(50)
+    """))
+    await db.commit()
+    return {"message": "product_sourcing_crawl_snapshot_item.unit 컬럼 적용 완료 (이미 있었다면 변경 없음)"}
+
+
 # GitHub Actions 로그는 대용량 실행 시 앞부분이 잘려서 조회 도구로 다시 볼 수
 # 없는 경우가 있어, "실제로 몇 건이 채워졌는지"를 DB 기준으로 바로 확인할 수
 # 있는 집계 엔드포인트를 둔다.
