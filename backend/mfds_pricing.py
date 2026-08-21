@@ -36,7 +36,9 @@ class MfdsPriceLookup:
     price_usd_per_kg: float
 
 
-def _resolve_mfds_item(product_type: str, all_item_names: list[str]) -> str | None:
+def _resolve_mfds_item(product_type: str | None, all_item_names: list[str]) -> str | None:
+    if not product_type:
+        return None
     mfds_item = get_mfds_item(product_type)
     if mfds_item is None:
         match = match_product_to_mfds_item(product_type, all_item_names)
