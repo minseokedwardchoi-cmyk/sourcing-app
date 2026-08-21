@@ -10,7 +10,7 @@ name: 원산지 판독 (Gemini 비전)
 # hs_code_estimation.yml 상단 주석 참고).
 #
 # 상품 URL 단위 캐시라 대상 건수가 브랜드검증보다 훨씬 많을 수 있다(브랜드는 수천 개,
-# 상품은 그보다 많음) — 그 대신 배치 처리(--batch-size) + gemini-2.5-flash-lite 기본
+# 상품은 그보다 많음) — 그 대신 배치 처리(--batch-size) + gemini-3.5-flash-lite 기본
 # 모델로 무료 티어 RPD(1,000/일)를 절약한다(verify_origin_gemini.py 상단 설명 참고).
 # 이미지가 토큰을 많이 먹어서 배치 크기는 HS코드보다 작게(기본 4) 잡는다.
 #

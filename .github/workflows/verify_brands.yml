@@ -13,7 +13,7 @@ name: 브랜드 검증 (Gemini)
 # API(google_search 그라운딩)로 리콜/품질·표시/법적·평판 조사해서 백엔드의
 # brand_verification 캐시에 upsert한다 (backend/verify_brands_gemini.py 참고). 원산지
 # 판독/HS코드 추정과 달리 그라운딩(실시간 웹검색)이 꼭 필요한 작업이라 flash-lite로
-# 낮추지 않고 gemini-2.5-flash를 그대로 쓴다 — 리콜/소송 정보는 최신 검색 품질이
+# 낮추지 않고 gemini-3.6-flash를 그대로 쓴다 — 리콜/소송 정보는 최신 검색 품질이
 # 중요해서 배치도, 모델 다운그레이드도 안 한다.
 #
 # ⚠️ 월마트/샘스클럽과 아마존/이온몰은 같은 업로드 엔드포인트를 쓰지만 서로 다른 회차

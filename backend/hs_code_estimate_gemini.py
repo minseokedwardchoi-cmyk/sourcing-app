@@ -22,7 +22,7 @@ Gemini 요청 "횟수"만 줄이는 것(무료 Batch API 같은 별도 기능이
 설계)이라 RPM/RPD 절약에 직접 도움이 된다. 병목은 요청수가 아니라 TPM(분당 토큰)이 되므로
 --batch-size로 상황에 맞게 조절한다(텍스트만 다루므로 원산지판독보다 훨씬 크게 잡아도 됨).
 
-기본 모델을 gemini-2.5-flash-lite로 낮춘 것도 같은 이유 — 무료 티어 RPD가 flash(250)보다
+기본 모델을 gemini-3.5-flash-lite로 낮춘 것도 같은 이유 — 무료 티어 RPD가 flash(250)보다
 4배 넉넉하고(1,000), 그라운딩 없는 구조화출력 작업이라 flash-lite로도 충분하다고 판단
 (브랜드검증처럼 심층 리서치/그라운딩이 필요한 작업만 flash 유지).
 
@@ -40,7 +40,7 @@ DB에 직접 붙지 않고 백엔드 HTTP API만 호출한다(다른 크롤링 �
   --batch-size=N    프롬프트 1번에 묶을 상품 수 (기본 15)
   --top-k=N         상품당 HSK 후보 검색 상위 K개 (기본 8)
   --sleep=SEC       배치 사이 호출 간격 (기본 1초)
-  --model=NAME      Gemini 모델명 (기본 gemini-2.5-flash-lite)
+  --model=NAME      Gemini 모델명 (기본 gemini-3.5-flash-lite)
   --dry-run         대상 상품 목록만 출력하고 API 호출/DB 쓰기 안 함
 """
 from __future__ import annotations
@@ -56,7 +56,7 @@ from pydantic import BaseModel, Field
 
 from product_name_key_normalize import normalize_product_name_key
 
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 DEFAULT_BACKEND_URL = "https://sourcing-backend-ucp5.onrender.com"
 
 _VALID_CONFIDENCE = {"high", "medium", "very_low"}

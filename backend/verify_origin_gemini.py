@@ -17,7 +17,7 @@ index로 구분해서 묶어 보낸다. 다만 이미지가 토큰을 많이 먹
 HS코드보다 훨씬 빨리 병목이 되므로 --batch-size 기본값을 작게(4) 잡는다 — 배치 4개 x
 이미지 4장 = 최대 16장/요청 정도가 무난한 상한.
 
-기본 모델을 gemini-2.5-flash-lite로 낮춘 것도 같은 이유(무료 티어 RPD가 flash보다 4배
+기본 모델을 gemini-3.5-flash-lite로 낮춘 것도 같은 이유(무료 티어 RPD가 flash보다 4배
 넉넉함, 그라운딩 없는 구조화출력 작업이라 flash-lite로도 충분하다고 판단).
 
 사진 확보 전략 (유통사별로 다름):
@@ -53,7 +53,7 @@ from datetime import datetime
 import httpx
 from pydantic import BaseModel, Field
 
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 DEFAULT_BACKEND_URL = "https://sourcing-backend-ucp5.onrender.com"
 
 MAX_IMAGES_PER_PRODUCT = 4

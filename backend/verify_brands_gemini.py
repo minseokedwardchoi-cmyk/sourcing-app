@@ -39,7 +39,7 @@ Gemini로 조사하게 된다.
   --all-runs               모든 회차를 통틀어 대상 브랜드 추출 (최초 1회 소급용)
   --limit=N                이번 실행에서 검증할 브랜드 수 상한 (기본 20, API 비용 제어)
   --sleep=SEC              브랜드 사이 호출 간격 (기본 2초, 레이트리밋 방지)
-  --model=NAME              Gemini 모델명 (기본 gemini-2.5-flash)
+  --model=NAME              Gemini 모델명 (기본 gemini-3.6-flash)
   --dry-run                 대상 브랜드 목록만 출력하고 API 호출/DB 쓰기 안 함
 """
 from __future__ import annotations
@@ -56,7 +56,7 @@ from pydantic import BaseModel, Field
 
 from brand_key_normalize import normalize_brand_key
 
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 DEFAULT_BACKEND_URL = "https://sourcing-backend-ucp5.onrender.com"
 
 _VALID_STATUS = {"통과", "탈락"}

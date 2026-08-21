@@ -15,7 +15,7 @@ name: HS코드 추정 (임베딩 후보검색 + Gemini)
 # 샘스클럽 회차를 놓치지 않기 위함, 이미 캐시된 상품은 스킵되니 매번 전체를 다시 훑어도 비용
 # 문제 없음). workflow_dispatch(수동 실행)일 때만 all_runs 입력값을 따른다.
 #
-# 배치 처리(--batch-size) + gemini-2.5-flash-lite 기본 모델로 무료 티어 RPD(1,000/일,
+# 배치 처리(--batch-size) + gemini-3.5-flash-lite 기본 모델로 무료 티어 RPD(1,000/일,
 # flash의 250/일보다 4배 여유)를 절약한다 — hs_code_estimate_gemini.py 상단 설명 참고.
 #
 # HSK 참조표 임베딩 벡터(11,327개 HS10코드)는 관세청이 연 1회만 갱신하므로 actions/cache로

@@ -26,7 +26,7 @@ POST .../upsert)만 호출한다 — 이 프로젝트의 다른 GitHub Actions �
 옵션:
   --limit=N       이번 실행에서 처리할 품목유형(product_type) 수 상한 (기본 5, API 비용 제어)
   --sleep=SEC     품목유형 사이 호출 간격 (기본 2초, 레이트리밋 방지)
-  --model=NAME    Gemini 모델명 (기본 gemini-2.5-flash)
+  --model=NAME    Gemini 모델명 (기본 gemini-3.6-flash)
   --dry-run       대상 품목유형만 출력하고 API 호출/DB 쓰기 안 함
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ import time
 import httpx
 from pydantic import BaseModel, Field
 
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 DEFAULT_BACKEND_URL = "https://sourcing-backend-ucp5.onrender.com"
 
 _SLUG_PUNCT_RE = re.compile(r"[^a-z0-9]+")
