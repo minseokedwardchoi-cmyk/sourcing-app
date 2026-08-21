@@ -3228,6 +3228,32 @@ async def get_import_history_product_type_samples(
     return {"rows": [dict(row) for row in r.mappings().all()]}
 
 
+@app.get("/api/import-history/cached-costs")
+async def get_import_history_cached_costs(
+    sku_name: str = Query(..., description="조회할 SKU명 (정확히 일치)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """디버그용: 실제 화면(SKU/OEM 수입이력 페이지)이 읽는 sku_history_mv가 아니라
+    import_history 원본 테이블에 캐싱된 hs_code/원가 컬럼을 그대로 읽는다.
+    cost-coverage(그때그때 다시 계산)와 달리 이건 백그라운드 재계산이 실제로
+    DB에 반영/커밋됐는지, 화면에 안 보이는 게 계산 실패 때문인지 MV 리프레시가
+    아직 안 됐기 때문인지 구분하는 용도."""
+    r = await db.execute(text("""
+        SELECT id, hs_code, hs_code_confidence, tariff_rate_pct, tariff_basis,
+               estimated_landed_cost_krw, landed_cost_is_per_kg
+        FROM import_history
+        WHERE sku_name = :sku_name
+        LIMIT 20
+    """), {"sku_name": sku_name})
+    rows = [dict(row) for row in r.mappings().all()]
+    for row in rows:
+        if row["tariff_rate_pct"] is not None:
+            row["tariff_rate_pct"] = float(row["tariff_rate_pct"])
+        if row["estimated_landed_cost_krw"] is not None:
+            row["estimated_landed_cost_krw"] = float(row["estimated_landed_cost_krw"])
+    return {"rows": rows}
+
+
 @app.get("/api/import-history/cost-coverage", response_model=ImportHistoryCostCoverageResponse)
 async def get_import_history_cost_coverage(
     sku_name: str = Query(..., description="진단할 SKU명 (정확히 일치) — import_history는 120k+ 행이라 전체 스캔은 게이트웨이 타임아웃(Render 60s)에 걸려 sku_name 단위로만 지원한다"),
