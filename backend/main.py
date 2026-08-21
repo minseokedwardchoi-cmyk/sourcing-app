@@ -231,6 +231,14 @@ async def refresh_mvs(db: AsyncSession = None):
 
 _refresh_mvs_lock = None  # lazily created on the running event loop (see _refresh_mvs_safe)
 
+# product_sourcing_item/import_history 원가 재계산은 둘 다 대상 행 전체를 id
+# 정렬 없이 읽어 배치 UPDATE...FROM unnest로 쓰는데, 두 요청이 겹치면(업로드
+# curl 재시도, Render 콜드스타트로 인한 중복 요청 등) 서로 다른 순서로 같은
+# 행들의 락을 잡다가 Postgres가 deadlock detected로 한쪽을 강제 종료시킨다
+# (import_history 24k행 대량 업로드에서 실제로 재현됨). _refresh_mvs_lock과
+# 동일하게 프로세스 내에서 직렬화해 겹치는 실행 자체를 없앤다.
+_cost_recompute_lock = None
+
 
 async def _refresh_mvs_safe(db: AsyncSession = None, retries: int = 1):
     """Wrapper for every refresh_mvs() call site.
@@ -2829,6 +2837,15 @@ def _normalize_hs_code(hs_code: str | None) -> str | None:
 
 
 async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
+    import asyncio
+    global _cost_recompute_lock
+    if _cost_recompute_lock is None:
+        _cost_recompute_lock = asyncio.Lock()
+    async with _cost_recompute_lock:
+        return await _recompute_and_store_cost_estimates_impl(db)
+
+
+async def _recompute_and_store_cost_estimates_impl(db: AsyncSession) -> int:
     """hs_code가 채워진 모든 행의 관세율/추정 착지원가를 다시 계산해서
     product_sourcing_item.tariff_rate_pct/tariff_basis/estimated_landed_cost_krw에
     저장해둔다. 조회(GET /all, /search)는 이 컬럼을 그대로 읽기만 하므로
@@ -2840,6 +2857,7 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
         SELECT id, hs_code, origin, price_usd, product_type, unit
         FROM product_sourcing_item
         WHERE hs_code IS NOT NULL AND hs_code <> ''
+        ORDER BY id
     """))
     rows = [dict(r) for r in rows_r.mappings().all()]
 
@@ -2957,6 +2975,15 @@ async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
 # 원본 수입이력 데이터에 없어 대부분 비어 있을 수 있는데, 그 경우
 # estimate_purchase_price가 1kg당 금액(is_per_kg=True)으로 대체 표시한다.
 async def _recompute_and_store_import_history_cost_estimates(db: AsyncSession) -> int:
+    import asyncio
+    global _cost_recompute_lock
+    if _cost_recompute_lock is None:
+        _cost_recompute_lock = asyncio.Lock()
+    async with _cost_recompute_lock:
+        return await _recompute_and_store_import_history_cost_estimates_impl(db)
+
+
+async def _recompute_and_store_import_history_cost_estimates_impl(db: AsyncSession) -> int:
     """hs_code가 채워진 모든 import_history 행의 관세율/추정 착지원가를 다시 계산해서
     tariff_rate_pct/tariff_basis/estimated_landed_cost_krw/landed_cost_is_per_kg에
     저장해둔다. hs_code 업로드/수동수정, 관세율표 재적재 시점에 호출한다.
@@ -2966,6 +2993,7 @@ async def _recompute_and_store_import_history_cost_estimates(db: AsyncSession) -
         SELECT id, hs_code, country, unit, product_type
         FROM import_history
         WHERE hs_code IS NOT NULL AND hs_code <> ''
+        ORDER BY id
     """))
     rows = [dict(r) for r in rows_r.mappings().all()]
 
