@@ -55,55 +55,34 @@ export async function scrapeSamsClub(page, query, limit = 5, interactive = false
 
   await page.waitForTimeout(1000);
 
-  // 상품 상세페이지 링크(/p/ 포함)를 기준으로 카드를 역추적하는 범용 방식.
-  // 정확한 data-testid를 모르기 때문에 이렇게 접근한다.
+  // 2026-08 기준으로 상품 카드가 <a href="/p/...">를 더 이상 안 쓰는 구조로 바뀌어서
+  // (경로 자체도 /p/ → /ip/로 변경됨) DOM 앵커 기반 스크래핑이 항상 0건을 반환하게 됨
+  // (실제 크롤링 로그로 확인: "OK samsclub ... → 0개"). Next.js가 페이지에 심어두는
+  // __NEXT_DATA__(SSR 시 받은 검색 API 응답 원본)에서 직접 읽는 방식으로 교체 — 이 쪽은
+  // 마크업/CSS 변경에 안 흔들리고 가격/평점/URL이 이미 구조화돼 있어 더 정확함.
   const rawItems = await page.evaluate((limit) => {
     const clean = (s) => (s || "").replace(/\s+/g, " ").trim();
-    const anchors = Array.from(document.querySelectorAll('a[href*="/p/"]'));
-    const seenHref = new Set();
-    const out = [];
 
-    for (const a of anchors) {
-      const href = a.getAttribute("href");
-      if (!href || seenHref.has(href)) continue;
-      seenHref.add(href);
-
-      // 카드 컨테이너 추정: li/article 또는 카드로 보이는 클래스, 없으면 4단계 위 부모
-      let container =
-        a.closest("li") ||
-        a.closest("article") ||
-        a.closest('[class*="tile" i]') ||
-        a.closest('[class*="card" i]');
-      if (!container) {
-        container = a;
-        for (let i = 0; i < 4 && container.parentElement; i++) {
-          container = container.parentElement;
+    function findProductItems(obj) {
+      if (obj && typeof obj === "object") {
+        if (Array.isArray(obj) && obj.length && obj[0]?.__typename === "Product") return obj;
+        for (const k in obj) {
+          const found = findProductItems(obj[k]);
+          if (found) return found;
         }
       }
+      return null;
+    }
 
-      const containerText = clean(container.innerText || "");
-      if (!containerText) continue;
+    const items = window.__NEXT_DATA__ ? findProductItems(window.__NEXT_DATA__.props) : null;
+    if (!items) return [];
 
-      const priceMatch = containerText.match(/\$\s?\d[\d,]*\.?\d{0,2}/);
-      const price = priceMatch ? clean(priceMatch[0]) : null;
+    const out = [];
+    for (const it of items) {
+      const title = clean(it.name);
+      if (!title || title.length < 5 || !it.canonicalUrl) continue;
 
-      // 제목: 링크의 aria-label/title, 없으면 이미지 alt, 없으면 앵커 텍스트 중 가장 긴 텍스트
-      let title =
-        clean(a.getAttribute("aria-label")) ||
-        clean(a.getAttribute("title")) ||
-        clean(container.querySelector("img")?.getAttribute("alt")) ||
-        clean(a.textContent);
-      if (!title || title.length < 5) continue;
-
-      const ratingMatch = containerText.match(/(\d(?:\.\d)?)\s*(?:out of 5|stars)/i);
-      const rating = ratingMatch ? clean(ratingMatch[0]) : null;
-
-      const reviewMatch = containerText.match(/\(([\d,]+)\)/);
-      const reviewCount = reviewMatch ? reviewMatch[1] : null;
-
-      const sponsored = /sponsored/i.test(containerText.slice(0, 60));
-
-      const sizeMatch = (title + " " + containerText).match(
+      const sizeMatch = title.match(
         /(\d+(?:\.\d+)?\s?(?:fl\.?\s?oz|fluid ounces?|ml|milliliters?|\bL\b|liters?|litres?|qt|gal|ct|count))/i
       );
       const size = sizeMatch ? clean(sizeMatch[0]) : null;
@@ -111,18 +90,26 @@ export async function scrapeSamsClub(page, query, limit = 5, interactive = false
       // 카테고리별 불용어 목록은 83개 유형 전체로 확장하면서 다른 품목에서 오작동해
       // 폐기함(walmart.js와 같은 이유 — 상세 근거는 그쪽 주석 참고). 샘스클럽도 콤마가
       // 브랜드 경계가 아니라 상품명 끝 용량 표기 앞에 오는 경우가 많아 "앞 2단어 고정"만 쓴다.
-      const words = title.split(/\s+/).filter(Boolean);
-      const brand = words.slice(0, 2).join(" ") || null;
+      // 맨 앞 수량/묶음 표기("2X-" 등)는 브랜드가 아니므로 제거 후 자름.
+      // API의 brand 필드는 대부분 null이라(실측) 우선순위 삼기 어려워 폴백으로만 씀.
+      const titleForBrand = title.replace(/^\d+\s*[xX]\s*-?\s*/, "");
+      const words = titleForBrand.split(/\s+/).filter(Boolean);
+      const brand = it.brand || words.slice(0, 2).join(" ") || null;
 
-      const imgEl = container.querySelector("img");
-      const image = imgEl?.getAttribute("src") || imgEl?.getAttribute("data-src") || null;
+      const price = it.priceInfo?.linePrice || it.priceInfo?.itemPrice || null;
+      const rating = it.averageRating != null ? String(it.averageRating) : null;
+      const reviewCount = it.numberOfReviews != null ? String(it.numberOfReviews) : null;
+      const sponsored = it.sponsoredProduct != null;
+      const image = it.imageInfo?.thumbnailUrl || null;
 
       out.push({
-        id: href,
+        id: it.usItemId || it.canonicalUrl,
         brand,
         title,
         size,
-        url: href.startsWith("http") ? href : "https://www.samsclub.com" + href,
+        url: it.canonicalUrl.startsWith("http")
+          ? it.canonicalUrl
+          : "https://www.samsclub.com" + it.canonicalUrl,
         price,
         rating,
         reviewCount,
@@ -145,8 +132,9 @@ export async function scrapeSamsClub(page, query, limit = 5, interactive = false
  * 상품 상세페이지를 방문해서 갤러리 사진(정면/후면/측면 등) URL을 여러 장 뽑는다.
  * walmart.js의 scrapeWalmartProductImages와 같은 목적(원산지판독용 후면 라벨 사진 확보).
  *
- * ⚠️ 이 파일 전체가 이미 "실제 마크업을 본 적이 없는 추측 기반 구현"이라고 명시돼 있는데,
- * 이 함수도 마찬가지로 미검증 — 후보 selector를 여러 개 순서대로 시도하는 방어적 구현.
+ * 검색결과와 마찬가지로 DOM selector 대신 __NEXT_DATA__의
+ * product.imageInfo.allImages(원본 갤러리 사진 URL 배열, 실측 확인함)를 우선 사용하고,
+ * 혹시 그 경로가 또 바뀌는 경우를 대비해 DOM selector를 폴백으로 남겨둔다.
  */
 export async function scrapeSamsClubProductImages(page, productUrl, maxImages = 4) {
   await page.goto(productUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -163,6 +151,29 @@ export async function scrapeSamsClubProductImages(page, productUrl, maxImages = 
   await page.waitForTimeout(500);
 
   const images = await page.evaluate((max) => {
+    function findAllImages(obj) {
+      if (obj && typeof obj === "object") {
+        if (
+          Array.isArray(obj.allImages) &&
+          obj.allImages.length &&
+          typeof obj.allImages[0]?.url === "string"
+        ) {
+          return obj.allImages;
+        }
+        for (const k in obj) {
+          const found = findAllImages(obj[k]);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
+    const allImages = window.__NEXT_DATA__ ? findAllImages(window.__NEXT_DATA__.props) : null;
+    if (allImages) {
+      return allImages.slice(0, max).map((img) => img.url);
+    }
+
+    // 폴백: JSON 경로가 또 바뀐 경우를 대비한 DOM selector 방어적 구현.
     const candidateSelectors = [
       '[class*="thumbnail" i] img',
       '[class*="carousel" i] img',

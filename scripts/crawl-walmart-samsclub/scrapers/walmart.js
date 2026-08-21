@@ -61,7 +61,10 @@ export async function scrapeWalmart(page, query, limit = 5, sort = "best-sellers
     // (scripts/crawl-product-sourcing/brand-extract.js의 extractBrandFixedWords와 동일 로직 —
     // 이 함수는 page.$$eval 안에서 브라우저 컨텍스트로 직렬화돼 실행되므로 import 불가해 인라인함).
     const parseBrand = (title) => {
-      const words = title.split(/\s+/).filter(Boolean);
+      // 맨 앞 수량/묶음 표기("2X-", "2x ", "1 x ")는 브랜드가 아니므로 제거 후 자름
+      // (brand-extract.js stripLeadingQty와 동일 로직, 인라인 이유는 위 주석 참고).
+      const clean = String(title || "").replace(/^\d+\s*[xX]\s*-?\s*/, "");
+      const words = clean.split(/\s+/).filter(Boolean);
       return words.slice(0, 2).join(" ") || null;
     };
 

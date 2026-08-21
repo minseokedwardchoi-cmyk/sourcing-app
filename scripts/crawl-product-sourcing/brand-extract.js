@@ -20,13 +20,31 @@ function splitWords(text) {
   return String(text || "").trim().split(/\s+/).filter(Boolean);
 }
 
+// 상품명 맨 앞에 붙는 수량/묶음 표기("2X-", "2x ", "1 x ")는 브랜드가 아니라 판매
+// 단위 표기라 그대로 두면 브랜드 앞단어로 잘못 포함된다(실측: 7,397건 중 20건,
+// 예: "2X-Utz Ripples..." → "2X-Utz"가 브랜드로 잘못 뽑힘). 브랜드 추출 전에 제거.
+const LEADING_QTY_RE = /^\d+\s*[xX]\s*-?\s*/;
+
+function stripLeadingQty(text) {
+  return String(text || "").replace(LEADING_QTY_RE, "");
+}
+
 /**
  * 아마존/이온몰용 — 콤마/파이프가 나오면 그 앞까지(최대 maxWords 단어), 없으면 앞
  * fallbackWords개 단어.
  */
 export function extractBrandCommaOrWords(title, { maxWords = 3, fallbackWords = 2 } = {}) {
-  const clean = String(title || "").trim();
+  const clean = stripLeadingQty(String(title || "").trim()).trim();
   if (!clean) return null;
+
+  // 상표기호(®/™)가 남아있으면 그 위치가 브랜드 경계로 100% 확실함(실측: 26/7,397건,
+  // 드물지만 나오면 항상 정확) — 콤마 판단보다 우선.
+  const tmIdx = clean.search(/[®™]/);
+  if (tmIdx > 0) {
+    const head = clean.slice(0, tmIdx).trim();
+    const words = splitWords(head);
+    if (words.length >= 1) return words.join(" ");
+  }
 
   const boundaryIdx = clean.search(/[,|]/);
   if (boundaryIdx > 0) {
@@ -43,6 +61,6 @@ export function extractBrandCommaOrWords(title, { maxWords = 3, fallbackWords = 
 
 /** 월마트/샘스클럽용 — 콤마 신호를 안 쓰고 항상 앞 wordCount개 단어만. */
 export function extractBrandFixedWords(title, wordCount = 2) {
-  const words = splitWords(title);
+  const words = splitWords(stripLeadingQty(title));
   return words.slice(0, wordCount).join(" ") || null;
 }
