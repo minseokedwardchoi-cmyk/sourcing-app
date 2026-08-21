@@ -2852,6 +2852,32 @@ def _normalize_hs_code(hs_code: str | None) -> str | None:
     return digits or None
 
 
+def _mfds_item_for(text: str | None, all_item_names: list[str]) -> str | None:
+    """mfds_pricing._resolve_mfds_item과 동일한 판정(수동표 우선, 없으면
+    substring/bigram 매칭)이지만, import_history의 여러 후보 텍스트(mc/sku_name)
+    중 실제로 매칭되는 걸 찾는 _pick_import_history_match_text가 "이 텍스트로
+    매칭이 되는지" 자체를 확인하는 데 쓴다."""
+    if not text:
+        return None
+    item = get_mfds_item(text)
+    if item is None:
+        item = match_product_to_mfds_item(text, all_item_names).matched_item_name
+    return item
+
+
+def _pick_import_history_match_text(row: dict, all_item_names: list[str]) -> str | None:
+    """import_history는 product_type이 사실상 항상 비어있다(원본 통관데이터에
+    없음 — 실측 결과 채워진 행이 0건). mc("감자"/"과자" 등 이미 카테고리명 그
+    자체라 MFDS item_name과 직접 매칭될 확률이 높음)를 먼저 시도하고, 안 되면
+    sku_name("냉동삶은감자"처럼 카테고리명을 포함한 구체적 상품명)으로 넘어간다.
+    셋 다 매칭이 안 되면 그래도 가장 구체적인 sku_name을 반환해, 하위 호출부가
+    "매칭 실패"를 스스로 판정하게 둔다(빈 문자열/None보다 진단에 유리)."""
+    for candidate in (row.get("product_type"), row.get("mc"), row.get("sku_name")):
+        if candidate and _mfds_item_for(candidate, all_item_names):
+            return candidate
+    return row.get("product_type") or row.get("mc") or row.get("sku_name")
+
+
 async def _recompute_and_store_cost_estimates(db: AsyncSession) -> int:
     import asyncio
     global _cost_recompute_lock
@@ -3006,7 +3032,7 @@ async def _recompute_and_store_import_history_cost_estimates_impl(db: AsyncSessi
     호출부는 이후 sku_history_mv도 REFRESH해야 SKU/OEM 수입이력 페이지에 반영된다
     (_refresh_mvs_safe 참고). 반환값: 갱신한 행 수."""
     rows_r = await db.execute(text("""
-        SELECT id, hs_code, country, unit, product_type, sku_name
+        SELECT id, hs_code, country, unit, product_type, mc, sku_name
         FROM import_history
         WHERE hs_code IS NOT NULL AND hs_code <> ''
         ORDER BY id
@@ -3049,10 +3075,7 @@ async def _recompute_and_store_import_history_cost_estimates_impl(db: AsyncSessi
     for row in rows:
         norm = _normalize_hs_code(row["hs_code"])
         tariff_rows = by_hs_code.get(norm) if norm else None
-        # product_type은 원본 통관데이터에 없는 행이 많다(모델도 nullable) — 그럴 때
-        # sku_name("냉동삶은감자" 등)이 MFDS 매칭용 텍스트로 대신 쓸 수 있는 동등한
-        # 상품명이라 폴백으로 쓴다.
-        match_text = row.get("product_type") or row.get("sku_name")
+        match_text = _pick_import_history_match_text(row, all_mfds_item_names)
         price_estimate = estimate_purchase_price(
             match_text, row.get("country"), row.get("unit"),
             all_mfds_item_names, mfds_price_lookup,
@@ -3194,7 +3217,7 @@ async def get_import_history_cost_coverage(
     행 수가 수천 건이라 전체 스캔 가능)와 동일한 로직이며, origin 대신 country
     컬럼을 원산지 텍스트로 쓴다는 점만 다르다. 사유 종류는 get_cost_coverage 문서 참고."""
     rows_r = await db.execute(text("""
-        SELECT id, sku_name, product_type, hs_code, country
+        SELECT id, sku_name, product_type, mc, hs_code, country
         FROM import_history
         WHERE hs_code IS NOT NULL AND hs_code <> '' AND sku_name = :sku_name
     """), {"sku_name": sku_name})
@@ -3229,9 +3252,7 @@ async def get_import_history_cost_coverage(
     for row in rows:
         norm = _normalize_hs_code(row["hs_code"])
         tariff_rows = by_hs_code.get(norm) if norm else None
-        # product_type이 없는 행(원본 통관데이터에 흔함)은 sku_name으로 대신 매칭한다
-        # (_recompute_and_store_import_history_cost_estimates_impl과 동일한 폴백).
-        match_text = row.get("product_type") or row.get("sku_name")
+        match_text = _pick_import_history_match_text(row, all_mfds_item_names)
         origin_country = resolve_origin_country(
             match_text or "", row.get("country"), all_mfds_item_names, mfds_price_lookup,
         )
