@@ -3163,16 +3163,19 @@ async def recompute_import_history_costs(db: AsyncSession = Depends(get_db)):
 
 
 @app.get("/api/import-history/cost-coverage", response_model=ImportHistoryCostCoverageResponse)
-async def get_import_history_cost_coverage(db: AsyncSession = Depends(get_db)):
-    """hs_code가 채워진 import_history 행 전체를 훑어서 추정원가 계산이 실패한
-    행과 사유를 진단. get_cost_coverage(product_sourcing_item용)와 동일한
-    로직이며, origin 대신 country 컬럼을 원산지 텍스트로 쓴다는 점만 다르다.
-    사유 종류는 get_cost_coverage 문서 참고."""
+async def get_import_history_cost_coverage(
+    sku_name: str = Query(..., description="진단할 SKU명 (정확히 일치) — import_history는 120k+ 행이라 전체 스캔은 게이트웨이 타임아웃(Render 60s)에 걸려 sku_name 단위로만 지원한다"),
+    db: AsyncSession = Depends(get_db),
+):
+    """특정 sku_name의 import_history 행(같은 sku_name이 보통 여러 회차로 존재)에
+    대해 추정원가 계산이 왜 실패했는지 진단. get_cost_coverage(product_sourcing_item용,
+    행 수가 수천 건이라 전체 스캔 가능)와 동일한 로직이며, origin 대신 country
+    컬럼을 원산지 텍스트로 쓴다는 점만 다르다. 사유 종류는 get_cost_coverage 문서 참고."""
     rows_r = await db.execute(text("""
         SELECT id, sku_name, product_type, hs_code, country
         FROM import_history
-        WHERE hs_code IS NOT NULL AND hs_code <> ''
-    """))
+        WHERE hs_code IS NOT NULL AND hs_code <> '' AND sku_name = :sku_name
+    """), {"sku_name": sku_name})
     rows = [dict(r) for r in rows_r.mappings().all()]
 
     hs_codes = sorted({_normalize_hs_code(row["hs_code"]) for row in rows} - {None})
