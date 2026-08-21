@@ -3128,6 +3128,24 @@ async def _recompute_and_store_import_history_cost_estimates_impl(db: AsyncSessi
     return len(updates)
 
 
+async def _recompute_import_history_costs_and_refresh_background():
+    """import_history 원가 재계산(120k+ 행, 수 분 소요)을 요청-응답 밖에서 돌리는
+    백그라운드 태스크. 이 재계산을 요청 안에서 await하면 Render 게이트웨이가
+    응답을 기다리다 클라이언트에 502를 반환한다(재현: 실제로 66초/80초 지점에서
+    502) — 서버 쪽 작업 자체는 계속 진행되지만 클라이언트가 완료 여부를 알 방법이
+    없어져 매번 추측만 하게 됐다. _refresh_mvs_safe와 동일하게 자체 세션을 열어
+    fire-and-forget으로 돌리고, 끝나면 MV까지 이어서 리프레시한다."""
+    import traceback
+    try:
+        async with AsyncSessionLocal() as db:
+            updated = await _recompute_and_store_import_history_cost_estimates(db)
+        print(f"IMPORT_HISTORY_COST_RECOMPUTE_DONE: updated={updated}")
+    except Exception:
+        traceback.print_exc()
+        return
+    await _refresh_mvs_safe()
+
+
 @app.patch("/api/import-history/hs-code", response_model=ImportHistoryHsCodeUpdateResponse)
 async def update_import_history_hs_code(
     payload: ImportHistoryHsCodeUpdateRequest,
@@ -3135,15 +3153,16 @@ async def update_import_history_hs_code(
 ):
     """SKU명(sku_name) 단위로 HS코드를 지정/수정 — 같은 SKU명에 속한 모든 수입이력
     행에 일괄 적용된다. 나중에 HS코드 파일을 대량 업로드하는 기능이 추가되기 전까지
-    수동 입력/테스트용으로 쓴다."""
+    수동 입력/테스트용으로 쓴다. 원가 재계산은 백그라운드로 진행되므로(아래
+    _recompute_import_history_costs_and_refresh_background 참고), 이 응답 직후엔
+    아직 새 원가가 안 보일 수 있다 — 보통 몇 분 내 반영된다."""
     hs_code = payload.hs_code.strip() if payload.hs_code else None
     r = await db.execute(text("""
         UPDATE import_history SET hs_code = :hs_code WHERE sku_name = :sku_name
     """), {"hs_code": hs_code, "sku_name": payload.sku_name})
     await db.commit()
-    await _recompute_and_store_import_history_cost_estimates(db)
     import asyncio
-    asyncio.create_task(_refresh_mvs_safe())
+    asyncio.create_task(_recompute_import_history_costs_and_refresh_background())
     return ImportHistoryHsCodeUpdateResponse(sku_name=payload.sku_name, hs_code=hs_code, updated_rows=r.rowcount)
 
 
@@ -3155,16 +3174,16 @@ async def upload_import_history_hs_codes(
     """confidence='high'인 행은 hs_code 그대로, 'medium'은 hs_code_confidence='medium'으로
     같이 저장(프론트에서 '(검토 필요)' 표시), 'low'/'very_low'/미상은 반영하지 않는다.
     같은 sku_name의 import_history 행이 여러 개면 전부 일괄 반영된다 — PATCH
-    /api/import-history/hs-code와 동일한 단위."""
+    /api/import-history/hs-code와 동일한 단위. 원가 재계산/MV 리프레시는 백그라운드로
+    이어지므로 응답의 updated 수치는 HS코드 반영 결과이고, 원가는 몇 분 뒤 반영된다."""
     try:
         if not file.filename.endswith((".xlsx", ".xls")):
             raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls)만 업로드 가능합니다.")
 
         content = await file.read()
         result = await import_history_hs_codes(content, db)
-        await _recompute_and_store_import_history_cost_estimates(db)
         import asyncio
-        asyncio.create_task(_refresh_mvs_safe())
+        asyncio.create_task(_recompute_import_history_costs_and_refresh_background())
 
         print("IMPORT_HISTORY_HS_CODE_UPLOAD_RESULT:", result)
         return ImportHistoryHsCodeUploadResponse(**result)
@@ -3180,13 +3199,15 @@ async def upload_import_history_hs_codes(
 
 
 @app.post("/api/import-history/recompute-costs")
-async def recompute_import_history_costs(db: AsyncSession = Depends(get_db)):
-    """SKU/OEM 수입이력의 추정원가 캐시를 수동으로 재계산 (관세율표 업로드 시 자동
-    호출되므로 평소엔 따로 부를 필요 없음)."""
-    updated = await _recompute_and_store_import_history_cost_estimates(db)
+async def recompute_import_history_costs():
+    """SKU/OEM 수입이력의 추정원가 캐시를 백그라운드로 재계산 시작(관세율표 업로드
+    시 자동 호출되므로 평소엔 따로 부를 필요 없음). 120k+ 행 전체를 훑는 무거운
+    작업이라 즉시 응답하고 실제 계산은 백그라운드에서 진행된다 — 완료 여부는
+    Render 로그의 IMPORT_HISTORY_COST_RECOMPUTE_DONE으로 확인하거나, 몇 분 뒤
+    /api/import-history/cost-coverage?sku_name=...로 개별 SKU를 확인한다."""
     import asyncio
-    asyncio.create_task(_refresh_mvs_safe())
-    return {"updated": updated}
+    asyncio.create_task(_recompute_import_history_costs_and_refresh_background())
+    return {"status": "started"}
 
 
 @app.get("/api/import-history/product-type-samples")
