@@ -3006,7 +3006,7 @@ async def _recompute_and_store_import_history_cost_estimates_impl(db: AsyncSessi
     호출부는 이후 sku_history_mv도 REFRESH해야 SKU/OEM 수입이력 페이지에 반영된다
     (_refresh_mvs_safe 참고). 반환값: 갱신한 행 수."""
     rows_r = await db.execute(text("""
-        SELECT id, hs_code, country, unit, product_type
+        SELECT id, hs_code, country, unit, product_type, sku_name
         FROM import_history
         WHERE hs_code IS NOT NULL AND hs_code <> ''
         ORDER BY id
@@ -3049,8 +3049,12 @@ async def _recompute_and_store_import_history_cost_estimates_impl(db: AsyncSessi
     for row in rows:
         norm = _normalize_hs_code(row["hs_code"])
         tariff_rows = by_hs_code.get(norm) if norm else None
+        # product_type은 원본 통관데이터에 없는 행이 많다(모델도 nullable) — 그럴 때
+        # sku_name("냉동삶은감자" 등)이 MFDS 매칭용 텍스트로 대신 쓸 수 있는 동등한
+        # 상품명이라 폴백으로 쓴다.
+        match_text = row.get("product_type") or row.get("sku_name")
         price_estimate = estimate_purchase_price(
-            row.get("product_type"), row.get("country"), row.get("unit"),
+            match_text, row.get("country"), row.get("unit"),
             all_mfds_item_names, mfds_price_lookup,
         )
         tariff = None
@@ -3058,7 +3062,7 @@ async def _recompute_and_store_import_history_cost_estimates_impl(db: AsyncSessi
             origin_country = (
                 price_estimate.country if price_estimate
                 else resolve_origin_country(
-                    row.get("product_type") or "", row.get("country"),
+                    match_text or "", row.get("country"),
                     all_mfds_item_names, mfds_price_lookup,
                 )
             )
@@ -3207,8 +3211,11 @@ async def get_import_history_cost_coverage(
     for row in rows:
         norm = _normalize_hs_code(row["hs_code"])
         tariff_rows = by_hs_code.get(norm) if norm else None
+        # product_type이 없는 행(원본 통관데이터에 흔함)은 sku_name으로 대신 매칭한다
+        # (_recompute_and_store_import_history_cost_estimates_impl과 동일한 폴백).
+        match_text = row.get("product_type") or row.get("sku_name")
         origin_country = resolve_origin_country(
-            row.get("product_type") or "", row.get("country"), all_mfds_item_names, mfds_price_lookup,
+            match_text or "", row.get("country"), all_mfds_item_names, mfds_price_lookup,
         )
         tariff = resolve_tariff_rate(tariff_rows, origin_country) if tariff_rows else None
 
@@ -3221,8 +3228,8 @@ async def get_import_history_cost_coverage(
             ))
             continue
 
-        mfds_item = get_mfds_item(row.get("product_type")) or match_product_to_mfds_item(
-            row.get("product_type") or "", all_mfds_item_names
+        mfds_item = get_mfds_item(match_text) or match_product_to_mfds_item(
+            match_text or "", all_mfds_item_names
         ).matched_item_name
         if not mfds_item:
             reason = "mfds_item_not_matched"
@@ -3231,7 +3238,7 @@ async def get_import_history_cost_coverage(
             if not candidates:
                 reason = "origin_country_not_resolved"
             else:
-                lookup = resolve_mfds_price(row.get("product_type") or "", row.get("country"), all_mfds_item_names, mfds_price_lookup)
+                lookup = resolve_mfds_price(match_text or "", row.get("country"), all_mfds_item_names, mfds_price_lookup)
                 reason = "mfds_weight_data_missing" if lookup is None else None
 
         if reason:
